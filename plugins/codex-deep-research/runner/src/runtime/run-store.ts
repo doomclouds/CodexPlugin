@@ -76,21 +76,20 @@ export class RunStore {
   }
 
   async writeStatus(status: RunStatus): Promise<void> {
-    const manifest = await this.readManifest(status.runId);
+    await this.readManifest(status.runId);
     const updated: RunStatus = { ...status, updatedAt: new Date().toISOString() };
-    await writeFile(join(manifest.outputDir, "status.json"), JSON.stringify(updated, null, 2), "utf8");
+    await writeFile(join(this.resolveRunDir(status.runId), "status.json"), JSON.stringify(updated, null, 2), "utf8");
   }
 
   async emit(runId: string, event: Omit<WorkflowEvent, "at" | "runId">): Promise<void> {
     this.validateRunId(runId);
-    const manifest = await this.readManifest(runId).catch((error: NodeJS.ErrnoException) => {
+    await this.readManifest(runId).catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") {
         return undefined;
       }
       throw error;
     });
-    const outputDir = manifest?.outputDir ?? join(this.runsDir(), runId);
-    await appendJsonl(join(outputDir, "events.jsonl"), {
+    await appendJsonl(join(this.resolveRunDir(runId), "events.jsonl"), {
       ...event,
       at: new Date().toISOString(),
       runId,
@@ -120,8 +119,12 @@ export class RunStore {
   }
 
   private async resolveRunFile(runId: string, fileName: string): Promise<string> {
+    return join(this.resolveRunDir(runId), fileName);
+  }
+
+  private resolveRunDir(runId: string): string {
     this.validateRunId(runId);
-    return join(this.runsDir(), runId, fileName);
+    return join(this.runsDir(), runId);
   }
 
   private validateRunId(runId: string): void {

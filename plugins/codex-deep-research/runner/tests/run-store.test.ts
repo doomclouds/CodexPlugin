@@ -68,6 +68,52 @@ describe("RunStore", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it("writes status to the expected run directory when manifest outputDir is tampered", async () => {
+    const { root, store } = await createTempStore();
+    const manifest = await createRun(store, root);
+    const tamperedDir = join(root, "outside-runs");
+    await writeFile(
+      join(manifest.outputDir, "manifest.json"),
+      JSON.stringify({ ...manifest, outputDir: tamperedDir }, null, 2),
+      "utf8",
+    );
+    const status = await store.readStatus(manifest.runId);
+    const updatedStatus: RunStatus = {
+      ...status,
+      phase: "planning",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    vi.setSystemTime(new Date("2026-01-02T03:04:05.678Z"));
+    await store.writeStatus(updatedStatus);
+
+    const written = await store.readStatus(manifest.runId);
+    expect(written.phase).toBe("planning");
+    expect(written.updatedAt).toBe("2026-01-02T03:04:05.678Z");
+    await expect(readFile(join(tamperedDir, "status.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("appends events to the expected run directory when manifest outputDir is tampered", async () => {
+    const { root, store } = await createTempStore();
+    const manifest = await createRun(store, root);
+    const tamperedDir = join(root, "outside-runs");
+    await writeFile(
+      join(manifest.outputDir, "manifest.json"),
+      JSON.stringify({ ...manifest, outputDir: tamperedDir }, null, 2),
+      "utf8",
+    );
+
+    await store.emit(manifest.runId, { type: "phase.started", message: "Planning" });
+
+    const eventsRaw = await readFile(join(manifest.outputDir, "events.jsonl"), "utf8");
+    expect(eventsRaw).toContain("phase.started");
+    await expect(readFile(join(tamperedDir, "events.jsonl"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+
+    await rm(root, { recursive: true, force: true });
+  });
+
   it("creates distinct run directories when generated run ids collide", async () => {
     const { root, store } = await createTempStore();
     vi.setSystemTime(new Date("2026-01-02T03:04:05.678Z"));
