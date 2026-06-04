@@ -21,11 +21,13 @@ async function stopIfCancellationRequested(runtime: WorkflowRuntime): Promise<bo
   runtime.status.progress.running = 0;
   runtime.status.lastEvents = [...runtime.status.lastEvents.slice(-9), "Run cancelled"];
   await runtime.store.writeStatus(runtime.status);
-  await runtime.store.emit(runtime.runId, {
-    type: "run.cancelled",
-    phase: runtime.status.phase,
-    message: "Run cancelled by cooperative cancellation request",
-  });
+  await runtime.store
+    .emit(runtime.runId, {
+      type: "run.cancelled",
+      phase: runtime.status.phase,
+      message: "Run cancelled by cooperative cancellation request",
+    })
+    .catch(() => undefined);
   return true;
 }
 
@@ -97,6 +99,11 @@ export async function runDeepResearch(input: DeepResearchRunInput): Promise<void
       .emit(input.manifest.runId, { type: "report.written", message: reportPath })
       .catch(() => undefined);
   } catch (error) {
+    const currentStatus = await input.store.readStatus(input.manifest.runId).catch(() => undefined);
+    if (currentStatus?.state === "cancelled") {
+      throw error;
+    }
+
     runtime.status.state = "failed";
     await input.store.writeStatus(runtime.status).catch(() => undefined);
     await input.store

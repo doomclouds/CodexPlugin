@@ -230,6 +230,49 @@ describe("runDeepResearch", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it("preserves cancelled status when the cancellation event emit fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "cdr-flow-cancel-emit-"));
+    const store = new RunStore(root);
+    const manifest = await store.createRun({
+      question: "Should cancellation remain terminal when event emit fails?",
+      workspace: root,
+      mode: "mixed",
+      depth: "standard",
+      maxConcurrency: 2,
+      maxTasks: 20,
+      debugPrompts: false,
+    });
+    await writeFile(join(manifest.outputDir, "cancel.requested"), new Date().toISOString() + "\n", "utf8");
+    const worker = new FakeWorkerClient([
+      {
+        question: manifest.question,
+        summary: "Should not be used.",
+        angles: [
+          { label: "cancel", query: "cancelled terminal", rationale: "Regression" },
+          { label: "event", query: "emit failure", rationale: "Regression" },
+          { label: "status", query: "failed overwrite", rationale: "Regression" },
+        ],
+      },
+    ]);
+    const originalEmit = store.emit.bind(store);
+    store.emit = async (runId, event) => {
+      if (event.type === "run.cancelled") {
+        throw new Error("cancelled emit failed");
+      }
+      await originalEmit(runId, event);
+    };
+
+    try {
+      await expect(runDeepResearch({ manifest, store, worker })).resolves.toBeUndefined();
+      const status = await store.readStatus(manifest.runId);
+      expect(status.state).toBe("cancelled");
+      expect(status.progress.running).toBe(0);
+      expect(status.lastEvents).toContain("Run cancelled");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("does not overwrite cancellation requested after report files are written", async () => {
     const root = await mkdtemp(join(tmpdir(), "cdr-flow-late-cancel-"));
     const store = new RunStore(root);
