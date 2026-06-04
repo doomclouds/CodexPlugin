@@ -33,7 +33,6 @@ The main files are:
 - `report.md`
 - `report.summary.md`
 - `report.sources.md`
-- `report.audit.json`
 
 ## Privacy
 
