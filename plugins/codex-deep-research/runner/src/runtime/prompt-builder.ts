@@ -23,10 +23,7 @@ export function buildPromptEnvelope(envelope: PromptEnvelope): PromptEnvelope {
 }
 
 export function redactPromptEnvelope(envelope: PromptEnvelope): PromptEnvelope {
-  return {
-    ...envelope,
-    injected: redactValue(envelope.injected) as Record<string, unknown>,
-  };
+  return redactValue(envelope) as PromptEnvelope;
 }
 
 function redactValue(value: unknown): unknown {
