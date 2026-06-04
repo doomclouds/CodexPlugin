@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -189,6 +189,43 @@ describe("runDeepResearch", () => {
     });
     await expect(readFile(join(outsideDir, "report.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(join(outsideDir, "report.sources.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("stops at phase boundaries when a cancellation marker exists", async () => {
+    const root = await mkdtemp(join(tmpdir(), "cdr-flow-cancel-"));
+    const store = new RunStore(root);
+    const manifest = await store.createRun({
+      question: "Should cancellation prevent report synthesis?",
+      workspace: root,
+      mode: "mixed",
+      depth: "standard",
+      maxConcurrency: 2,
+      maxTasks: 20,
+      debugPrompts: false,
+    });
+    await writeFile(join(manifest.outputDir, "cancel.requested"), new Date().toISOString() + "\n", "utf8");
+    const worker = new FakeWorkerClient([
+      {
+        question: manifest.question,
+        summary: "Should not be used.",
+        angles: [
+          { label: "cancel", query: "cancel requested", rationale: "Boundary" },
+          { label: "status", query: "cancelled status", rationale: "Boundary" },
+          { label: "report", query: "no report", rationale: "Boundary" },
+        ],
+      },
+    ]);
+
+    await expect(runDeepResearch({ manifest, store, worker })).resolves.toBeUndefined();
+
+    const status = await store.readStatus(manifest.runId);
+    expect(status.state).toBe("cancelled");
+    expect(status.output).toBeUndefined();
+    const eventsRaw = await readFile(join(manifest.outputDir, "events.jsonl"), "utf8");
+    expect(eventsRaw).toContain("run.cancelled");
+    await expect(readFile(join(manifest.outputDir, "report.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 
     await rm(root, { recursive: true, force: true });
   });

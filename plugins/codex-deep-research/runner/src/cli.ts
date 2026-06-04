@@ -22,11 +22,19 @@ program
   .option("--debug-prompts", "reserved prompt capture manifest flag", false)
   .action(startCommand);
 
-program.command("run").argument("<runId>").action(runCommand);
-program.command("status").argument("<runId>").action(statusCommand);
-program.command("watch").argument("<runId>").action(watchCommand);
-program.command("report").argument("<runId>").action(reportCommand);
-program.command("cancel").argument("<runId>").action(cancelCommand);
-program.command("list").action(listCommand);
+program.command("run").argument("<runId>").description("execute a queued research run").action(runCommand);
+program.command("status").argument("<runId>").description("print run status JSON").action(statusCommand);
+program
+  .command("watch")
+  .argument("<runId>")
+  .description("follow run events until the run reaches a terminal state")
+  .action(watchCommand);
+program.command("report").argument("<runId>").description("print report paths and summary").action(reportCommand);
+program
+  .command("cancel")
+  .argument("<runId>")
+  .description("request cooperative cancellation for an active run")
+  .action(cancelCommand);
+program.command("list").description("list known research run ids").action(listCommand);
 
 await program.parseAsync(process.argv);

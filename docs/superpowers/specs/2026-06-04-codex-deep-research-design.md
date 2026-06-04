@@ -117,7 +117,18 @@ runner 中，便于命令行、skill 和未来 MCP 复用。
 
 ## 用户入口
 
-用户运行命令必须从 caller workspace root 调用插件 runner：
+用户运行命令必须从 caller workspace root 调用插件 runner。安装后的插件通过相对于插件根目录的 wrapper 启动，不要求业务 workspace 存在 `plugins\codex-deep-research`：
+
+```text
+node "<installed-plugin-root>\scripts\run.mjs" start "研究 Codex plugin 是否适合实现 deep research"
+node "<installed-plugin-root>\scripts\run.mjs" status <run_id>
+node "<installed-plugin-root>\scripts\run.mjs" watch <run_id>
+node "<installed-plugin-root>\scripts\run.mjs" report <run_id>
+node "<installed-plugin-root>\scripts\run.mjs" cancel <run_id>
+node "<installed-plugin-root>\scripts\run.mjs" list
+```
+
+仓库开发时可从本仓库 root 使用：
 
 ```text
 npm --prefix plugins\codex-deep-research run dev -- start "研究 Codex plugin 是否适合实现 deep research"
@@ -773,7 +784,7 @@ Running:
 - extractor:falsifiable_claim_miner src_009
 ```
 
-`watch <run_id>` tail `events.jsonl`，只显示增量事件。
+`watch <run_id>` tail `events.jsonl`，显示启动后读到的事件，并在 `status.json` 到达 `completed`、`partial`、`failed` 或 `cancelled` 后退出。
 
 ## Checkpoint and Recovery
 
@@ -800,7 +811,7 @@ checkpoints/
 
 ## Cancel
 
-本节描述 later phases 的完整取消语义。v0 skeleton 取消只更新状态和事件，不生成 partial report。
+本节描述 later phases 的完整取消语义。v0 skeleton 取消是 cooperative cancel request：更新 marker、状态和事件，不 kill 已 detached 的 OS process，也不生成 partial report。
 
 `cancel` 写入：
 
@@ -812,10 +823,9 @@ runner 看到后：
 
 - 停止创建新任务；
 - 已完成结果继续写入 state；
-- 正在运行任务给短暂 grace period；
-- 超时后终止 worker；
-- later phases 中生成 partial report；
-- 状态标记为 `cancelled` 或 `partial`。
+- 在 v0 phase boundary 读到 marker 后标记 `cancelled` 并退出；
+- later phases 可增加 grace period、worker termination 和 partial report；
+- later phases 状态标记为 `cancelled` 或 `partial`。
 
 ## Failure Strategy
 

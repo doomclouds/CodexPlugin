@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { appendJsonl } from "./jsonl.js";
 import { createRunId } from "./ids.js";
@@ -103,6 +103,18 @@ export class RunStore {
   async getRunDir(runId: string): Promise<string> {
     await this.readManifest(runId);
     return this.resolveRunDir(runId);
+  }
+
+  async isCancellationRequested(runId: string): Promise<boolean> {
+    await this.readManifest(runId);
+    return await access(join(this.resolveRunDir(runId), "cancel.requested"))
+      .then(() => true)
+      .catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") {
+          return false;
+        }
+        throw error;
+      });
   }
 
   private async createRunDirectory(): Promise<{ runId: string; outputDir: string }> {

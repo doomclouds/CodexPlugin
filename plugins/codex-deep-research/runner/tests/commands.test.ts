@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { cancelCommand } from "../src/commands/cancel.js";
 import { listCommand } from "../src/commands/list.js";
 import { reportCommand } from "../src/commands/report.js";
 import { resolveStartLauncher, startCommand, validateStartOptions } from "../src/commands/start.js";
@@ -162,7 +163,7 @@ describe("reportCommand", () => {
 });
 
 describe("watchCommand", () => {
-  it("prints empty output when the run has no events file", async () => {
+  it("prints empty output for a terminal run with no events file", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "cdr-watch-missing-workspace-"));
     const pluginCwd = await mkdtemp(join(tmpdir(), "cdr-watch-missing-plugin-"));
     process.env.INIT_CWD = workspace;
@@ -180,10 +181,45 @@ describe("watchCommand", () => {
       debugPrompts: false,
     });
     await rm(join(manifest.outputDir, "events.jsonl"));
+    await store.writeStatus({ ...(await store.readStatus(manifest.runId)), state: "completed", phase: "completed" });
 
     await watchCommand(manifest.runId);
 
     expect(logSpy).toHaveBeenCalledWith("");
+
+    await rm(workspace, { recursive: true, force: true });
+    await rm(pluginCwd, { recursive: true, force: true });
+  });
+
+  it("follows appended events until the run reaches a terminal state", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "cdr-watch-tail-workspace-"));
+    const pluginCwd = await mkdtemp(join(tmpdir(), "cdr-watch-tail-plugin-"));
+    process.env.INIT_CWD = workspace;
+    vi.spyOn(process, "cwd").mockReturnValue(pluginCwd);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const store = new RunStore(workspace);
+    const manifest = await store.createRun({
+      question: "Should watch follow event appends?",
+      workspace,
+      mode: "mixed",
+      depth: "standard",
+      maxConcurrency: 8,
+      maxTasks: 120,
+      debugPrompts: false,
+    });
+
+    const watch = watchCommand(manifest.runId, { pollIntervalMs: 5 });
+    await appendFile(
+      join(manifest.outputDir, "events.jsonl"),
+      JSON.stringify({ runId: manifest.runId, type: "test.appended", at: new Date().toISOString() }) + "\n",
+      "utf8",
+    );
+    await store.writeStatus({ ...(await store.readStatus(manifest.runId)), state: "completed", phase: "completed" });
+
+    await watch;
+
+    expect(logSpy.mock.calls.map((call) => call[0]).join("\n")).toContain("test.appended");
 
     await rm(workspace, { recursive: true, force: true });
     await rm(pluginCwd, { recursive: true, force: true });
@@ -210,7 +246,42 @@ describe("watchCommand", () => {
     await rm(eventsPath);
     await mkdir(eventsPath);
 
-    await expect(watchCommand(manifest.runId)).rejects.toMatchObject({ code: expect.not.stringMatching(/^ENOENT$/) });
+    await expect(watchCommand(manifest.runId, { follow: false })).rejects.toMatchObject({
+      code: expect.not.stringMatching(/^ENOENT$/),
+    });
+
+    await rm(workspace, { recursive: true, force: true });
+    await rm(pluginCwd, { recursive: true, force: true });
+  });
+});
+
+describe("cancelCommand", () => {
+  it("records a cooperative cancellation request in marker, events, and status", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "cdr-cancel-workspace-"));
+    const pluginCwd = await mkdtemp(join(tmpdir(), "cdr-cancel-plugin-"));
+    process.env.INIT_CWD = workspace;
+    vi.spyOn(process, "cwd").mockReturnValue(pluginCwd);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const store = new RunStore(workspace);
+    const manifest = await store.createRun({
+      question: "Should cancel update observable state?",
+      workspace,
+      mode: "mixed",
+      depth: "standard",
+      maxConcurrency: 8,
+      maxTasks: 120,
+      debugPrompts: false,
+    });
+
+    await cancelCommand(manifest.runId);
+
+    await expect(readFile(join(manifest.outputDir, "cancel.requested"), "utf8")).resolves.toMatch(/\d{4}-\d{2}-\d{2}T/);
+    const status = await store.readStatus(manifest.runId);
+    expect(status.state).toBe("cancelled");
+    expect(status.lastEvents).toContain("Cancellation requested");
+    const events = await readFile(join(manifest.outputDir, "events.jsonl"), "utf8");
+    expect(events).toContain("run.cancel_requested");
 
     await rm(workspace, { recursive: true, force: true });
     await rm(pluginCwd, { recursive: true, force: true });
