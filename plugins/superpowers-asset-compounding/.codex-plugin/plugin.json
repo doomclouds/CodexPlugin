@@ -1,0 +1,41 @@
+{
+  "name": "superpowers-asset-compounding",
+  "version": "0.2.5",
+  "description": "Local Superpowers asset-compounding plugin for routing reusable engineering knowledge into archives, problem notes, and inbox triage.",
+  "author": {
+    "name": "doomclouds",
+    "url": "https://github.com/doomclouds"
+  },
+  "homepage": "https://github.com/doomclouds/CodexPlugin/tree/main/plugins/superpowers-asset-compounding#readme",
+  "repository": "https://github.com/doomclouds/CodexPlugin",
+  "license": "MIT",
+  "keywords": [
+    "superpowers",
+    "asset-compounding",
+    "archives",
+    "problems",
+    "inbox"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Superpowers Asset Compounding",
+    "shortDescription": "Turn completed work and hard-won debugging lessons into reusable assets.",
+    "longDescription": "Bundle the local asset-compounding skill system as a reusable Superpowers companion plugin. It provides an entry gate, a router, an archive writer, a problem/inbox writer, deterministic completion-gate checks, and status/closeout scripts so agents can preserve completed requirement history, reusable failure modes, uncertain signals, and retrieval guidance across repositories instead of leaving them buried in chat history or commit diffs.",
+    "developerName": "doomclouds",
+    "category": "Productivity",
+    "websiteURL": "https://github.com/doomclouds/CodexPlugin/tree/main/plugins/superpowers-asset-compounding#readme",
+    "privacyPolicyURL": "https://github.com/doomclouds/CodexPlugin/blob/main/plugins/superpowers-asset-compounding/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/doomclouds/CodexPlugin/blob/main/plugins/superpowers-asset-compounding/TERMS.md",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Bootstrap asset-compounding guidance for this repository.",
+      "Route this completed work into reusable Superpowers assets.",
+      "Find related problem or archive assets before writing a new one."
+    ],
+    "brandColor": "#B87333"
+  }
+}

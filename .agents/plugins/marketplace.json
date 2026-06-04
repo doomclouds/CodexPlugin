@@ -1,0 +1,20 @@
+{
+  "name": "codex-plugin",
+  "interface": {
+    "displayName": "Codex Plugin"
+  },
+  "plugins": [
+    {
+      "name": "superpowers-asset-compounding",
+      "source": {
+        "source": "local",
+        "path": "./plugins/superpowers-asset-compounding"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write Superpowers Problem"
+  short_description: "Write problem and inbox Superpowers assets"
+  default_prompt: "Use $write-superpowers-problem to create or update Superpowers problem and inbox assets."

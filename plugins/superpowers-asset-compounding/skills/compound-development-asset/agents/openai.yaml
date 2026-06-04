@@ -1,0 +1,4 @@
+interface:
+  display_name: "Compound Development Asset"
+  short_description: "Route reusable work to asset writer skills"
+  default_prompt: "Use $compound-development-asset to bootstrap asset guidance, classify reusable work, find related assets, and dispatch to archive or problem writer skills."

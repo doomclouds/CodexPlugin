@@ -1,0 +1,63 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import os, runpy; runpy.run_path(os.path.join(os.environ['PLUGIN_ROOT'], 'hooks', 'asset_hook.py'), run_name='__main__')\"",
+            "statusMessage": "Loading asset-compounding context"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Edit|Write|functions.update_plan|update_plan",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import os, runpy; runpy.run_path(os.path.join(os.environ['PLUGIN_ROOT'], 'hooks', 'asset_hook.py'), run_name='__main__')\"",
+            "statusMessage": "Recording asset closeout signals"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import os, runpy; runpy.run_path(os.path.join(os.environ['PLUGIN_ROOT'], 'hooks', 'asset_hook.py'), run_name='__main__')\"",
+            "statusMessage": "Checking asset closeout gate"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import os, runpy; runpy.run_path(os.path.join(os.environ['PLUGIN_ROOT'], 'hooks', 'asset_hook.py'), run_name='__main__')\"",
+            "statusMessage": "Saving asset-compounding state"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import os, runpy; runpy.run_path(os.path.join(os.environ['PLUGIN_ROOT'], 'hooks', 'asset_hook.py'), run_name='__main__')\"",
+            "statusMessage": "Restoring asset-compounding state"
+          }
+        ]
+      }
+    ]
+  }
+}

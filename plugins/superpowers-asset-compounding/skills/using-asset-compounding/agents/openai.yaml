@@ -1,0 +1,4 @@
+interface:
+  display_name: "Using Asset Compounding"
+  short_description: "Force asset checks before wrap-up and route reusable signals"
+  default_prompt: "Use $using-asset-compounding before wrap-up to decide whether reusable work should route through the asset-compounding router."

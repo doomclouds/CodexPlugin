@@ -1,0 +1,1342 @@
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SKILLS = ROOT / "skills"
+ROUTER = SKILLS / "compound-development-asset" / "scripts" / "suggest_asset_route.py"
+FINDER = SKILLS / "compound-development-asset" / "scripts" / "find_related_assets.py"
+CHECKER = SKILLS / "compound-development-asset" / "scripts" / "check_indexes.py"
+COMPLETION_GATE = SKILLS / "compound-development-asset" / "scripts" / "check_completion_gate.py"
+ASSET_STATUS = SKILLS / "compound-development-asset" / "scripts" / "asset_status.py"
+ASSET_CLOSEOUT = SKILLS / "compound-development-asset" / "scripts" / "asset_closeout.py"
+BOOTSTRAP = SKILLS / "compound-development-asset" / "scripts" / "bootstrap_asset_compounding.py"
+ARCHIVE_VALIDATOR = SKILLS / "archive-superpowers-feature" / "scripts" / "validate_archive_asset.py"
+PROBLEM_VALIDATOR = SKILLS / "write-superpowers-problem" / "scripts" / "validate_problem_asset.py"
+INBOX_INSPECTOR = SKILLS / "write-superpowers-problem" / "scripts" / "inspect_inbox_lifecycle.py"
+HOOKS_CONFIG = ROOT / "hooks" / "hooks.json"
+HOOK_SCRIPT = ROOT / "hooks" / "asset_hook.py"
+HOOK_REPORT = ROOT / "hooks" / "asset_hook_report.py"
+
+
+class AssetScriptTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_root = Path(tempfile.mkdtemp(prefix="asset_script_tests_"))
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.temp_root, ignore_errors=True)
+
+    def run_json(self, *args: object) -> dict[str, object]:
+        completed = subprocess.run(
+            ["python", *map(str, args)],
+            check=False,
+            text=True,
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
+        return json.loads(completed.stdout)
+
+    def run_json_fail(self, *args: object) -> dict[str, object]:
+        completed = subprocess.run(
+            ["python", *map(str, args)],
+            check=False,
+            text=True,
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        return json.loads(completed.stdout)
+
+    def run_hook(self, event: dict[str, object], *, plugin_data: Path | None = None) -> tuple[int, str, str]:
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PLUGIN_ROOT"] = str(ROOT)
+        env["PLUGIN_DATA"] = str(plugin_data or (self.temp_root / "plugin-data"))
+        completed = subprocess.run(
+            ["python", str(HOOK_SCRIPT)],
+            input=json.dumps(event),
+            check=False,
+            text=True,
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        return completed.returncode, completed.stdout, completed.stderr
+
+    def run_hook_raw(self, payload: bytes, *, plugin_data: Path | None = None) -> tuple[int, str, str]:
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PLUGIN_ROOT"] = str(ROOT)
+        env["PLUGIN_DATA"] = str(plugin_data or (self.temp_root / "plugin-data"))
+        completed = subprocess.run(
+            ["python", str(HOOK_SCRIPT)],
+            input=payload,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        return (
+            completed.returncode,
+            completed.stdout.decode("utf-8", errors="replace"),
+            completed.stderr.decode("utf-8", errors="replace"),
+        )
+
+    def create_repo(self) -> Path:
+        repo = self.temp_root / "repo"
+        for area in ("specs", "plans", "archives/2026-05", "problems/2026-05"):
+            (repo / "docs" / "superpowers" / area).mkdir(parents=True, exist_ok=True)
+        (repo / "docs/superpowers/specs/2026-05-01-demo-feature-design.md").write_text(
+            "# Demo Feature Design\n\nDemo feature verification.\n",
+            encoding="utf-8",
+        )
+        (repo / "docs/superpowers/plans/2026-05-01-demo-feature.md").write_text(
+            "# Demo Feature Plan\n\nDemo feature implementation plan.\n",
+            encoding="utf-8",
+        )
+        return repo
+
+    def add_archive(self, repo: Path) -> Path:
+        archive = repo / "docs/superpowers/archives/2026-05/2026-05-01-demo-feature-archives.md"
+        archive.write_text(
+            """# Demo Feature Archive
+
+- Date: `2026-05-01`
+- Topic slug: `demo-feature`
+- Status: `Archived`
+- Scope: `Feature`
+- Tags: `demo`
+
+## Summary
+
+Archived.
+
+## Delivered Scope
+
+- Delivered.
+
+## Out of Scope
+
+- Out.
+
+## Verification Snapshot
+
+- Verified.
+
+## Source Documents
+
+- Spec: [spec](../../specs/2026-05-01-demo-feature-design.md)
+- Plan: [plan](../../plans/2026-05-01-demo-feature.md)
+
+## Related Problems
+
+- None yet.
+
+## Notes
+
+- Note.
+""",
+            encoding="utf-8",
+        )
+        (repo / "docs/superpowers/archives/INDEX.md").write_text(
+            """# Superpowers Archive Index
+
+## 2026-05
+
+- [2026-05-01-demo-feature-archives.md](./2026-05/2026-05-01-demo-feature-archives.md): Demo archive.
+""",
+            encoding="utf-8",
+        )
+        return archive
+
+    def add_problem(self, repo: Path) -> Path:
+        problem = repo / "docs/superpowers/problems/2026-05/2026-05-01-demo-problem-problem.md"
+        problem.write_text(
+            """# Demo Problem
+
+- Date: `2026-05-01`
+- Topic slug: `demo-problem`
+- Status: `Captured`
+- Scope: `Test`
+- Tags: `demo`
+
+## Symptom
+
+Symptom.
+
+## Trigger / Context
+
+- Trigger.
+
+## Root Cause
+
+Root cause.
+
+## Fix
+
+- Fix.
+
+## Why This Fix
+
+Reason.
+
+## Recognition Clues
+
+- Cue.
+
+## Applicability / Non-Applicability
+
+### Applies When
+
+- Applies.
+
+### Does Not Apply When
+
+- Does not apply.
+
+## Related Artifacts
+
+- Archive: [archive](../../archives/2026-05/2026-05-01-demo-feature-archives.md)
+""",
+            encoding="utf-8",
+        )
+        (repo / "docs/superpowers/problems/INDEX.md").write_text(
+            """# Superpowers Problem Index
+
+## 2026-05
+
+- [2026-05-01-demo-problem-problem.md](./2026-05/2026-05-01-demo-problem-problem.md): Demo problem.
+""",
+            encoding="utf-8",
+        )
+        return problem
+
+    def add_inbox(self, repo: Path, *, include_lifecycle: bool = True) -> Path:
+        inbox_root = repo / "docs/superpowers/inbox/2026-05"
+        inbox_root.mkdir(parents=True, exist_ok=True)
+        lifecycle_lines = ""
+        if include_lifecycle:
+            lifecycle_lines = "- Lifecycle: `Open`\n- Revisit trigger: `When the signal recurs or stabilizes.`\n"
+        inbox = inbox_root / "2026-05-01-demo-signal-inbox.md"
+        inbox.write_text(
+            f"""# Demo Signal
+
+- Date: `2026-05-01`
+- Topic slug: `demo-signal`
+- Status: `Inbox`
+{lifecycle_lines if include_lifecycle else ""}- Scope: `Test`
+- Confidence: `Medium`
+- Route candidate: `new-problem`
+
+## Signal
+
+Signal.
+
+## Why It Might Matter
+
+It might recur.
+
+## What Is Missing
+
+- Stable root cause.
+
+## Likely Next Route
+
+Promote if repeated.
+
+## Related Assets
+
+- Problems:
+  - None yet.
+""",
+            encoding="utf-8",
+        )
+        return inbox
+
+    def test_spec_plan_without_archive_routes_to_archive(self) -> None:
+        repo = self.create_repo()
+        result = self.run_json(ROUTER, repo, "--keywords", "demo", "feature", "--json")
+        self.assertEqual(result["routes"], ["archive"])
+
+    def test_finder_recognizes_plain_plan_markdown_files(self) -> None:
+        repo = self.create_repo()
+        result = self.run_json(FINDER, repo, "demo", "feature", "--json")
+        self.assertIn("plans", {item["area"] for item in result["results"]})
+
+    def test_existing_archive_routes_to_update_existing(self) -> None:
+        repo = self.create_repo()
+        self.add_archive(repo)
+        result = self.run_json(ROUTER, repo, "--keywords", "demo", "feature", "completed", "--json")
+        self.assertEqual(result["routes"], ["update-existing"])
+
+    def test_lightweight_polish_signal_routes_to_none(self) -> None:
+        repo = self.temp_root / "lightweight_repo"
+        (repo / "docs" / "superpowers").mkdir(parents=True)
+        result = self.run_json(ROUTER, repo, "--keywords", "minor", "fix", "visual", "issue", "--json")
+        self.assertEqual(result["routes"], ["none"])
+
+    def test_uncertain_problem_signal_routes_to_inbox(self) -> None:
+        repo = self.temp_root / "weak_repo"
+        (repo / "docs" / "superpowers").mkdir(parents=True)
+        result = self.run_json(
+            ROUTER,
+            repo,
+            "--keywords",
+            "minor",
+            "fix",
+            "visual",
+            "issue",
+            "possibly",
+            "--json",
+        )
+        self.assertEqual(result["routes"], ["inbox"])
+
+    def test_problem_gate_routes_lightweight_problem_signal_to_inbox(self) -> None:
+        repo = self.temp_root / "problem_gate_repo"
+        (repo / "docs" / "superpowers").mkdir(parents=True)
+        result = self.run_json(
+            ROUTER,
+            repo,
+            "--keywords",
+            "minor",
+            "fix",
+            "visual",
+            "issue",
+            "--problem-gate",
+            "--json",
+        )
+        self.assertEqual(result["routes"], ["inbox"])
+
+    def test_problem_gate_review_candidate_routes_to_inbox(self) -> None:
+        repo = self.temp_root / "review_gate_repo"
+        (repo / "docs" / "superpowers").mkdir(parents=True)
+        result = self.run_json(
+            ROUTER,
+            repo,
+            "--keywords",
+            "code",
+            "quality",
+            "review",
+            "finding",
+            "candidate",
+            "--problem-gate",
+            "--json",
+        )
+        self.assertEqual(result["routes"], ["inbox"])
+
+    def test_stable_root_cause_signal_routes_to_new_problem(self) -> None:
+        repo = self.temp_root / "strong_repo"
+        (repo / "docs" / "superpowers").mkdir(parents=True)
+        result = self.run_json(ROUTER, repo, "--keywords", "root", "cause", "recovery", "rule", "--json")
+        self.assertEqual(result["routes"], ["new-problem"])
+
+    def test_release_ci_warning_routes_to_inbox(self) -> None:
+        repo = self.temp_root / "ci_warning_repo"
+        (repo / "docs" / "superpowers").mkdir(parents=True)
+        result = self.run_json(
+            ROUTER,
+            repo,
+            "--keywords",
+            "github",
+            "actions",
+            "node",
+            "20",
+            "deprecated",
+            "warning",
+            "release",
+            "workflow",
+            "--problem-gate",
+            "--json",
+        )
+        self.assertEqual(result["routes"], ["inbox"])
+
+    def test_release_ci_warning_updates_existing_release_asset(self) -> None:
+        repo = self.create_repo()
+        self.add_archive(repo)
+        result = self.run_json(
+            ROUTER,
+            repo,
+            "--keywords",
+            "demo",
+            "feature",
+            "github",
+            "actions",
+            "node",
+            "20",
+            "deprecated",
+            "warning",
+            "release",
+            "workflow",
+            "--problem-gate",
+            "--json",
+        )
+        self.assertEqual(result["routes"], ["update-existing"])
+
+    def test_inbox_validator_warns_when_lifecycle_metadata_is_missing(self) -> None:
+        repo = self.create_repo()
+        inbox = self.add_inbox(repo, include_lifecycle=False)
+        result = self.run_json(PROBLEM_VALIDATOR, inbox, "--kind", "inbox", "--json")
+        issues = result["issues"]
+        self.assertEqual([issue["severity"] for issue in issues], ["warning"])
+        self.assertEqual(issues[0]["code"], "missing_lifecycle")
+
+    def test_inbox_lifecycle_inspector_reports_revisit_candidates(self) -> None:
+        repo = self.create_repo()
+        self.add_inbox(repo, include_lifecycle=True)
+        result = self.run_json(INBOX_INSPECTOR, repo, "demo", "--json")
+
+        self.assertEqual(len(result["items"]), 1)
+        item = result["items"][0]
+        self.assertEqual(item["lifecycle"], "Open")
+        self.assertTrue(item["needs_revisit"])
+        self.assertEqual(item["issues"], [])
+
+    def test_inbox_lifecycle_inspector_flags_legacy_notes(self) -> None:
+        repo = self.create_repo()
+        self.add_inbox(repo, include_lifecycle=False)
+        result = self.run_json(INBOX_INSPECTOR, repo, "demo", "--json")
+
+        self.assertEqual(result["items"][0]["issues"], ["missing_lifecycle"])
+
+    def test_archive_and_problem_validators_plus_index_checker(self) -> None:
+        repo = self.create_repo()
+        archive = self.add_archive(repo)
+        problem = self.add_problem(repo)
+        self.assertEqual(self.run_json(ARCHIVE_VALIDATOR, archive, "--json")["issues"], [])
+        self.assertEqual(self.run_json(PROBLEM_VALIDATOR, problem, "--json")["issues"], [])
+        self.assertEqual(self.run_json(CHECKER, repo, "--json")["issues"], [])
+
+    def test_archive_validator_rejects_missing_contract_sections(self) -> None:
+        repo = self.create_repo()
+        bad_archive = repo / "docs/superpowers/archives/2026-05/2026-05-02-bad-archive-archives.md"
+        bad_archive.write_text("# Bad Archive\n\n- Date: `2026-05-02`\n", encoding="utf-8")
+        result = self.run_json_fail(ARCHIVE_VALIDATOR, bad_archive, "--json")
+        codes = {issue["code"] for issue in result["issues"]}
+        self.assertIn("missing_metadata", codes)
+        self.assertIn("missing_section", codes)
+
+    def test_bootstrap_creates_standard_layout_and_agents_guidance(self) -> None:
+        repo = self.temp_root / "bootstrap_repo"
+        repo.mkdir()
+        (repo / "AGENTS.md").write_text("# Repository Guidelines\n\nExisting rules.\n", encoding="utf-8")
+
+        result = self.run_json(BOOTSTRAP, repo, "--write", "--json")
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["created_dirs"], [
+            "docs/superpowers",
+            "docs/superpowers/specs",
+            "docs/superpowers/plans",
+            "docs/superpowers/archives",
+            "docs/superpowers/problems",
+            "docs/superpowers/inbox",
+        ])
+        agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("Existing rules.", agents_text)
+        self.assertEqual(agents_text.count("<!-- asset-compounding-guidance:start -->"), 1)
+        self.assertIn("docs/superpowers/inbox/", agents_text)
+        self.assertIn("hook-assisted asset compounding", agents_text)
+        self.assertIn("rg -n", agents_text)
+        self.assertIn("/hooks", agents_text)
+        self.assertNotIn("### Routing Boundaries", agents_text)
+        self.assertNotIn("### Completion Gates", agents_text)
+        self.assertNotIn("### Problem Gate Output", agents_text)
+        self.assertNotIn("--completed-topic", agents_text)
+
+    def test_bootstrap_is_idempotent_after_initialization(self) -> None:
+        repo = self.temp_root / "idempotent_bootstrap_repo"
+        repo.mkdir()
+
+        first = self.run_json(BOOTSTRAP, repo, "--write", "--json")
+        second = self.run_json(BOOTSTRAP, repo, "--write", "--json")
+
+        self.assertTrue(first["changed"])
+        self.assertFalse(second["changed"])
+        agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertEqual(agents_text.count("<!-- asset-compounding-guidance:start -->"), 1)
+        self.assertEqual(second["created_dirs"], [])
+
+    def test_completion_gate_detects_solution_folder_and_relayout_drift(self) -> None:
+        repo = self.temp_root / "relayout_repo"
+        (repo / "src/LightRAGNet.Core").mkdir(parents=True)
+        (repo / "tests/LightRAGNet.Tests").mkdir(parents=True)
+        (repo / "LightRAGNet.Core/bin").mkdir(parents=True)
+        (repo / "src/LightRAGNet.Core/LightRAGNet.Core.csproj").write_text(
+            "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+            encoding="utf-8",
+        )
+        (repo / "tests/LightRAGNet.Tests/LightRAGNet.Tests.csproj").write_text(
+            "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+            encoding="utf-8",
+        )
+        (repo / "LightRAGNet.slnx").write_text(
+            """<Solution>
+  <Project Path="src\\LightRAGNet.Core\\LightRAGNet.Core.csproj" />
+  <Project Path="tests\\LightRAGNet.Tests\\LightRAGNet.Tests.csproj" />
+</Solution>
+""",
+            encoding="utf-8",
+        )
+
+        result = self.run_json(COMPLETION_GATE, repo, "--json")
+
+        codes = {issue["code"] for issue in result["issues"]}
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertIn("old_project_directory_after_relayout", codes)
+        self.assertIn("missing_src_solution_folder", codes)
+        self.assertIn("missing_tests_solution_folder", codes)
+
+    def test_completion_gate_passes_when_solution_folders_match_structure(self) -> None:
+        repo = self.temp_root / "clean_relayout_repo"
+        (repo / "src/LightRAGNet.Core").mkdir(parents=True)
+        (repo / "tests/LightRAGNet.Tests").mkdir(parents=True)
+        (repo / "src/LightRAGNet.Core/LightRAGNet.Core.csproj").write_text(
+            "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+            encoding="utf-8",
+        )
+        (repo / "tests/LightRAGNet.Tests/LightRAGNet.Tests.csproj").write_text(
+            "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+            encoding="utf-8",
+        )
+        (repo / "LightRAGNet.slnx").write_text(
+            """<Solution>
+  <Folder Name="/src/">
+    <Project Path="src\\LightRAGNet.Core\\LightRAGNet.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests\\LightRAGNet.Tests\\LightRAGNet.Tests.csproj" />
+  </Folder>
+</Solution>
+""",
+            encoding="utf-8",
+        )
+
+        result = self.run_json(COMPLETION_GATE, repo, "--json")
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["issues"], [])
+
+    def test_completion_gate_warns_on_unarchived_spec_plan_without_topic(self) -> None:
+        repo = self.create_repo()
+
+        result = self.run_json(COMPLETION_GATE, repo, "--json")
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["issues"][0]["code"], "possible_missing_requirement_archive")
+
+    def test_completion_gate_blocks_completed_topic_without_archive(self) -> None:
+        repo = self.create_repo()
+
+        result = self.run_json_fail(COMPLETION_GATE, repo, "--completed-topic", "demo feature", "--json")
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["issues"][0]["code"], "missing_requirement_archive")
+
+    def test_completion_gate_accepts_completed_topic_with_archive(self) -> None:
+        repo = self.create_repo()
+        self.add_archive(repo)
+
+        result = self.run_json(COMPLETION_GATE, repo, "--completed-topic", "demo-feature", "--json")
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["issues"], [])
+        self.assertEqual(result["checks"]["completed_topics"], ["demo-feature"])
+
+    def test_asset_status_reports_archived_topic_and_related_problem(self) -> None:
+        repo = self.create_repo()
+        archive = self.add_archive(repo)
+        problem = self.add_problem(repo)
+
+        result = self.run_json(ASSET_STATUS, repo, "--topic", "demo-feature", "--json")
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["requirement_archive"]["status"], "found")
+        self.assertEqual(result["requirement_archive"]["path"], archive.relative_to(repo).as_posix())
+        self.assertEqual(result["problem_assets"][0]["path"], problem.relative_to(repo).as_posix())
+        self.assertEqual(result["inbox_assets"], [])
+        self.assertEqual(result["indexes"]["status"], "pass")
+        self.assertEqual(result["completion_gate"]["status"], "pass")
+
+    def test_asset_closeout_blocks_completed_topic_without_archive(self) -> None:
+        repo = self.create_repo()
+
+        result = self.run_json_fail(ASSET_CLOSEOUT, repo, "--topic", "demo-feature", "--json")
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["route"], "archive")
+        self.assertEqual(result["missing"], ["requirement_archive"])
+        self.assertIn("write archive for topic demo-feature", result["required_actions"])
+        self.assertEqual(result["handoff_block"]["gate"], "fail")
+
+    def test_completion_gate_blocks_unknown_completed_topic(self) -> None:
+        repo = self.create_repo()
+
+        result = self.run_json_fail(COMPLETION_GATE, repo, "--completed-topic", "unknown feature", "--json")
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["issues"][0]["code"], "completed_topic_not_found")
+
+    def test_completion_gate_requires_asset_gate_when_requested(self) -> None:
+        repo = self.temp_root / "handoff_repo"
+        repo.mkdir()
+
+        result = self.run_json_fail(COMPLETION_GATE, repo, "--require-asset-gate", "--handoff-text", "done", "--json")
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["issues"][0]["code"], "missing_asset_gate_output")
+
+    def test_completion_gate_accepts_asset_candidates_and_asset_gate(self) -> None:
+        repo = self.temp_root / "candidate_repo"
+        repo.mkdir()
+
+        result = self.run_json(
+            COMPLETION_GATE,
+            repo,
+            "--skip-structure-checks",
+            "--require-asset-gate",
+            "--require-asset-candidates",
+            "--handoff-text",
+            (
+                "asset_gate:\n"
+                "  event_type: implementation-boundary\n"
+                "  route: none\n"
+                "reason: tested\n"
+                "evidence: unit tests\n"
+                "related_assets: none\n"
+                "asset_candidates: subagent reported no reusable issue\n"
+                "deferred_signals: none\n"
+                "next_step: none"
+            ),
+            "--asset-candidate",
+            "subagent reported no reusable issue",
+            "--json",
+        )
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["issues"], [])
+        self.assertEqual(result["asset_candidates"], ["subagent reported no reusable issue"])
+
+    def test_hook_config_registers_lifecycle_events_without_user_prompt_submit(self) -> None:
+        config = json.loads(HOOKS_CONFIG.read_text(encoding="utf-8"))
+        hooks = config["hooks"]
+
+        for event_name in (
+            "SessionStart",
+            "PostToolUse",
+            "Stop",
+            "PreCompact",
+            "PostCompact",
+        ):
+            self.assertIn(event_name, hooks)
+            command = hooks[event_name][0]["hooks"][0]["command"]
+            self.assertIn("asset_hook.py", command)
+
+        self.assertNotIn("UserPromptSubmit", hooks)
+        self.assertNotIn("SubagentStart", hooks)
+        self.assertNotIn("SubagentStop", hooks)
+        self.assertIn("functions.update_plan", hooks["PostToolUse"][0]["matcher"])
+
+    def test_session_start_injects_context_only_for_asset_repo(self) -> None:
+        repo = self.create_repo()
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": "session-1",
+                "cwd": str(repo),
+                "source": "startup",
+            }
+        )
+
+        self.assertEqual(code, 0, stderr)
+        payload = json.loads(stdout)
+        context = payload["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("hook-assisted asset compounding", context)
+        self.assertIn("asset_gate", context)
+
+        no_asset_repo = self.temp_root / "plain_repo"
+        no_asset_repo.mkdir()
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": "session-1",
+                "cwd": str(no_asset_repo),
+                "source": "startup",
+            }
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+
+    def test_hook_accepts_utf8_bom_input(self) -> None:
+        repo = self.create_repo()
+        payload = json.dumps(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": "session-1",
+                "cwd": str(repo),
+                "source": "startup",
+            }
+        ).encode("utf-8")
+
+        code, stdout, stderr = self.run_hook_raw(b"\xef\xbb\xbf" + payload)
+
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("asset_gate", json.loads(stdout)["hookSpecificOutput"]["additionalContext"])
+
+    def test_hook_times_out_when_stdin_never_closes(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PLUGIN_ROOT"] = str(ROOT)
+        env["PLUGIN_DATA"] = str(plugin_data)
+        env["ASSET_HOOK_STDIN_TIMEOUT_MS"] = "100"
+        process = subprocess.Popen(
+            ["python", str(HOOK_SCRIPT)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        self.assertIsNotNone(process.stdin)
+        process.stdin.write(b"{")
+        process.stdin.flush()
+
+        return_code = process.wait(timeout=3)
+        try:
+            process.stdin.close()
+        except OSError:
+            pass
+        stdout = process.stdout.read().decode("utf-8", errors="replace") if process.stdout else ""
+        stderr = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
+        if process.stdout:
+            process.stdout.close()
+        if process.stderr:
+            process.stderr.close()
+
+        self.assertEqual(return_code, 1, stdout)
+        self.assertEqual(stdout, "")
+        self.assertIn("stdin read timed out", stderr)
+        events = [
+            json.loads(line)
+            for line in (plugin_data / "_hook" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["hookEventName"], "HookInput")
+        self.assertEqual(events[-1]["reasonCode"], "stdin_timeout")
+        self.assertEqual(events[-1]["timeoutMs"], 100)
+
+    def test_subagent_lifecycle_events_are_noops_when_called_directly(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        for event in (
+            {
+                "hook_event_name": "SubagentStart",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "agent_id": "agent-1",
+                "agent_type": "reviewer",
+            },
+            {
+                "hook_event_name": "SubagentStop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "agent_id": "agent-1",
+                "agent_type": "reviewer",
+                "last_assistant_message": "asset_candidates:\n  - transient dotnet test DLL lock",
+            },
+        ):
+            code, stdout, stderr = self.run_hook(event, plugin_data=plugin_data)
+
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(stdout, "")
+
+        self.assertFalse((plugin_data / "session-1" / "state.json").exists())
+        self.assertFalse((plugin_data / "session-1" / "events.jsonl").exists())
+
+    def test_post_tool_use_update_plan_marks_plan_boundary_without_prompting(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "functions.update_plan",
+                "tool_input": {
+                    "plan": [
+                        {"step": "Implement hook change", "status": "completed"},
+                        {"step": "Run validation", "status": "in_progress"},
+                    ]
+                },
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["meaningfulWorkSignals"], ["plan-boundary"])
+
+        events = [
+            json.loads(line)
+            for line in (plugin_data / "session-1" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["hookEventName"], "PostToolUse")
+        self.assertEqual(events[-1]["commandKind"], "plan-update")
+        self.assertEqual(events[-1]["signalsAdded"], ["plan-boundary"])
+
+    def test_post_tool_use_update_plan_reminds_before_next_task_when_gate_due(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "update_plan",
+                "tool_input": {
+                    "plan": [
+                        {"step": "Implement hook change", "status": "completed"},
+                        {"step": "Run validation", "status": "pending"},
+                    ]
+                },
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        self.assertTrue(state["assetGateDue"])
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-2",
+                "cwd": str(repo),
+                "tool_name": "update_plan",
+                "tool_input": {
+                    "plan": [
+                        {"step": "Implement hook change", "status": "completed"},
+                        {"step": "Run validation", "status": "in_progress"},
+                    ]
+                },
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        payload = json.loads(stdout)
+        self.assertIn("systemMessage", payload)
+        self.assertIn("asset", payload["systemMessage"])
+        self.assertIn("before starting the next planned task", payload["systemMessage"].lower())
+
+    def test_stop_allows_plan_boundary_only_without_asset_gate(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "update_plan",
+                "tool_input": {
+                    "plan": [
+                        {"step": "Explore context", "status": "completed"},
+                        {"step": "Ask clarifying question", "status": "in_progress"},
+                    ]
+                },
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "设计阶段确认了一小段，等待用户继续。",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        self.assertTrue(state["assetGateDue"])
+        self.assertEqual(state["meaningfulWorkSignals"], ["plan-boundary"])
+
+    def test_stop_with_asset_gate_clears_asset_gate_due(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "update_plan",
+                "tool_input": {"plan": [{"step": "Implement hook change", "status": "completed"}]},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "asset_gate:\n  route: none\n  asset_candidates: none",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        self.assertFalse(state["assetGateDue"])
+
+    def test_post_tool_use_marks_meaningful_work_and_stop_requires_asset_gate(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "dotnet test .\\LightRAGNet.slnx --verbosity minimal"},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "实现完成，测试通过。",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("asset_gate", payload["reason"])
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "stop_hook_active": True,
+                "last_assistant_message": "实现完成，测试通过。",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("systemMessage", json.loads(stdout))
+
+    def test_stop_with_asset_gate_clears_closeout_signals_for_later_turns(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "dotnet test .\\LightRAGNet.slnx"},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "asset_gate:\n  route: none\n  asset_candidates: none",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-2",
+                "cwd": str(repo),
+                "last_assistant_message": "Just answered a read-only question.",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["meaningfulWorkSignals"], [])
+        self.assertEqual(state["verificationEvidence"], [])
+
+    def test_post_tool_use_records_failed_verification_separately(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "dotnet test .\\LightRAGNet.slnx"},
+                "tool_response": {"exit_code": 1},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["meaningfulWorkSignals"], ["verification-failed"])
+        self.assertEqual(state["verificationEvidence"][0]["status"], "failed")
+        self.assertEqual(state["verificationEvidence"][0]["exitCode"], 1)
+
+    def test_post_tool_use_does_not_count_dotnet_build_version_as_verification(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "dotnet build --version"},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["meaningfulWorkSignals"], [])
+        self.assertEqual(state["verificationEvidence"], [])
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "Read dotnet build version.",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+
+    def test_post_tool_use_readonly_docs_search_does_not_mark_asset_files_changed(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "rg -n asset_gate docs/superpowers"},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        self.assertFalse((repo / "AGENTS.md").exists())
+        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        self.assertFalse(state["assetFilesChanged"])
+        self.assertEqual(state["meaningfulWorkSignals"], [])
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "Read-only asset search complete.",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+
+    def test_post_tool_use_bootstraps_guidance_when_first_asset_is_written(self) -> None:
+        repo = self.temp_root / "first_asset_repo"
+        (repo / "docs/superpowers/specs").mkdir(parents=True)
+        (repo / "docs/superpowers/specs/2026-06-01-demo-design.md").write_text(
+            "# Demo Design\n",
+            encoding="utf-8",
+        )
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "apply_patch",
+                "tool_input": {
+                    "patch": "*** Begin Patch\n*** Add File: docs/superpowers/plans/2026-06-01-demo.md\n+# Demo Plan\n*** End Patch"
+                },
+                "tool_response": {},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("<!-- asset-compounding-guidance:start -->", agents_text)
+        self.assertIn("docs/superpowers/inbox/", agents_text)
+        self.assertTrue((repo / "docs/superpowers/problems").is_dir())
+        self.assertTrue((repo / "docs/superpowers/inbox").is_dir())
+
+        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        self.assertTrue(state["assetFilesChanged"])
+        self.assertEqual(state["assetBootstrap"]["action"], "written")
+        self.assertIn("docs/superpowers/problems", state["assetBootstrap"]["createdDirs"])
+
+    def test_stop_allows_messages_that_already_include_asset_gate(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "apply_patch",
+                "tool_input": {"command": "*** Begin Patch\n*** End Patch"},
+                "tool_response": {},
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "asset_gate:\n  route: none\n  reason: cleanup-only",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+
+    def test_post_compact_records_pending_state_without_stdout(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "functions.update_plan",
+                "tool_input": {"plan": [{"step": "Review completed work", "status": "completed"}]},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostCompact",
+                "session_id": "session-1",
+                "turn_id": "turn-2",
+                "cwd": str(repo),
+                "trigger": "auto",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        events = [
+            json.loads(line)
+            for line in (plugin_data / "session-1" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        post_compact_event = events[-1]
+        self.assertEqual(post_compact_event["hookEventName"], "PostCompact")
+        self.assertEqual(post_compact_event["decision"], "recorded")
+        self.assertEqual(post_compact_event["reasonCode"], "pending_state_restored")
+        self.assertEqual(post_compact_event["candidateCount"], 0)
+        self.assertEqual(post_compact_event["signals"], ["plan-boundary"])
+
+    def test_hook_writes_sanitized_usage_events(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "functions.exec_command",
+                "tool_input": {"cmd": "dotnet test .\\LightRAGNet.slnx --verbosity minimal"},
+                "tool_response": {"exit_code": 1},
+            },
+            plugin_data=plugin_data,
+        )
+        self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "Verification failed.",
+            },
+            plugin_data=plugin_data,
+        )
+
+        events = [
+            json.loads(line)
+            for line in (plugin_data / "session-1" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+
+        self.assertGreaterEqual(len(events), 2)
+        post_tool_event = events[0]
+        stop_event = events[1]
+        self.assertEqual(post_tool_event["hookEventName"], "PostToolUse")
+        self.assertEqual(post_tool_event["commandKind"], "dotnet-test")
+        self.assertTrue(post_tool_event["commandPresent"])
+        self.assertGreater(post_tool_event["commandLength"], 0)
+        self.assertIn("commandHash", post_tool_event)
+        self.assertIn("durationMs", post_tool_event)
+        self.assertIn("processId", post_tool_event)
+        self.assertEqual(post_tool_event["exitCode"], 1)
+        self.assertEqual(post_tool_event["verificationStatus"], "failed")
+        self.assertEqual(post_tool_event["signalsAdded"], ["verification-failed"])
+        self.assertEqual(post_tool_event["signals"], ["verification-failed"])
+        self.assertFalse(post_tool_event["assetFilesChangedThisTool"])
+        self.assertNotIn("command", post_tool_event)
+        self.assertNotIn("cwd", post_tool_event)
+        self.assertEqual(stop_event["hookEventName"], "Stop")
+        self.assertEqual(stop_event["decision"], "block")
+        self.assertEqual(stop_event["reasonCode"], "missing_asset_gate")
+        self.assertTrue(stop_event["hasMeaningfulWork"])
+
+    def test_hook_report_summarizes_usage_events(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "dotnet test .\\LightRAGNet.slnx"},
+                "tool_response": {"exit_code": 1},
+            },
+            plugin_data=plugin_data,
+        )
+        self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "Verification failed.",
+            },
+            plugin_data=plugin_data,
+        )
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "functions.update_plan",
+                "tool_input": {"plan": [{"step": "Review failed verification", "status": "in_progress"}]},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+
+        report = self.run_json(HOOK_REPORT, plugin_data, "--json")
+
+        self.assertEqual(report["total_events"], 3)
+        self.assertEqual(report["stop_blocks"], 1)
+        self.assertEqual(report["verification_failed_detected"], 1)
+        self.assertEqual(report["subagent_candidates_collected"], 0)
+        self.assertEqual(report["command_kinds"]["dotnet-test"], 1)
+        self.assertEqual(report["command_kinds"]["plan-update"], 1)
+        self.assertEqual(report["unknown_command_kind_ratio"], 0.0)
+        self.assertEqual(report["hook_duration_ms"]["count"], 3)
+        self.assertGreaterEqual(report["hook_duration_ms"]["max"], 0)
+        self.assertEqual(len(report["slow_events"]), 3)
+
+
+if __name__ == "__main__":
+    unittest.main()

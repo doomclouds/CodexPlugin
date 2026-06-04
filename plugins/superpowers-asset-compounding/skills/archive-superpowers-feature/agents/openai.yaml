@@ -1,0 +1,4 @@
+interface:
+  display_name: "Archive Superpowers Feature"
+  short_description: "Create a final archive doc for a completed Superpowers requirement"
+  default_prompt: "Use $archive-superpowers-feature to archive a completed Superpowers requirement into docs/superpowers/archives and update INDEX.md."
