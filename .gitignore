@@ -12,3 +12,4 @@ Thumbs.db
 .codex-deep-research/
 node_modules/
 dist/
+.claude
