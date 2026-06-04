@@ -91,7 +91,7 @@ export async function startCommand(question: string, rawOptions: RawStartOptions
   });
   child.unref();
 
-  console.log(JSON.stringify({ runId: manifest.runId, statusPath: `${manifest.outputDir}/status.json` }, null, 2));
+  console.log(JSON.stringify({ runId: manifest.runId, statusPath: join(manifest.outputDir, "status.json") }, null, 2));
 }
 
 function parseChoice<T extends readonly string[]>(optionName: string, rawValue: unknown, choices: T): T[number] {

@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,9 +6,14 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { listCommand } from "../src/commands/list.js";
 import { reportCommand } from "../src/commands/report.js";
-import { resolveStartLauncher, validateStartOptions } from "../src/commands/start.js";
+import { resolveStartLauncher, startCommand, validateStartOptions } from "../src/commands/start.js";
+import { watchCommand } from "../src/commands/watch.js";
 import { resolveWorkspaceRoot } from "../src/commands/workspace.js";
 import { RunStore } from "../src/runtime/run-store.js";
+
+vi.mock("node:child_process", () => ({
+  spawn: vi.fn(() => ({ unref: vi.fn() })),
+}));
 
 const originalInitCwd = process.env.INIT_CWD;
 
@@ -112,6 +118,62 @@ describe("reportCommand", () => {
   });
 });
 
+describe("watchCommand", () => {
+  it("prints empty output when the run has no events file", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "cdr-watch-missing-workspace-"));
+    const pluginCwd = await mkdtemp(join(tmpdir(), "cdr-watch-missing-plugin-"));
+    process.env.INIT_CWD = workspace;
+    vi.spyOn(process, "cwd").mockReturnValue(pluginCwd);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const store = new RunStore(workspace);
+    const manifest = await store.createRun({
+      question: "Should watch tolerate missing events?",
+      workspace,
+      mode: "mixed",
+      depth: "standard",
+      maxConcurrency: 8,
+      maxTasks: 120,
+      debugPrompts: false,
+    });
+    await rm(join(manifest.outputDir, "events.jsonl"));
+
+    await watchCommand(manifest.runId);
+
+    expect(logSpy).toHaveBeenCalledWith("");
+
+    await rm(workspace, { recursive: true, force: true });
+    await rm(pluginCwd, { recursive: true, force: true });
+  });
+
+  it("propagates events file read errors other than ENOENT", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "cdr-watch-error-workspace-"));
+    const pluginCwd = await mkdtemp(join(tmpdir(), "cdr-watch-error-plugin-"));
+    process.env.INIT_CWD = workspace;
+    vi.spyOn(process, "cwd").mockReturnValue(pluginCwd);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const store = new RunStore(workspace);
+    const manifest = await store.createRun({
+      question: "Should watch surface read errors?",
+      workspace,
+      mode: "mixed",
+      depth: "standard",
+      maxConcurrency: 8,
+      maxTasks: 120,
+      debugPrompts: false,
+    });
+    const eventsPath = join(manifest.outputDir, "events.jsonl");
+    await rm(eventsPath);
+    await mkdir(eventsPath);
+
+    await expect(watchCommand(manifest.runId)).rejects.toMatchObject({ code: expect.not.stringMatching(/^ENOENT$/) });
+
+    await rm(workspace, { recursive: true, force: true });
+    await rm(pluginCwd, { recursive: true, force: true });
+  });
+});
+
 describe("start command helpers", () => {
   it.each([
     [{ mode: "invalid", depth: "standard", maxConcurrency: "8", maxTasks: "120", debugPrompts: false }, /--mode/],
@@ -169,5 +231,28 @@ describe("start command helpers", () => {
     );
 
     await rm(pluginRoot, { recursive: true, force: true });
+  });
+
+  it("prints a status path created with platform path joining", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "cdr-start-workspace-"));
+    const pluginCwd = await mkdtemp(join(tmpdir(), "cdr-start-plugin-"));
+    process.env.INIT_CWD = workspace;
+    vi.spyOn(process, "cwd").mockReturnValue(pluginCwd);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await startCommand("Should start output joined paths?", {
+      mode: "mixed",
+      depth: "standard",
+      maxConcurrency: "8",
+      maxTasks: "120",
+      debugPrompts: false,
+    });
+
+    expect(spawn).toHaveBeenCalledOnce();
+    const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string) as { runId: string; statusPath: string };
+    expect(output.statusPath).toBe(join(workspace, ".codex-deep-research", "runs", output.runId, "status.json"));
+
+    await rm(workspace, { recursive: true, force: true });
+    await rm(pluginCwd, { recursive: true, force: true });
   });
 });
