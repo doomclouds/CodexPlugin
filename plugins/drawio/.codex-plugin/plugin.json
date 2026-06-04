@@ -1,0 +1,30 @@
+{
+  "name": "drawio",
+  "version": "0.1.0",
+  "description": "Local draw.io plugin that groups built-in diagramming skills for template-aware drawing and library selection.",
+  "author": {
+    "name": "doomclouds",
+    "url": "https://github.com/doomclouds"
+  },
+  "homepage": "https://github.com/doomclouds/CodexPlugin/tree/main/plugins/drawio",
+  "repository": "https://github.com/doomclouds/CodexPlugin",
+  "license": "MIT",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Draw.io",
+    "shortDescription": "Draw.io plugin with template-aware diagramming skills.",
+    "longDescription": "Bundle local draw.io skills for generating diagrams with built-in template libraries, stencil libraries, and named shape packs on this PC.",
+    "developerName": "doomclouds",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Create a draw.io admin dashboard with Bootstrap shapes.",
+      "Choose the best built-in draw.io library for this architecture diagram.",
+      "Explain which draw.io template families are available on this PC."
+    ],
+    "brandColor": "#1D6F42"
+  }
+}

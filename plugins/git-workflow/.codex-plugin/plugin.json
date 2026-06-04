@@ -1,0 +1,37 @@
+{
+  "name": "git-workflow",
+  "version": "0.1.0",
+  "description": "Local Git workflow plugin for cleaning stale branches, committing changes, and creating pull requests.",
+  "author": {
+    "name": "doomclouds",
+    "url": "https://github.com/doomclouds"
+  },
+  "homepage": "https://github.com/doomclouds/CodexPlugin/tree/main/plugins/git-workflow",
+  "repository": "https://github.com/doomclouds/CodexPlugin",
+  "license": "MIT",
+  "keywords": [
+    "git",
+    "commit",
+    "pull-request",
+    "branches",
+    "workflow"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Git Workflow",
+    "shortDescription": "Clean branches, commit changes, and open pull requests.",
+    "longDescription": "Bundle local Git workflow skills for common repository maintenance: pruning gone branches and worktrees, creating conventional commits, and completing commit-push-pull-request flows with consistent safety checks.",
+    "developerName": "doomclouds",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Clean gone Git branches and related worktrees.",
+      "Commit current changes with a conventional message.",
+      "Commit, push, and create a pull request."
+    ],
+    "brandColor": "#F05032"
+  }
+}

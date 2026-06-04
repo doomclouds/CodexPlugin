@@ -1,0 +1,4 @@
+interface:
+  display_name: "Draw.io Template Shapes"
+  short_description: "Prefer built-in draw.io libraries when diagramming."
+  default_prompt: "Use $drawio-template-shapes to create a draw.io diagram with the most suitable built-in library on this PC."
