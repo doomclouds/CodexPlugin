@@ -6,6 +6,10 @@ import type { RunManifest, RunStatus, WorkflowEvent } from "./types.js";
 
 const RUN_ID_PATTERN = /^dr_\d{8}T\d{9}Z(?:_\d{2})?$/;
 
+export function isRunId(value: string): boolean {
+  return RUN_ID_PATTERN.test(value);
+}
+
 export interface CreateRunInput {
   question: string;
   workspace: string;
@@ -133,7 +137,7 @@ export class RunStore {
   }
 
   private validateRunId(runId: string): void {
-    if (!RUN_ID_PATTERN.test(runId)) {
+    if (!isRunId(runId)) {
       throw new Error(`Invalid run id: ${runId}`);
     }
   }
