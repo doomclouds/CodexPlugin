@@ -99,6 +99,48 @@ describe("runDeepResearch", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it("keeps a completed run successful when post-completion event emit fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "cdr-flow-"));
+    const store = new RunStore(root);
+    const manifest = await store.createRun({
+      question: "Should completed runs tolerate final event failures?",
+      workspace: root,
+      mode: "mixed",
+      depth: "standard",
+      maxConcurrency: 2,
+      maxTasks: 20,
+      debugPrompts: false,
+    });
+    const worker = new FakeWorkerClient([
+      {
+        question: manifest.question,
+        summary: "Final event failure should not change success.",
+        angles: [
+          { label: "state", query: "completed state", rationale: "Success" },
+          { label: "events", query: "event failure", rationale: "Hardening" },
+          { label: "report", query: "report written", rationale: "Output" },
+        ],
+      },
+    ]);
+    const originalEmit = store.emit.bind(store);
+    store.emit = async (runId, event) => {
+      if (event.type === "report.written") {
+        throw new Error("report emit failed");
+      }
+      await originalEmit(runId, event);
+    };
+
+    try {
+      await expect(runDeepResearch({ manifest, store, worker })).resolves.toBeUndefined();
+      const status = await store.readStatus(manifest.runId);
+      expect(status.phase).toBe("completed");
+      expect(status.state).toBe("completed");
+      expect(status.progress).toEqual({ queued: 0, running: 0, completed: 1, failed: 0, skipped: 0 });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("writes checkpoints and reports to the run directory when manifest outputDir is tampered", async () => {
     const root = await mkdtemp(join(tmpdir(), "cdr-flow-"));
     const store = new RunStore(root);
@@ -161,8 +203,10 @@ describe("runDeepResearch", () => {
     const status = await store.readStatus(manifest.runId);
     expect(status.state).toBe("failed");
     expect(status.progress.running).toBe(0);
-    expect(status.progress.completed).toBe(1);
+    expect(status.progress.completed).toBe(0);
+    expect(status.progress.failed).toBe(1);
     const eventsRaw = await readFile(join(manifest.outputDir, "events.jsonl"), "utf8");
+    expect(eventsRaw).toContain("task.failed");
     expect(eventsRaw).toContain("run.failed");
 
     await rm(root, { recursive: true, force: true });

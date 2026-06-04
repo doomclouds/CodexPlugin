@@ -25,14 +25,16 @@ export async function runDeepResearch(input: DeepResearchRunInput): Promise<void
 
   try {
     await phase(runtime, "planning");
-    const scope = ScopeSchema.parse(
-      await agent(runtime, {
+    const scope = await agent(
+      runtime,
+      {
         label: "scope",
         schemaName: "ScopeSchema",
         prompt:
           `Decompose this research question into 3-6 complementary search angles.\n\n` +
           `Question: ${input.manifest.question}\n\nReturn structured JSON only.`,
-      }),
+      },
+      { parse: ScopeSchema.parse },
     );
 
     runtime.status.research.angles = scope.angles.length;
@@ -55,8 +57,12 @@ export async function runDeepResearch(input: DeepResearchRunInput): Promise<void
     runtime.status.state = "completed";
     runtime.status.output = { reportPath, summaryPath };
     await input.store.writeStatus(runtime.status);
-    await input.store.emit(input.manifest.runId, { type: "phase.started", phase: "completed", message: "completed" });
-    await input.store.emit(input.manifest.runId, { type: "report.written", message: reportPath });
+    await input.store
+      .emit(input.manifest.runId, { type: "phase.started", phase: "completed", message: "completed" })
+      .catch(() => undefined);
+    await input.store
+      .emit(input.manifest.runId, { type: "report.written", message: reportPath })
+      .catch(() => undefined);
   } catch (error) {
     runtime.status.state = "failed";
     await input.store.writeStatus(runtime.status).catch(() => undefined);

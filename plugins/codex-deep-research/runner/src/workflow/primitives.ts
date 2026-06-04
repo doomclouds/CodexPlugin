@@ -10,13 +10,17 @@ export interface WorkflowRuntime {
   worker: WorkerClient;
 }
 
+export interface AgentOptions<T> {
+  parse?: (result: unknown) => T;
+}
+
 export async function phase(runtime: WorkflowRuntime, phaseName: RunStatus["phase"]): Promise<void> {
   runtime.status.phase = phaseName;
   await runtime.store.writeStatus(runtime.status);
   await runtime.store.emit(runtime.runId, { type: "phase.started", phase: phaseName, message: phaseName });
 }
 
-export async function agent<T>(runtime: WorkflowRuntime, task: WorkerTask): Promise<T> {
+export async function agent<T>(runtime: WorkflowRuntime, task: WorkerTask, options: AgentOptions<T> = {}): Promise<T> {
   runtime.status.progress.running += 1;
   let result!: T;
   let hasResult = false;
@@ -29,7 +33,8 @@ export async function agent<T>(runtime: WorkflowRuntime, task: WorkerTask): Prom
     await runtime.store.emit(runtime.runId, { type: "task.started", taskId: task.label, message: task.label });
 
     try {
-      result = await runtime.worker.run<T>(task);
+      const workerResult = await runtime.worker.run<unknown>(task);
+      result = options.parse ? options.parse(workerResult) : (workerResult as T);
       hasResult = true;
       runtime.status.progress.completed += 1;
       await runtime.store
