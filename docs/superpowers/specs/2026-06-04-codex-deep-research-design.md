@@ -891,7 +891,7 @@ FAILURE_MODE = "partial_report";
 ## 建议实现顺序
 
 1. 创建插件骨架和 runner package。
-2. 实现运行目录、manifest、status、events、tasks 写入。
+2. 实现运行目录、manifest、status、events 写入；`tasks.jsonl` 留到 later phases。
 3. 实现 CLI `start/status/watch/list/cancel/report` 的静态骨架。
 4. 实现 `WorkerClient` 接口和 `codex exec --json` worker。
 5. 实现 v0 workflow primitive：`phase`、`agent`、`parallel`；later phases 再补 `pipeline`、`checkpoint`、`emit`。
@@ -906,5 +906,5 @@ FAILURE_MODE = "partial_report";
 - 大量并发 worker 可能触发资源、速率或外部 provider 限制，必须保留 `maxConcurrency` 和 retry 上限。
 - source provider 的可用性会随环境变化，later phases 应支持 partial report；v0 skeleton 不承诺 partial report。
 - prompt envelope 脱敏规则必须保守，避免把私有仓库正文或 secret 默认落盘。
-- report verifier 不能只做格式检查，必须检查 source id、claim decision 和正文引用的一致性。
+- v0 report verifier 不能只做格式检查，必须覆盖 citation/source id/status skeleton；claim decision 和正文引用一致性留到 later phases。
 
