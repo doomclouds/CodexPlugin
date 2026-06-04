@@ -197,7 +197,7 @@ v0 采用插件内部可信 TS workflow DSL。该 DSL 是 runner 内部接口，
 - `barrier(name)`：明确阶段屏障，例如 Verify 前必须收齐 claim pool。
 - `checkpoint(name)`：保存状态快照，支持恢复。
 - `emit(event)`：写入事件流，供 `watch` 展示。
-- `salvage(reason)`：失败时生成 partial report。
+- `salvage(reason)`：later phases 的失败恢复 primitive，用于生成 partial report；不是 v0 skeleton 行为。
 
 示例形态：
 
@@ -653,6 +653,8 @@ report.sources.md
 
 ## 引用规则
 
+本节是 later phases 的目标引用约束，不属于 v0 skeleton 验收。v0 skeleton 还没有完整 search/fetch/verify，也不生成机器可读来源审计链。
+
 硬规则：
 
 ```text
@@ -665,7 +667,7 @@ No decision, no report body.
 
 - 只能引用 `sources.jsonl` 里存在的 source；
 - 只能引用状态为 `fetched`、`extracted` 或 `verified_used` 的 source；
-- search 结果但未 fetch 的 URL 不能进入正文引用；
+- later phases 中，search 结果但未 fetch 的 URL 不能进入正文引用；
 - forum/blog 可以引用，但不能单独支撑 high confidence；
 - commercial/marketing source 必须降权，除非只是引用其自述事实；
 - fast-moving topic 必须展示 `retrievedAt`，尽量展示 `publishedAt`；
@@ -681,17 +683,19 @@ No decision, no report body.
 
 ## Report Verifier
 
+本节是 later phases 的报告一致性目标，不属于 v0 skeleton 验收。
+
 报告写完后必须跑 `report_verifier`，检查：
 
 - 正文中的 source id 是否都存在；
-- 每个事实 claim 是否能追溯到 finding、claim、source；
+- later phases 中，每个事实 claim 是否能追溯到 finding、claim、source；
 - `refuted` 和 `unverified` 是否误入正文；
-- 是否引用未 fetch 的 search result；
+- later phases 中，是否引用未 fetch 的 search result；
 - high confidence 是否被弱来源单独支撑；
 - 是否遗漏重要 caveat；
 - Markdown 链接是否可读。
 
-校验失败时回到 synthesizer 修一次。最多重试 1 次，仍失败则输出 partial report，并在顶部标注原因。
+later phases 中，校验失败时回到 synthesizer 修一次。最多重试 1 次，仍失败则输出 partial report，并在顶部标注原因。
 
 ## 可观测性
 
@@ -791,6 +795,8 @@ checkpoints/
 
 ## Cancel
 
+本节描述 later phases 的完整取消语义。v0 skeleton 取消只更新状态和事件，不生成 partial report。
+
 `cancel` 写入：
 
 ```text
@@ -803,10 +809,12 @@ runner 看到后：
 - 已完成结果继续写入 state；
 - 正在运行任务给短暂 grace period；
 - 超时后终止 worker；
-- 生成 partial report；
+- later phases 中生成 partial report；
 - 状态标记为 `cancelled` 或 `partial`。
 
 ## Failure Strategy
+
+本节描述 later phases 的容错策略。v0 skeleton 的失败/取消路径只更新 `status.json` 和 `events.jsonl`，不产出 partial report。
 
 默认不因单个 agent 失败中断全局。
 
@@ -823,7 +831,7 @@ FAILURE_MODE = "partial_report";
 - 所有 source provider 连续失败；
 - 用户显式设置 `--fail-fast`。
 
-其他失败进入 partial report。
+其他失败在 later phases 进入 partial report。
 
 ## Prompt Envelope 记录
 
@@ -849,8 +857,9 @@ FAILURE_MODE = "partial_report";
   - Verify：later phases 实现多票对抗验证和反驳裁决；
   - Synthesize：生成 Markdown 报告；
   - Verify Report：later phases 实现引用和裁决一致性检查。
-- Runtime state 文件：v0 skeleton 不生成完整 JSONL 审计文件；只要求能支撑 CLI 运行状态和三份 Markdown 报告输出。
-- 默认输出：`report.md`、`report.summary.md`、`report.sources.md`。
+- Runtime state 文件：v0 skeleton 生成 `manifest.json`、`status.json`、`events.jsonl`；不生成完整 JSONL 审计文件，也不生成 `tasks.jsonl`。
+- 成功路径默认输出：`report.md`、`report.summary.md`、`report.sources.md`。
+- 失败或取消路径：只更新 `status.json` 和 `events.jsonl`，不生成 partial report。
 - 默认 `.gitignore`：`.codex-deep-research/`。
 
 ## v0 暂不做
@@ -867,13 +876,14 @@ FAILURE_MODE = "partial_report";
 - 能通过 skill 启动一次研究，并返回 `run_id`。
 - `status <run_id>` 能看到阶段、队列、运行中任务、已完成任务、失败任务。
 - `watch <run_id>` 能持续显示事件流。
-- runner 中途失败或取消时能产出 partial report。
-- `report.md` 中每个事实性结论都能追溯到 source。
-- 未 fetch 的 search result 不能进入正文引用。
+- 成功路径能产出 `report.md`、`report.summary.md`、`report.sources.md`。
+- 失败或取消路径能更新 `status.json` 和 `events.jsonl`，不要求 partial report。
+- later phases 中，`report.md` 中每个事实性结论都能追溯到 source。
+- later phases 中，未 fetch 的 search result 不能进入正文引用。
 - later phases 中，`refuted` 和 `unverified` claim 不会进入正文，只能进入 appendix 或结构化复盘产物。
 - prompt envelope 默认脱敏保存，`--debug-prompts` 才保存完整 prompt。
 - `.codex-deep-research/` 默认不污染 git。
-- 本地测试覆盖 schema、去重、投票裁决、report verifier、checkpoint 恢复。
+- 本地测试覆盖 schema、JSONL、run store、CLI、workflow skeleton、report writer 和路径约束。
 
 ## 建议实现顺序
 
@@ -891,7 +901,7 @@ FAILURE_MODE = "partial_report";
 
 - `codex exec --json` worker 的真实事件粒度可能与 runner 期望不完全一致，需要以本机实测校准映射。
 - 大量并发 worker 可能触发资源、速率或外部 provider 限制，必须保留 `maxConcurrency` 和 retry 上限。
-- source provider 的可用性会随环境变化，v0 应允许 partial report。
+- source provider 的可用性会随环境变化，later phases 应支持 partial report；v0 skeleton 不承诺 partial report。
 - prompt envelope 脱敏规则必须保守，避免把私有仓库正文或 secret 默认落盘。
 - report verifier 不能只做格式检查，必须检查 source id、claim decision 和正文引用的一致性。
 

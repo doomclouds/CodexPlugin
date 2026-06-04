@@ -206,9 +206,9 @@ Runs are written to:
 
 The main files are:
 
+- `manifest.json`
 - `status.json`
 - `events.jsonl`
-- `tasks.jsonl`
 - `report.md`
 - `report.summary.md`
 - `report.sources.md`
