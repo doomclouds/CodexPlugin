@@ -15,6 +15,7 @@ export interface DeepResearchRunInput {
 
 export async function runDeepResearch(input: DeepResearchRunInput): Promise<void> {
   const status = await input.store.readStatus(input.manifest.runId);
+  const outputDir = await input.store.getRunDir(input.manifest.runId);
   const runtime: WorkflowRuntime = {
     store: input.store,
     runId: input.manifest.runId,
@@ -22,36 +23,49 @@ export async function runDeepResearch(input: DeepResearchRunInput): Promise<void
     worker: input.worker,
   };
 
-  await phase(runtime, "planning");
-  const scope = ScopeSchema.parse(
-    await agent(runtime, {
-      label: "scope",
-      schemaName: "ScopeSchema",
-      prompt:
-        `Decompose this research question into 3-6 complementary search angles.\n\n` +
-        `Question: ${input.manifest.question}\n\nReturn structured JSON only.`,
-    }),
-  );
+  try {
+    await phase(runtime, "planning");
+    const scope = ScopeSchema.parse(
+      await agent(runtime, {
+        label: "scope",
+        schemaName: "ScopeSchema",
+        prompt:
+          `Decompose this research question into 3-6 complementary search angles.\n\n` +
+          `Question: ${input.manifest.question}\n\nReturn structured JSON only.`,
+      }),
+    );
 
-  runtime.status.research.angles = scope.angles.length;
-  await input.store.writeStatus(runtime.status);
-  await writeCheckpoint(input.manifest.outputDir, "001-scope", scope);
+    runtime.status.research.angles = scope.angles.length;
+    await input.store.writeStatus(runtime.status);
+    await writeCheckpoint(input.store, input.manifest.runId, "001-scope", scope);
 
-  await phase(runtime, "synthesizing");
-  const reportPath = join(input.manifest.outputDir, "report.md");
-  const summaryPath = join(input.manifest.outputDir, "report.summary.md");
-  await writeFile(
-    reportPath,
-    `# ${input.manifest.question}\n\n## 摘要\n\n${scope.summary}\n\n## Search Angles\n\n${scope.angles
-      .map((angle) => `- ${angle.label}: ${angle.query}`)
-      .join("\n")}\n`,
-    "utf8",
-  );
-  await writeFile(summaryPath, scope.summary + "\n", "utf8");
+    await phase(runtime, "synthesizing");
+    const reportPath = join(outputDir, "report.md");
+    const summaryPath = join(outputDir, "report.summary.md");
+    await writeFile(
+      reportPath,
+      `# ${input.manifest.question}\n\n## 摘要\n\n${scope.summary}\n\n## Search Angles\n\n${scope.angles
+        .map((angle) => `- ${angle.label}: ${angle.query}`)
+        .join("\n")}\n`,
+      "utf8",
+    );
+    await writeFile(summaryPath, scope.summary + "\n", "utf8");
 
-  await phase(runtime, "completed");
-  runtime.status.state = "completed";
-  runtime.status.output = { reportPath, summaryPath };
-  await input.store.writeStatus(runtime.status);
-  await input.store.emit(input.manifest.runId, { type: "report.written", message: reportPath });
+    runtime.status.phase = "completed";
+    runtime.status.state = "completed";
+    runtime.status.output = { reportPath, summaryPath };
+    await input.store.writeStatus(runtime.status);
+    await input.store.emit(input.manifest.runId, { type: "phase.started", phase: "completed", message: "completed" });
+    await input.store.emit(input.manifest.runId, { type: "report.written", message: reportPath });
+  } catch (error) {
+    runtime.status.state = "failed";
+    await input.store.writeStatus(runtime.status).catch(() => undefined);
+    await input.store
+      .emit(input.manifest.runId, {
+        type: "run.failed",
+        message: error instanceof Error ? error.message : String(error),
+      })
+      .catch(() => undefined);
+    throw error;
+  }
 }

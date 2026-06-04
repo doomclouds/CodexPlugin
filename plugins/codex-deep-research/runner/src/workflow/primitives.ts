@@ -18,25 +18,58 @@ export async function phase(runtime: WorkflowRuntime, phaseName: RunStatus["phas
 
 export async function agent<T>(runtime: WorkflowRuntime, task: WorkerTask): Promise<T> {
   runtime.status.progress.running += 1;
-  await runtime.store.writeStatus(runtime.status);
-  await runtime.store.emit(runtime.runId, { type: "task.started", taskId: task.label, message: task.label });
+  let result!: T;
+  let hasResult = false;
+  let workerError: unknown;
+  let emitError: unknown;
+  let statusError: unknown;
+
   try {
-    const result = await runtime.worker.run<T>(task);
-    runtime.status.progress.completed += 1;
-    await runtime.store.emit(runtime.runId, { type: "task.completed", taskId: task.label, message: task.label });
-    return result;
+    await runtime.store.writeStatus(runtime.status);
+    await runtime.store.emit(runtime.runId, { type: "task.started", taskId: task.label, message: task.label });
+
+    try {
+      result = await runtime.worker.run<T>(task);
+      hasResult = true;
+      runtime.status.progress.completed += 1;
+      await runtime.store
+        .emit(runtime.runId, { type: "task.completed", taskId: task.label, message: task.label })
+        .catch((error: unknown) => {
+          emitError = error;
+        });
+    } catch (error) {
+      workerError = error;
+      runtime.status.progress.failed += 1;
+      await runtime.store
+        .emit(runtime.runId, {
+          type: "task.failed",
+          taskId: task.label,
+          message: error instanceof Error ? error.message : String(error),
+        })
+        .catch(() => undefined);
+    }
   } catch (error) {
-    runtime.status.progress.failed += 1;
-    await runtime.store.emit(runtime.runId, {
-      type: "task.failed",
-      taskId: task.label,
-      message: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
+    emitError = error;
   } finally {
     runtime.status.progress.running -= 1;
-    await runtime.store.writeStatus(runtime.status);
+    await runtime.store.writeStatus(runtime.status).catch((error: unknown) => {
+      statusError = error;
+    });
   }
+
+  if (workerError !== undefined) {
+    throw workerError;
+  }
+  if (emitError !== undefined) {
+    throw emitError;
+  }
+  if (statusError !== undefined) {
+    throw statusError;
+  }
+  if (!hasResult) {
+    throw new Error(`Worker task did not return a result: ${task.label}`);
+  }
+  return result;
 }
 
 export async function parallel<T>(tasks: Array<() => Promise<T>>, concurrency: number): Promise<T[]> {

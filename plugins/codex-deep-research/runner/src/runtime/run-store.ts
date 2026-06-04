@@ -96,6 +96,11 @@ export class RunStore {
     });
   }
 
+  async getRunDir(runId: string): Promise<string> {
+    await this.readManifest(runId);
+    return this.resolveRunDir(runId);
+  }
+
   private async createRunDirectory(): Promise<{ runId: string; outputDir: string }> {
     const baseRunId = createRunId();
     await mkdir(this.runsDir(), { recursive: true });
