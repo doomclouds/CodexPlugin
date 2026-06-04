@@ -51,15 +51,17 @@ export const VerdictSchema = z.object({
 
 export const ReportSchema = z.object({
   summary: z.string().min(1),
-  findings: z.array(
-    z.object({
-      claim: z.string().min(1),
-      confidence: z.enum(["high", "medium", "low"]),
-      sources: z.array(z.string().min(1)),
-      evidence: z.string().min(1),
-      vote: z.string().optional(),
-    }),
-  ),
+  findings: z
+    .array(
+      z.object({
+        claim: z.string().min(1),
+        confidence: z.enum(["high", "medium", "low"]),
+        sources: z.array(z.string().min(1)).min(1),
+        evidence: z.string().min(1),
+        vote: z.string().optional(),
+      }),
+    )
+    .min(1),
   caveats: z.string().min(1),
   openQuestions: z.array(z.string()).default([]),
 });

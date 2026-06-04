@@ -1,5 +1,5 @@
 export function createRunId(now = new Date()): string {
-  const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const stamp = now.toISOString().replace(/[-:.]/g, "");
   return `dr_${stamp}`;
 }
 
