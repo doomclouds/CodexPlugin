@@ -281,6 +281,53 @@ describe("runDeepResearch", () => {
     }
   });
 
+  it("does not overwrite cancellation marker written just before final completion status", async () => {
+    const root = await mkdtemp(join(tmpdir(), "cdr-flow-final-cancel-"));
+    const store = new RunStore(root);
+    const manifest = await store.createRun({
+      question: "Should final-boundary cancellation win over completion?",
+      workspace: root,
+      mode: "mixed",
+      depth: "standard",
+      maxConcurrency: 2,
+      maxTasks: 20,
+      debugPrompts: false,
+    });
+    const worker = new FakeWorkerClient([
+      {
+        question: manifest.question,
+        summary: "Final cancellation should remain terminal.",
+        angles: [
+          { label: "cancel", query: "final cancel", rationale: "Race" },
+          { label: "completion", query: "completion write", rationale: "Boundary" },
+          { label: "status", query: "cancelled terminal", rationale: "Regression" },
+        ],
+      },
+    ]);
+    const originalWriteStatus = store.writeStatus.bind(store);
+    let injected = false;
+    store.writeStatus = async (status) => {
+      if (!injected && status.state === "completed") {
+        injected = true;
+        await writeFile(join(manifest.outputDir, "cancel.requested"), new Date().toISOString() + "\n", "utf8");
+      }
+      await originalWriteStatus(status);
+    };
+
+    try {
+      await expect(runDeepResearch({ manifest, store, worker })).resolves.toBeUndefined();
+      const status = await store.readStatus(manifest.runId);
+      expect(status.state).toBe("cancelled");
+      expect(status.phase).not.toBe("completed");
+      expect(status.output).toBeUndefined();
+      const eventsRaw = await readFile(join(manifest.outputDir, "events.jsonl"), "utf8");
+      expect(eventsRaw).not.toContain('"phase":"completed"');
+      expect(eventsRaw).not.toContain('"type":"report.written"');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("marks the run failed when worker output does not match the workflow schema", async () => {
     const root = await mkdtemp(join(tmpdir(), "cdr-flow-"));
     const store = new RunStore(root);

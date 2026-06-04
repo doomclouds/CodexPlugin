@@ -81,8 +81,38 @@ export class RunStore {
 
   async writeStatus(status: RunStatus): Promise<void> {
     await this.readManifest(status.runId);
-    const updated: RunStatus = { ...status, updatedAt: new Date().toISOString() };
-    await writeFile(join(this.resolveRunDir(status.runId), "status.json"), JSON.stringify(updated, null, 2), "utf8");
+    const current = await this.readStatus(status.runId);
+    if (status.state === "completed") {
+      if (current.state === "cancelled") {
+        return;
+      }
+      if (current.state !== "completed" && (await this.isCancellationRequested(status.runId))) {
+        await this.writeStatusFile(this.asCancelledStatus(current));
+        return;
+      }
+    }
+    await this.writeStatusFile(status);
+  }
+
+  async writeCompletionStatus(status: RunStatus): Promise<boolean> {
+    if (status.state !== "completed") {
+      throw new Error(`Completion status must be completed, got ${status.state}`);
+    }
+
+    await this.readManifest(status.runId);
+    const current = await this.readStatus(status.runId);
+    if (
+      current.state === "cancelled" ||
+      (current.state !== "completed" && (await this.isCancellationRequested(status.runId)))
+    ) {
+      if (current.state !== "cancelled") {
+        await this.writeStatus(this.asCancelledStatus(current));
+      }
+      return false;
+    }
+
+    await this.writeStatus(status);
+    return (await this.readStatus(status.runId)).state === "completed";
   }
 
   async emit(runId: string, event: Omit<WorkflowEvent, "at" | "runId">): Promise<void> {
@@ -141,6 +171,20 @@ export class RunStore {
 
   private async resolveRunFile(runId: string, fileName: string): Promise<string> {
     return join(this.resolveRunDir(runId), fileName);
+  }
+
+  private async writeStatusFile(status: RunStatus): Promise<void> {
+    const updated: RunStatus = { ...status, updatedAt: new Date().toISOString() };
+    await writeFile(join(this.resolveRunDir(status.runId), "status.json"), JSON.stringify(updated, null, 2), "utf8");
+  }
+
+  private asCancelledStatus(status: RunStatus): RunStatus {
+    return {
+      ...status,
+      state: "cancelled",
+      progress: { ...status.progress, running: 0 },
+      lastEvents: [...status.lastEvents.slice(-9), "Run cancelled"],
+    };
   }
 
   private resolveRunDir(runId: string): string {

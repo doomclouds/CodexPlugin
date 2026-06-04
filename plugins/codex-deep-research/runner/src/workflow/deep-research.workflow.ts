@@ -87,7 +87,9 @@ export async function runDeepResearch(input: DeepResearchRunInput): Promise<void
     runtime.status.phase = "completed";
     runtime.status.state = "completed";
     runtime.status.output = { reportPath, summaryPath, sourcesPath };
-    await input.store.writeStatus(runtime.status);
+    if (!(await input.store.writeCompletionStatus(runtime.status))) {
+      return;
+    }
     await input.store
       .emit(input.manifest.runId, { type: "phase.started", phase: "completed", message: "completed" })
       .catch(() => undefined);
