@@ -48,7 +48,7 @@ Create:
 - `plugins/codex-deep-research/runner/src/runtime/scheduler.ts`：bounded concurrency。
 - `plugins/codex-deep-research/runner/src/runtime/checkpoint.ts`：checkpoint 保存和恢复。
 - `plugins/codex-deep-research/runner/src/workflow/schemas.ts`：Zod schemas。
-- `plugins/codex-deep-research/runner/src/workflow/primitives.ts`：`phase/agent/parallel/pipeline/checkpoint/emit`。
+- `plugins/codex-deep-research/runner/src/workflow/primitives.ts`：v0 exports `phase/agent/parallel`; later phases add `pipeline/checkpoint/emit` as needed.
 - `plugins/codex-deep-research/runner/src/workflow/deep-research.workflow.ts`：v0 workflow。
 - `plugins/codex-deep-research/runner/src/workers/worker-client.ts`：worker 接口。
 - `plugins/codex-deep-research/runner/src/workers/codex-exec-worker.ts`：`codex exec --json` worker。
@@ -162,7 +162,7 @@ Create `plugins/codex-deep-research/.codex-plugin/plugin.json`:
   "interface": {
     "displayName": "Codex Deep Research",
     "shortDescription": "Run async multi-agent research workflows from Codex.",
-    "longDescription": "Launch bounded-concurrency deep research runs that decompose questions, collect sources, extract claims, verify them adversarially, and write cited Markdown reports with auditable state files.",
+    "longDescription": "Launch v0 skeleton deep research runs that create a run directory and write Markdown report skeletons with source placeholders; cited reports, full search, extraction, verification, and structured state files are planned for later phases.",
     "developerName": "doomclouds",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
@@ -188,12 +188,12 @@ Create `plugins/codex-deep-research/README.md`:
 ## Commands
 
 ```text
-codex-deep-research start "<question>"
-codex-deep-research status <run_id>
-codex-deep-research watch <run_id>
-codex-deep-research report <run_id>
-codex-deep-research cancel <run_id>
-codex-deep-research list
+npm --prefix plugins\codex-deep-research run dev -- start "<question>"
+npm --prefix plugins\codex-deep-research run dev -- status <run_id>
+npm --prefix plugins\codex-deep-research run dev -- watch <run_id>
+npm --prefix plugins\codex-deep-research run dev -- report <run_id>
+npm --prefix plugins\codex-deep-research run dev -- cancel <run_id>
+npm --prefix plugins\codex-deep-research run dev -- list
 ```
 
 ## Output
@@ -206,17 +206,16 @@ Runs are written to:
 
 The main files are:
 
+- `manifest.json`
 - `status.json`
 - `events.jsonl`
-- `tasks.jsonl`
 - `report.md`
 - `report.summary.md`
 - `report.sources.md`
-- `report.audit.json`
 
 ## Privacy
 
-Prompt envelopes are redacted by default. Use `--debug-prompts` only when you explicitly want full prompt capture for local debugging.
+`--debug-prompts` is recorded in `manifest.json` only in v0. Prompt envelope capture is later-phase work; when it exists, full prompt capture must require an explicit debug setting.
 ```
 
 - [ ] **Step 5: Update gitignore**
@@ -232,9 +231,8 @@ Append to `.gitignore` if not already present:
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm install
-npm run typecheck
+npm --prefix plugins\codex-deep-research install
+npm --prefix plugins\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -300,8 +298,7 @@ describe("jsonl", () => {
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test -- runner/tests/jsonl.test.ts
+npm --prefix plugins\codex-deep-research test -- runner/tests/jsonl.test.ts
 ```
 
 Expected:
@@ -595,9 +592,8 @@ export const ReportSchema = z.object({
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test -- runner/tests/jsonl.test.ts runner/tests/schemas.test.ts
-npm run typecheck
+npm --prefix plugins\codex-deep-research test -- runner/tests/jsonl.test.ts runner/tests/schemas.test.ts
+npm --prefix plugins\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -669,8 +665,7 @@ describe("RunStore", () => {
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test -- runner/tests/run-store.test.ts
+npm --prefix plugins\codex-deep-research test -- runner/tests/run-store.test.ts
 ```
 
 Expected:
@@ -789,9 +784,8 @@ export class RunStore {
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test -- runner/tests/run-store.test.ts
-npm run typecheck
+npm --prefix plugins\codex-deep-research test -- runner/tests/run-store.test.ts
+npm --prefix plugins\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -1052,9 +1046,8 @@ function redactValue(value: unknown): unknown {
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test -- runner/tests/scheduler.test.ts runner/tests/prompt-builder.test.ts
-npm run typecheck
+npm --prefix plugins\codex-deep-research test -- runner/tests/scheduler.test.ts runner/tests/prompt-builder.test.ts
+npm --prefix plugins\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -1220,9 +1213,8 @@ function parseLastJsonObject(stdout: string): unknown {
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test -- runner/tests/fake-worker.test.ts
-npm run typecheck
+npm --prefix plugins\codex-deep-research test -- runner/tests/fake-worker.test.ts
+npm --prefix plugins\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -1437,9 +1429,8 @@ export async function runDeepResearch(input: DeepResearchRunInput): Promise<void
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test -- runner/tests/deep-research.workflow.test.ts
-npm run typecheck
+npm --prefix plugins\codex-deep-research test -- runner/tests/deep-research.workflow.test.ts
+npm --prefix plugins\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -1498,7 +1489,7 @@ program
   .option("--depth <depth>", "quick|standard|deep", "standard")
   .option("--max-concurrency <n>", "maximum concurrent workers", "8")
   .option("--max-tasks <n>", "maximum logical tasks", "120")
-  .option("--debug-prompts", "save full prompt envelopes", false)
+  .option("--debug-prompts", "reserved prompt capture manifest flag", false)
   .action(startCommand);
 
 program.command("run").argument("<runId>").action(runCommand);
@@ -1643,9 +1634,8 @@ export async function watchCommand(runId: string): Promise<void> {
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run typecheck
-npm run build
+npm --prefix plugins\codex-deep-research run typecheck
+npm --prefix plugins\codex-deep-research run build
 ```
 
 Expected:
@@ -1662,8 +1652,7 @@ Both commands exit with code `0`.
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-node dist/cli.js list
+npm --prefix plugins\codex-deep-research run dev -- list
 ```
 
 Expected:
@@ -1787,41 +1776,36 @@ Use this skill when the user asks for deep research, dynamic workflow research, 
 
 ## Commands
 
-Use the plugin runner from `plugins/codex-deep-research`.
+Use the plugin runner from the caller workspace root.
 
 Start:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- start "<question>"
+npm --prefix plugins\codex-deep-research run dev -- start "<question>"
 ```
 
 Status:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- status <run_id>
+npm --prefix plugins\codex-deep-research run dev -- status <run_id>
 ```
 
 Watch:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- watch <run_id>
+npm --prefix plugins\codex-deep-research run dev -- watch <run_id>
 ```
 
 Report:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- report <run_id>
+npm --prefix plugins\codex-deep-research run dev -- report <run_id>
 ```
 
 Cancel:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- cancel <run_id>
+npm --prefix plugins\codex-deep-research run dev -- cancel <run_id>
 ```
 
 ## Behavior
@@ -1829,7 +1813,7 @@ npm run dev -- cancel <run_id>
 - Start returns a `run_id`.
 - Full reports are written to `.codex-deep-research/runs/<run_id>/report.md`.
 - Chat responses should summarize status and provide the report path instead of pasting full reports by default.
-- Prompt envelopes are redacted unless `--debug-prompts` is explicitly requested.
+- `--debug-prompts` is a reserved prompt-capture setting recorded in `manifest.json`; v0 does not save prompt envelopes.
 ```
 
 - [ ] **Step 5: Update README with skill usage**
@@ -1843,9 +1827,9 @@ Append to `plugins/codex-deep-research/README.md`:
 The plugin includes a `deep-research` skill. In Codex, use it to start and inspect runs:
 
 ```text
-@codex-deep-research start "your research question"
-@codex-deep-research status <run_id>
-@codex-deep-research report <run_id>
+npm --prefix plugins\codex-deep-research run dev -- start "your research question"
+npm --prefix plugins\codex-deep-research run dev -- status <run_id>
+npm --prefix plugins\codex-deep-research run dev -- report <run_id>
 ```
 ```
 
@@ -1854,10 +1838,9 @@ The plugin includes a `deep-research` skill. In Codex, use it to start and inspe
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test
-npm run typecheck
-npm run build
+npm --prefix plugins\codex-deep-research test
+npm --prefix plugins\codex-deep-research run typecheck
+npm --prefix plugins\codex-deep-research run build
 ```
 
 Expected:
@@ -1873,19 +1856,15 @@ and both typecheck/build exit with code `0`.
 Run from repository root:
 
 ```powershell
-Set-Location C:\WorkSpace\ResearchProjects\CodexPlugin
-git status --short
+npm --prefix plugins\codex-deep-research run dev -- list
 ```
 
 Expected:
 
 ```text
- M .gitignore
-?? plugins/codex-deep-research/
-?? docs/superpowers/plans/2026-06-04-codex-deep-research-implementation-plan.md
 ```
 
-Other pre-existing untracked files such as `.claude/` may still appear and must not be removed unless the user explicitly asks.
+An empty list is acceptable when no runs exist. Review the working tree separately before committing, but do not rely on stale sample status output from before the implementation was committed.
 
 - [ ] **Step 8: Git checkpoint**
 
