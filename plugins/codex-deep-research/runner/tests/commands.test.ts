@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cancelCommand } from "../src/commands/cancel.js";
@@ -220,6 +221,41 @@ describe("watchCommand", () => {
     await watch;
 
     expect(logSpy.mock.calls.map((call) => call[0]).join("\n")).toContain("test.appended");
+
+    await rm(workspace, { recursive: true, force: true });
+    await rm(pluginCwd, { recursive: true, force: true });
+  });
+
+  it("drains an event appended just after terminal status is observed", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "cdr-watch-terminal-drain-workspace-"));
+    const pluginCwd = await mkdtemp(join(tmpdir(), "cdr-watch-terminal-drain-plugin-"));
+    process.env.INIT_CWD = workspace;
+    vi.spyOn(process, "cwd").mockReturnValue(pluginCwd);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const store = new RunStore(workspace);
+    const manifest = await store.createRun({
+      question: "Should watch drain final events?",
+      workspace,
+      mode: "mixed",
+      depth: "standard",
+      maxConcurrency: 8,
+      maxTasks: 120,
+      debugPrompts: false,
+    });
+    await store.writeStatus({ ...(await store.readStatus(manifest.runId)), state: "completed", phase: "completed" });
+
+    const watch = watchCommand(manifest.runId, { pollIntervalMs: 20 });
+    await setTimeout(1);
+    await appendFile(
+      join(manifest.outputDir, "events.jsonl"),
+      JSON.stringify({ runId: manifest.runId, type: "test.final", at: new Date().toISOString() }) + "\n",
+      "utf8",
+    );
+
+    await watch;
+
+    expect(logSpy.mock.calls.map((call) => call[0]).join("\n")).toContain("test.final");
 
     await rm(workspace, { recursive: true, force: true });
     await rm(pluginCwd, { recursive: true, force: true });

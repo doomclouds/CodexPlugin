@@ -7,7 +7,6 @@
 Installed plugin usage from the caller workspace root:
 
 ```powershell
-node "<installed-plugin-root>\scripts\run.mjs" start "<question>"
 node "<installed-plugin-root>\scripts\run.mjs" status <run_id>
 node "<installed-plugin-root>\scripts\run.mjs" watch <run_id>
 node "<installed-plugin-root>\scripts\run.mjs" report <run_id>
@@ -17,7 +16,7 @@ node "<installed-plugin-root>\scripts\run.mjs" list
 
 `<installed-plugin-root>` is the directory that contains this plugin's `.codex-plugin`, `skills`, and `scripts` folders. The wrapper preserves the caller workspace through `INIT_CWD`, so run outputs stay under the workspace where the command was launched.
 
-The v0 wrapper is dependency-free, but the runner itself must exist in the plugin copy. It uses `dist/cli.js` when built, or the repository checkout's local `tsx` dev dependency when available. If neither exists, the wrapper exits with setup instructions instead of pretending the installed cache is runnable.
+The v0 wrapper is dependency-free for `list`, `status`, `watch`, `report`, and `cancel`, so a clean installed cache copy can inspect and manage existing runs without `dist/` or `node_modules/`. `start` and `run` still require `dist/cli.js` or the repository checkout's local `tsx` dev dependency; if neither exists, the wrapper exits with setup instructions.
 
 Repository development usage from this repository root:
 
@@ -64,7 +63,7 @@ The main files are:
 The plugin includes a `deep-research` skill. In Codex, use it to start and inspect runs:
 
 ```text
-node "<installed-plugin-root>\scripts\run.mjs" start "your research question"
+node "<installed-plugin-root>\scripts\run.mjs" list
 node "<installed-plugin-root>\scripts\run.mjs" status <run_id>
 node "<installed-plugin-root>\scripts\run.mjs" report <run_id>
 ```

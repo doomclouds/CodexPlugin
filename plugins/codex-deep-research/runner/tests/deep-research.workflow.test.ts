@@ -230,6 +230,57 @@ describe("runDeepResearch", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it("does not overwrite cancellation requested after report files are written", async () => {
+    const root = await mkdtemp(join(tmpdir(), "cdr-flow-late-cancel-"));
+    const store = new RunStore(root);
+    const manifest = await store.createRun({
+      question: "Should late cancellation win over completion?",
+      workspace: root,
+      mode: "mixed",
+      depth: "standard",
+      maxConcurrency: 2,
+      maxTasks: 20,
+      debugPrompts: false,
+    });
+    const worker = new FakeWorkerClient([
+      {
+        question: manifest.question,
+        summary: "Late cancellation should remain terminal.",
+        angles: [
+          { label: "cancel", query: "late cancel", rationale: "Race" },
+          { label: "report", query: "report write", rationale: "Boundary" },
+          { label: "status", query: "terminal status", rationale: "Regression" },
+        ],
+      },
+    ]);
+    const originalIsCancellationRequested = store.isCancellationRequested.bind(store);
+    store.isCancellationRequested = async (runId) => {
+      const reportExists = await readFile(join(manifest.outputDir, "report.md"), "utf8")
+        .then(() => true)
+        .catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") {
+            return false;
+          }
+          throw error;
+        });
+      if (reportExists) {
+        await writeFile(join(manifest.outputDir, "cancel.requested"), new Date().toISOString() + "\n", "utf8");
+      }
+      return await originalIsCancellationRequested(runId);
+    };
+
+    try {
+      await expect(runDeepResearch({ manifest, store, worker })).resolves.toBeUndefined();
+      const status = await store.readStatus(manifest.runId);
+      expect(status.state).toBe("cancelled");
+      expect(status.output).toBeUndefined();
+      const eventsRaw = await readFile(join(manifest.outputDir, "events.jsonl"), "utf8");
+      expect(eventsRaw).toContain("run.cancelled");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("marks the run failed when worker output does not match the workflow schema", async () => {
     const root = await mkdtemp(join(tmpdir(), "cdr-flow-"));
     const store = new RunStore(root);

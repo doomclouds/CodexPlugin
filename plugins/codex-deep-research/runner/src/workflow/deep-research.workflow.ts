@@ -81,6 +81,9 @@ export async function runDeepResearch(input: DeepResearchRunInput): Promise<void
       sources: [],
     });
 
+    if (await stopIfCancellationRequested(runtime)) {
+      return;
+    }
     runtime.status.phase = "completed";
     runtime.status.state = "completed";
     runtime.status.output = { reportPath, summaryPath, sourcesPath };

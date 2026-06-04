@@ -10,6 +10,7 @@ const TERMINAL_STATES = new Set<RunState>(["completed", "partial", "failed", "ca
 export interface WatchOptions {
   follow?: boolean;
   pollIntervalMs?: number;
+  terminalDrainMs?: number;
 }
 
 async function readEvents(path: string): Promise<Buffer> {
@@ -40,6 +41,7 @@ function printNewLines(buffer: Buffer, offset: number): { nextOffset: number; pr
 export async function watchCommand(runId: string, options: WatchOptions = {}): Promise<void> {
   const follow = options.follow ?? true;
   const pollIntervalMs = options.pollIntervalMs ?? 1000;
+  const terminalDrainMs = options.terminalDrainMs ?? Math.min(pollIntervalMs, 50);
   const store = new RunStore(resolveWorkspaceRoot());
   const outputDir = await store.getRunDir(runId);
   const eventsPath = join(outputDir, "events.jsonl");
@@ -53,7 +55,14 @@ export async function watchCommand(runId: string, options: WatchOptions = {}): P
     printed = printed || result.printed;
 
     const status = await store.readStatus(runId);
-    if (!follow || TERMINAL_STATES.has(status.state)) {
+    if (!follow) {
+      break;
+    }
+    if (TERMINAL_STATES.has(status.state)) {
+      await setTimeout(terminalDrainMs);
+      const finalEvents = await readEvents(eventsPath);
+      const finalResult = printNewLines(finalEvents, offset);
+      printed = printed || finalResult.printed;
       break;
     }
 

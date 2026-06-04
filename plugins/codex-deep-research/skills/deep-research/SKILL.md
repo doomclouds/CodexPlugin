@@ -11,13 +11,15 @@ Use this skill when the user asks for deep research, dynamic workflow research, 
 
 Run these commands from the caller workspace root. Resolve `<plugin-root>` to the installed plugin directory that contains this `SKILL.md` under `skills\deep-research\SKILL.md`, then use its dependency-free wrapper at `scripts\run.mjs`.
 
-The wrapper preserves the caller workspace through `INIT_CWD`. If the installed plugin copy does not contain `dist\cli.js` or repository development dependencies, it exits with setup instructions; v0 does not pretend an unbuilt cache copy is runnable.
+The wrapper preserves the caller workspace through `INIT_CWD`. In a clean installed plugin copy, `list`, `status`, `watch`, `report`, and `cancel` are dependency-free. `start` and `run` still require `dist\cli.js` or repository development dependencies; when those are missing, the wrapper exits with setup instructions.
 
 Start:
 
 ```powershell
 node "<plugin-root>\scripts\run.mjs" start "<question>"
 ```
+
+Use `start` only when this plugin copy has a built runner or repository development dependencies available.
 
 Status:
 
