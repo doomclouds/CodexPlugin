@@ -9,46 +9,42 @@ Use this skill when the user asks for deep research, dynamic workflow research, 
 
 ## Commands
 
-Use the plugin runner from `plugins/codex-deep-research`.
+Run these commands from the caller workspace root. `npm --prefix` invokes the plugin package while preserving the caller workspace through `INIT_CWD`.
 
 Start:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- start "<question>"
+npm --prefix plugins\codex-deep-research run dev -- start "<question>"
 ```
 
 Status:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- status <run_id>
+npm --prefix plugins\codex-deep-research run dev -- status <run_id>
 ```
 
 Watch:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- watch <run_id>
+npm --prefix plugins\codex-deep-research run dev -- watch <run_id>
 ```
 
 Report:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- report <run_id>
+npm --prefix plugins\codex-deep-research run dev -- report <run_id>
 ```
 
 Cancel:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- cancel <run_id>
+npm --prefix plugins\codex-deep-research run dev -- cancel <run_id>
 ```
 
 ## Behavior
 
 - Start returns a `run_id`.
+- The runner writes runs under the caller workspace, using `INIT_CWD` when invoked with `npm --prefix`.
 - Full reports are written to `.codex-deep-research/runs/<run_id>/report.md`.
 - Chat responses should summarize status and provide the report path instead of pasting full reports by default.
 - Prompt envelopes are redacted unless `--debug-prompts` is explicitly requested.

@@ -89,11 +89,15 @@ describe("runDeepResearch", () => {
     expect(status.progress).toEqual({ queued: 0, running: 0, completed: 1, failed: 0, skipped: 0 });
     expect(status.research.angles).toBe(3);
     expect(status.output?.reportPath).toContain("report.md");
+    expect(status.output?.sourcesPath).toContain("report.sources.md");
     await expect(readFile(join(manifest.outputDir, "checkpoints", "001-scope.json"), "utf8")).resolves.toContain(
       "official docs",
     );
     await expect(readFile(join(manifest.outputDir, "report.md"), "utf8")).resolves.toContain(
-      "- skeptical: limitations",
+      "skeptical: limitations",
+    );
+    await expect(readFile(join(manifest.outputDir, "report.sources.md"), "utf8")).resolves.toContain(
+      "No sources were collected",
     );
 
     await rm(root, { recursive: true, force: true });
@@ -172,14 +176,19 @@ describe("runDeepResearch", () => {
 
     const status = await store.readStatus(manifest.runId);
     expect(status.output?.reportPath).toBe(join(manifest.outputDir, "report.md"));
+    expect(status.output?.sourcesPath).toBe(join(manifest.outputDir, "report.sources.md"));
     await expect(readFile(join(manifest.outputDir, "checkpoints", "001-scope.json"), "utf8")).resolves.toContain(
       "run store",
     );
-    await expect(readFile(join(manifest.outputDir, "report.md"), "utf8")).resolves.toContain("- report: report path");
+    await expect(readFile(join(manifest.outputDir, "report.md"), "utf8")).resolves.toContain("report: report path");
+    await expect(readFile(join(manifest.outputDir, "report.sources.md"), "utf8")).resolves.toContain(
+      "No sources were collected",
+    );
     await expect(readFile(join(outsideDir, "checkpoints", "001-scope.json"), "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });
     await expect(readFile(join(outsideDir, "report.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(outsideDir, "report.sources.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 
     await rm(root, { recursive: true, force: true });
   });

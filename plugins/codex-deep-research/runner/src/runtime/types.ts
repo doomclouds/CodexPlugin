@@ -58,6 +58,7 @@ export interface RunStatus {
   output?: {
     reportPath?: string;
     summaryPath?: string;
+    sourcesPath?: string;
   };
 }
 

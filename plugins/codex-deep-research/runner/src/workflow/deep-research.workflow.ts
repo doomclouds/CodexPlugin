@@ -1,11 +1,10 @@
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { RunManifest } from "../runtime/types.js";
 import type { RunStore } from "../runtime/run-store.js";
 import type { WorkerClient } from "../workers/worker-client.js";
 import { ScopeSchema } from "./schemas.js";
 import { agent, phase, type WorkflowRuntime } from "./primitives.js";
 import { writeCheckpoint } from "../runtime/checkpoint.js";
+import { writeReports } from "../report/report-writer.js";
 
 export interface DeepResearchRunInput {
   manifest: RunManifest;
@@ -42,20 +41,17 @@ export async function runDeepResearch(input: DeepResearchRunInput): Promise<void
     await writeCheckpoint(input.store, input.manifest.runId, "001-scope", scope);
 
     await phase(runtime, "synthesizing");
-    const reportPath = join(outputDir, "report.md");
-    const summaryPath = join(outputDir, "report.summary.md");
-    await writeFile(
-      reportPath,
-      `# ${input.manifest.question}\n\n## 摘要\n\n${scope.summary}\n\n## Search Angles\n\n${scope.angles
-        .map((angle) => `- ${angle.label}: ${angle.query}`)
-        .join("\n")}\n`,
-      "utf8",
-    );
-    await writeFile(summaryPath, scope.summary + "\n", "utf8");
+    const { reportPath, summaryPath, sourcesPath } = await writeReports({
+      outputDir,
+      question: input.manifest.question,
+      summary: scope.summary,
+      findings: scope.angles.map((angle) => `${angle.label}: ${angle.query}`),
+      sources: [],
+    });
 
     runtime.status.phase = "completed";
     runtime.status.state = "completed";
-    runtime.status.output = { reportPath, summaryPath };
+    runtime.status.output = { reportPath, summaryPath, sourcesPath };
     await input.store.writeStatus(runtime.status);
     await input.store
       .emit(input.manifest.runId, { type: "phase.started", phase: "completed", message: "completed" })
