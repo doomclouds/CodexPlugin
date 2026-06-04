@@ -162,7 +162,7 @@ Create `plugins/codex-deep-research/.codex-plugin/plugin.json`:
   "interface": {
     "displayName": "Codex Deep Research",
     "shortDescription": "Run async multi-agent research workflows from Codex.",
-    "longDescription": "Launch bounded-concurrency deep research runs that decompose questions, collect sources, extract claims, verify them adversarially, and write cited Markdown reports with auditable state files.",
+    "longDescription": "Launch v0 skeleton deep research runs that create a run directory and write cited Markdown reports; full search, extraction, verification, and structured state files are planned for later phases.",
     "developerName": "doomclouds",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
@@ -1652,7 +1652,7 @@ Both commands exit with code `0`.
 Run:
 
 ```powershell
-node plugins\codex-deep-research\dist\cli.js list
+npm --prefix plugins\codex-deep-research run dev -- list
 ```
 
 Expected:
@@ -1856,19 +1856,15 @@ and both typecheck/build exit with code `0`.
 Run from repository root:
 
 ```powershell
-Set-Location C:\WorkSpace\ResearchProjects\CodexPlugin
-git status --short
+npm --prefix plugins\codex-deep-research run dev -- list
 ```
 
 Expected:
 
 ```text
- M .gitignore
-?? plugins/codex-deep-research/
-?? docs/superpowers/plans/2026-06-04-codex-deep-research-implementation-plan.md
 ```
 
-Other pre-existing untracked files such as `.claude/` may still appear and must not be removed unless the user explicitly asks.
+An empty list is acceptable when no runs exist. Review the working tree separately before committing, but do not rely on stale sample status output from before the implementation was committed.
 
 - [ ] **Step 8: Git checkpoint**
 
