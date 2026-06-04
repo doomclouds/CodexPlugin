@@ -120,12 +120,12 @@ runner 中，便于命令行、skill 和未来 MCP 复用。
 Codex 内建议入口：
 
 ```text
-@codex-deep-research start "研究 Codex plugin 是否适合实现 deep research"
-@codex-deep-research status <run_id>
-@codex-deep-research watch <run_id>
-@codex-deep-research report <run_id>
-@codex-deep-research cancel <run_id>
-@codex-deep-research list
+npm --prefix plugins\codex-deep-research run dev -- start "研究 Codex plugin 是否适合实现 deep research"
+npm --prefix plugins\codex-deep-research run dev -- status <run_id>
+npm --prefix plugins\codex-deep-research run dev -- watch <run_id>
+npm --prefix plugins\codex-deep-research run dev -- report <run_id>
+npm --prefix plugins\codex-deep-research run dev -- cancel <run_id>
+npm --prefix plugins\codex-deep-research run dev -- list
 ```
 
 runner CLI 等价入口：

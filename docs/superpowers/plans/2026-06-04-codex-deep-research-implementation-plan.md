@@ -1843,9 +1843,9 @@ Append to `plugins/codex-deep-research/README.md`:
 The plugin includes a `deep-research` skill. In Codex, use it to start and inspect runs:
 
 ```text
-@codex-deep-research start "your research question"
-@codex-deep-research status <run_id>
-@codex-deep-research report <run_id>
+npm --prefix plugins\codex-deep-research run dev -- start "your research question"
+npm --prefix plugins\codex-deep-research run dev -- status <run_id>
+npm --prefix plugins\codex-deep-research run dev -- report <run_id>
 ```
 ```
 
