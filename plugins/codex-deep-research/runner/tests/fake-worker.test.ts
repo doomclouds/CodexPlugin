@@ -8,4 +8,12 @@ describe("FakeWorkerClient", () => {
       ok: true,
     });
   });
+
+  it("throws when no queued result is available", async () => {
+    const worker = new FakeWorkerClient([]);
+
+    await expect(worker.run({ label: "scope", prompt: "test", schemaName: "ScopeSchema" })).rejects.toThrow(
+      "FakeWorkerClient has no queued result",
+    );
+  });
 });
