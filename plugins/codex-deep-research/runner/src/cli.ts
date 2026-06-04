@@ -19,7 +19,7 @@ program
   .option("--depth <depth>", "quick|standard|deep", "standard")
   .option("--max-concurrency <n>", "maximum concurrent workers", "8")
   .option("--max-tasks <n>", "maximum logical tasks", "120")
-  .option("--debug-prompts", "save full prompt envelopes", false)
+  .option("--debug-prompts", "reserved prompt capture manifest flag", false)
   .action(startCommand);
 
 program.command("run").argument("<runId>").action(runCommand);

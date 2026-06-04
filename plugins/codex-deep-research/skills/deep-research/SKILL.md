@@ -47,4 +47,4 @@ npm --prefix plugins\codex-deep-research run dev -- cancel <run_id>
 - The runner writes runs under the caller workspace, using `INIT_CWD` when invoked with `npm --prefix`.
 - Full reports are written to `.codex-deep-research/runs/<run_id>/report.md`.
 - Chat responses should summarize status and provide the report path instead of pasting full reports by default.
-- Prompt envelopes are redacted unless `--debug-prompts` is explicitly requested.
+- `--debug-prompts` is a reserved prompt-capture setting recorded in `manifest.json`; v0 does not save prompt envelopes.

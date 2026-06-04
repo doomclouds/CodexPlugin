@@ -138,6 +138,8 @@ npm --prefix plugins\codex-deep-research run dev -- list
 --debug-prompts
 ```
 
+`--debug-prompts` 是 v0 保留的 manifest 设置；当前只记录 `debugPrompts`，不保存 prompt envelope。
+
 默认值：
 
 ```ts
@@ -838,12 +840,14 @@ FAILURE_MODE = "partial_report";
 
 ## Prompt Envelope 记录
 
-默认保存脱敏 `prompt_envelopes.jsonl`：
+Prompt envelope 记录是 later-phase 设计。v0 不生成 `prompt_envelopes.jsonl`，也不保存 prompt envelope；`--debug-prompts` 当前只作为 `manifest.json` 中的保留设置。
+
+later phases 引入该能力时，默认保存脱敏 `prompt_envelopes.jsonl`：
 
 - 保存 task id、role、persona、context refs、schema id、token budget；
 - 保存注入变量摘要；
 - 不保存完整网页正文、大段私有文件内容、疑似 secret；
-- `--debug-prompts` 才保存完整 prompt。
+- `--debug-prompts` 才作为显式完整 prompt 捕获开关。
 
 这能让 100+ worker 的运行过程可复盘，同时默认不扩大敏感数据落盘面。
 
@@ -884,7 +888,7 @@ FAILURE_MODE = "partial_report";
 - later phases 中，`report.md` 中每个事实性结论都能追溯到 source。
 - later phases 中，未 fetch 的 search result 不能进入正文引用。
 - later phases 中，`refuted` 和 `unverified` claim 不会进入正文，只能进入 appendix 或结构化复盘产物。
-- prompt envelope 默认脱敏保存，`--debug-prompts` 才保存完整 prompt。
+- v0 不保存 prompt envelope；`--debug-prompts` 只作为 later-phase prompt 捕获控制的 manifest 保留设置。
 - `.codex-deep-research/` 默认不污染 git。
 - 本地测试覆盖 schema、JSONL、run store、CLI、workflow skeleton、report writer 和路径约束。
 
@@ -905,6 +909,6 @@ FAILURE_MODE = "partial_report";
 - `codex exec --json` worker 的真实事件粒度可能与 runner 期望不完全一致，需要以本机实测校准映射。
 - 大量并发 worker 可能触发资源、速率或外部 provider 限制，必须保留 `maxConcurrency` 和 retry 上限。
 - source provider 的可用性会随环境变化，later phases 应支持 partial report；v0 skeleton 不承诺 partial report。
-- prompt envelope 脱敏规则必须保守，避免把私有仓库正文或 secret 默认落盘。
+- later-phase prompt envelope 脱敏规则必须保守，避免把私有仓库正文或 secret 默认落盘。
 - v0 report verifier 不能只做格式检查，必须覆盖 citation/source id/status skeleton；claim decision 和正文引用一致性留到 later phases。
 

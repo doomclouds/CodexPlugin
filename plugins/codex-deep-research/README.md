@@ -36,7 +36,7 @@ The main files are:
 
 ## Privacy
 
-Prompt envelopes are redacted by default. Use `--debug-prompts` only when you explicitly want full prompt capture for local debugging.
+`--debug-prompts` is reserved for later prompt capture work. In v0 it is recorded in `manifest.json` only; v0 does not save prompt envelopes.
 
 ## Codex Skill
 

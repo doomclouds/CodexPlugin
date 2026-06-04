@@ -116,6 +116,49 @@ describe("reportCommand", () => {
     await rm(pluginCwd, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
   });
+
+  it("fails clearly when report.md is missing", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "cdr-report-missing-workspace-"));
+    const pluginCwd = await mkdtemp(join(tmpdir(), "cdr-report-missing-plugin-"));
+    process.env.INIT_CWD = workspace;
+    vi.spyOn(process, "cwd").mockReturnValue(pluginCwd);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const store = new RunStore(workspace);
+    const manifest = await store.createRun({
+      question: "Should report require report.md?",
+      workspace,
+      mode: "mixed",
+      depth: "standard",
+      maxConcurrency: 8,
+      maxTasks: 120,
+      debugPrompts: false,
+    });
+    const status = await store.readStatus(manifest.runId);
+    await writeFile(join(manifest.outputDir, "report.summary.md"), "Real summary\n", "utf8");
+    await writeFile(
+      join(manifest.outputDir, "status.json"),
+      JSON.stringify(
+        {
+          ...status,
+          output: {
+            reportPath: join(manifest.outputDir, "report.md"),
+            summaryPath: join(manifest.outputDir, "report.summary.md"),
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    await expect(reportCommand(manifest.runId)).rejects.toThrow(
+      `Report file is missing for ${manifest.runId}: ${join(manifest.outputDir, "report.md")}`,
+    );
+
+    await rm(workspace, { recursive: true, force: true });
+    await rm(pluginCwd, { recursive: true, force: true });
+  });
 });
 
 describe("watchCommand", () => {
