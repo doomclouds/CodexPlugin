@@ -188,12 +188,12 @@ Create `plugins/codex-deep-research/README.md`:
 ## Commands
 
 ```text
-codex-deep-research start "<question>"
-codex-deep-research status <run_id>
-codex-deep-research watch <run_id>
-codex-deep-research report <run_id>
-codex-deep-research cancel <run_id>
-codex-deep-research list
+npm --prefix plugins\codex-deep-research run dev -- start "<question>"
+npm --prefix plugins\codex-deep-research run dev -- status <run_id>
+npm --prefix plugins\codex-deep-research run dev -- watch <run_id>
+npm --prefix plugins\codex-deep-research run dev -- report <run_id>
+npm --prefix plugins\codex-deep-research run dev -- cancel <run_id>
+npm --prefix plugins\codex-deep-research run dev -- list
 ```
 
 ## Output

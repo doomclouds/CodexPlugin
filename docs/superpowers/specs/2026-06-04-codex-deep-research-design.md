@@ -117,7 +117,7 @@ runner 中，便于命令行、skill 和未来 MCP 复用。
 
 ## 用户入口
 
-Codex 内建议入口：
+用户运行命令必须从 caller workspace root 调用插件 runner：
 
 ```text
 npm --prefix plugins\codex-deep-research run dev -- start "研究 Codex plugin 是否适合实现 deep research"
@@ -126,17 +126,6 @@ npm --prefix plugins\codex-deep-research run dev -- watch <run_id>
 npm --prefix plugins\codex-deep-research run dev -- report <run_id>
 npm --prefix plugins\codex-deep-research run dev -- cancel <run_id>
 npm --prefix plugins\codex-deep-research run dev -- list
-```
-
-runner CLI 等价入口：
-
-```text
-codex-deep-research start "<question>"
-codex-deep-research status <run_id>
-codex-deep-research watch <run_id>
-codex-deep-research report <run_id>
-codex-deep-research cancel <run_id>
-codex-deep-research list
 ```
 
 常用参数：
