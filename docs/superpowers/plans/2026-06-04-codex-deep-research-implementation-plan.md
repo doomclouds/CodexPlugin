@@ -48,7 +48,7 @@ Create:
 - `plugins/codex-deep-research/runner/src/runtime/scheduler.ts`：bounded concurrency。
 - `plugins/codex-deep-research/runner/src/runtime/checkpoint.ts`：checkpoint 保存和恢复。
 - `plugins/codex-deep-research/runner/src/workflow/schemas.ts`：Zod schemas。
-- `plugins/codex-deep-research/runner/src/workflow/primitives.ts`：`phase/agent/parallel/pipeline/checkpoint/emit`。
+- `plugins/codex-deep-research/runner/src/workflow/primitives.ts`：v0 exports `phase/agent/parallel`; later phases add `pipeline/checkpoint/emit` as needed.
 - `plugins/codex-deep-research/runner/src/workflow/deep-research.workflow.ts`：v0 workflow。
 - `plugins/codex-deep-research/runner/src/workers/worker-client.ts`：worker 接口。
 - `plugins/codex-deep-research/runner/src/workers/codex-exec-worker.ts`：`codex exec --json` worker。
@@ -162,7 +162,7 @@ Create `plugins/codex-deep-research/.codex-plugin/plugin.json`:
   "interface": {
     "displayName": "Codex Deep Research",
     "shortDescription": "Run async multi-agent research workflows from Codex.",
-    "longDescription": "Launch v0 skeleton deep research runs that create a run directory and write cited Markdown reports; full search, extraction, verification, and structured state files are planned for later phases.",
+    "longDescription": "Launch v0 skeleton deep research runs that create a run directory and write Markdown report skeletons with source placeholders; cited reports, full search, extraction, verification, and structured state files are planned for later phases.",
     "developerName": "doomclouds",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
