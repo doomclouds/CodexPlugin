@@ -212,7 +212,6 @@ The main files are:
 - `report.md`
 - `report.summary.md`
 - `report.sources.md`
-- `report.audit.json`
 
 ## Privacy
 
@@ -232,9 +231,8 @@ Append to `.gitignore` if not already present:
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm install
-npm run typecheck
+npm --prefix plugins\codex-deep-research install
+npm --prefix plugins\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -300,8 +298,7 @@ describe("jsonl", () => {
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test -- runner/tests/jsonl.test.ts
+npm --prefix plugins\codex-deep-research test -- runner/tests/jsonl.test.ts
 ```
 
 Expected:
@@ -595,9 +592,8 @@ export const ReportSchema = z.object({
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test -- runner/tests/jsonl.test.ts runner/tests/schemas.test.ts
-npm run typecheck
+npm --prefix plugins\codex-deep-research test -- runner/tests/jsonl.test.ts runner/tests/schemas.test.ts
+npm --prefix plugins\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -669,8 +665,7 @@ describe("RunStore", () => {
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test -- runner/tests/run-store.test.ts
+npm --prefix plugins\codex-deep-research test -- runner/tests/run-store.test.ts
 ```
 
 Expected:
@@ -789,9 +784,8 @@ export class RunStore {
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test -- runner/tests/run-store.test.ts
-npm run typecheck
+npm --prefix plugins\codex-deep-research test -- runner/tests/run-store.test.ts
+npm --prefix plugins\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -1052,9 +1046,8 @@ function redactValue(value: unknown): unknown {
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test -- runner/tests/scheduler.test.ts runner/tests/prompt-builder.test.ts
-npm run typecheck
+npm --prefix plugins\codex-deep-research test -- runner/tests/scheduler.test.ts runner/tests/prompt-builder.test.ts
+npm --prefix plugins\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -1220,9 +1213,8 @@ function parseLastJsonObject(stdout: string): unknown {
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test -- runner/tests/fake-worker.test.ts
-npm run typecheck
+npm --prefix plugins\codex-deep-research test -- runner/tests/fake-worker.test.ts
+npm --prefix plugins\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -1437,9 +1429,8 @@ export async function runDeepResearch(input: DeepResearchRunInput): Promise<void
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test -- runner/tests/deep-research.workflow.test.ts
-npm run typecheck
+npm --prefix plugins\codex-deep-research test -- runner/tests/deep-research.workflow.test.ts
+npm --prefix plugins\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -1643,9 +1634,8 @@ export async function watchCommand(runId: string): Promise<void> {
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run typecheck
-npm run build
+npm --prefix plugins\codex-deep-research run typecheck
+npm --prefix plugins\codex-deep-research run build
 ```
 
 Expected:
@@ -1662,8 +1652,7 @@ Both commands exit with code `0`.
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-node dist/cli.js list
+node plugins\codex-deep-research\dist\cli.js list
 ```
 
 Expected:
@@ -1787,41 +1776,36 @@ Use this skill when the user asks for deep research, dynamic workflow research, 
 
 ## Commands
 
-Use the plugin runner from `plugins/codex-deep-research`.
+Use the plugin runner from the caller workspace root.
 
 Start:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- start "<question>"
+npm --prefix plugins\codex-deep-research run dev -- start "<question>"
 ```
 
 Status:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- status <run_id>
+npm --prefix plugins\codex-deep-research run dev -- status <run_id>
 ```
 
 Watch:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- watch <run_id>
+npm --prefix plugins\codex-deep-research run dev -- watch <run_id>
 ```
 
 Report:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- report <run_id>
+npm --prefix plugins\codex-deep-research run dev -- report <run_id>
 ```
 
 Cancel:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm run dev -- cancel <run_id>
+npm --prefix plugins\codex-deep-research run dev -- cancel <run_id>
 ```
 
 ## Behavior
@@ -1854,10 +1838,9 @@ npm --prefix plugins\codex-deep-research run dev -- report <run_id>
 Run:
 
 ```powershell
-Set-Location plugins\codex-deep-research
-npm test
-npm run typecheck
-npm run build
+npm --prefix plugins\codex-deep-research test
+npm --prefix plugins\codex-deep-research run typecheck
+npm --prefix plugins\codex-deep-research run build
 ```
 
 Expected:

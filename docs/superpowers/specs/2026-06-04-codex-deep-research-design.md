@@ -187,7 +187,6 @@ debugPrompts = false;
       report.md
       report.summary.md
       report.sources.md
-      report.audit.json
       artifacts/
       checkpoints/
 ```
@@ -631,7 +630,6 @@ sourcesCited
 report.md
 report.summary.md
 report.sources.md
-report.audit.json
 ```
 
 `report.md` 结构：
@@ -868,7 +866,7 @@ FAILURE_MODE = "partial_report";
   - Verify Report：检查引用和裁决一致性。
 - Runtime state 文件：`status.json`、`events.jsonl`、`tasks.jsonl`、`sources.jsonl`、
   `claims.jsonl`、`votes.jsonl`、`decisions.jsonl`、`checkpoints/`。
-- 默认输出：`report.md`、`report.summary.md`、`report.sources.md`、`report.audit.json`。
+- 默认输出：`report.md`、`report.summary.md`、`report.sources.md`。
 - 默认 `.gitignore`：`.codex-deep-research/`。
 
 ## v0 暂不做
