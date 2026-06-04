@@ -4,6 +4,8 @@ import { appendJsonl } from "./jsonl.js";
 import { createRunId } from "./ids.js";
 import type { RunManifest, RunStatus, WorkflowEvent } from "./types.js";
 
+const RUN_ID_PATTERN = /^dr_\d{8}T\d{9}Z(?:_\d{2})?$/;
+
 export interface CreateRunInput {
   question: string;
   workspace: string;
@@ -80,7 +82,13 @@ export class RunStore {
   }
 
   async emit(runId: string, event: Omit<WorkflowEvent, "at" | "runId">): Promise<void> {
-    const manifest = await this.readManifest(runId).catch(() => undefined);
+    this.validateRunId(runId);
+    const manifest = await this.readManifest(runId).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        return undefined;
+      }
+      throw error;
+    });
     const outputDir = manifest?.outputDir ?? join(this.runsDir(), runId);
     await appendJsonl(join(outputDir, "events.jsonl"), {
       ...event,
@@ -112,7 +120,14 @@ export class RunStore {
   }
 
   private async resolveRunFile(runId: string, fileName: string): Promise<string> {
+    this.validateRunId(runId);
     return join(this.runsDir(), runId, fileName);
+  }
+
+  private validateRunId(runId: string): void {
+    if (!RUN_ID_PATTERN.test(runId)) {
+      throw new Error(`Invalid run id: ${runId}`);
+    }
   }
 
   private runsDir(): string {
