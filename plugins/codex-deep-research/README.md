@@ -7,29 +7,36 @@
 Installed plugin usage from the caller workspace root:
 
 ```powershell
-node "<installed-plugin-root>\scripts\run.mjs" status <run_id>
-node "<installed-plugin-root>\scripts\run.mjs" watch <run_id>
-node "<installed-plugin-root>\scripts\run.mjs" report <run_id>
-node "<installed-plugin-root>\scripts\run.mjs" cancel <run_id>
-node "<installed-plugin-root>\scripts\run.mjs" list
+& "<installed-plugin-root>\bin\codex-deep-research.cmd" start "<question>"
+& "<installed-plugin-root>\bin\codex-deep-research.cmd" status <run_id>
+& "<installed-plugin-root>\bin\codex-deep-research.cmd" watch <run_id>
+& "<installed-plugin-root>\bin\codex-deep-research.cmd" report <run_id>
+& "<installed-plugin-root>\bin\codex-deep-research.cmd" cancel <run_id>
+& "<installed-plugin-root>\bin\codex-deep-research.cmd" list
 ```
 
-`<installed-plugin-root>` is the directory that contains this plugin's `.codex-plugin`, `skills`, and `scripts` folders. The wrapper preserves the caller workspace through `INIT_CWD`, so run outputs stay under the workspace where the command was launched.
+`<installed-plugin-root>` is the directory that contains this plugin's `.codex-plugin`, `skills`, and `bin` folders. The Windows CLI preserves the caller workspace through `INIT_CWD`, so run outputs stay under the workspace where the command was launched.
 
-The v0 wrapper is dependency-free for `list`, `status`, `watch`, `report`, and `cancel`, so a clean installed cache copy can inspect and manage existing runs without `dist/` or `node_modules/`. `start` and `run` still require `dist/cli.js` or the repository checkout's local `tsx` dev dependency; if neither exists, the wrapper exits with setup instructions.
+The installed plugin ships a prebuilt Windows CLI under `bin\`. A clean installed cache copy can run `start`, `status`, `watch`, `report`, `cancel`, and `list` without `npm install`, `node_modules\`, or a post-install TypeScript build.
 
 Repository development usage from this repository root:
 
 ```powershell
-npm --prefix plugins\codex-deep-research run dev -- start "<question>"
-npm --prefix plugins\codex-deep-research run dev -- status <run_id>
-npm --prefix plugins\codex-deep-research run dev -- watch <run_id>
-npm --prefix plugins\codex-deep-research run dev -- report <run_id>
-npm --prefix plugins\codex-deep-research run dev -- cancel <run_id>
-npm --prefix plugins\codex-deep-research run dev -- list
+npm --prefix src\codex-deep-research run dev -- start "<question>"
+npm --prefix src\codex-deep-research run dev -- status <run_id>
+npm --prefix src\codex-deep-research run dev -- watch <run_id>
+npm --prefix src\codex-deep-research run dev -- report <run_id>
+npm --prefix src\codex-deep-research run dev -- cancel <run_id>
+npm --prefix src\codex-deep-research run dev -- list
 ```
 
 The development command also uses the caller workspace via `INIT_CWD` when invoked with `npm --prefix`.
+
+Build the installable CLI after source changes:
+
+```powershell
+npm --prefix src\codex-deep-research run build
+```
 
 ## Output
 
@@ -63,7 +70,7 @@ The main files are:
 The plugin includes a `deep-research` skill. In Codex, use it to start and inspect runs:
 
 ```text
-node "<installed-plugin-root>\scripts\run.mjs" list
-node "<installed-plugin-root>\scripts\run.mjs" status <run_id>
-node "<installed-plugin-root>\scripts\run.mjs" report <run_id>
+& "<installed-plugin-root>\bin\codex-deep-research.cmd" list
+& "<installed-plugin-root>\bin\codex-deep-research.cmd" status <run_id>
+& "<installed-plugin-root>\bin\codex-deep-research.cmd" report <run_id>
 ```

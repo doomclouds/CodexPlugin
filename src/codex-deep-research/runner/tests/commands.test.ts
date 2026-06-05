@@ -335,6 +335,20 @@ describe("start command helpers", () => {
     expect(() => validateStartOptions(options)).toThrow(message);
   });
 
+  it("resolves the bundled Windows CLI launcher to the same CLI file", async () => {
+    const pluginRoot = await mkdtemp(join(tmpdir(), "cdr-bin-launcher-"));
+    await mkdir(join(pluginRoot, "bin"), { recursive: true });
+    const cliPath = join(pluginRoot, "bin", "codex-deep-research.mjs");
+    await writeFile(cliPath, "", "utf8");
+
+    const launcher = resolveStartLauncher(pathToFileURL(cliPath).href);
+
+    expect(launcher.command).toBe(process.execPath);
+    expect(launcher.args("dr_20260102T030405678Z")).toEqual([cliPath, "run", "dr_20260102T030405678Z"]);
+
+    await rm(pluginRoot, { recursive: true, force: true });
+  });
+
   it("resolves the built launcher to dist/cli.js", async () => {
     const pluginRoot = await mkdtemp(join(tmpdir(), "cdr-built-launcher-"));
     await mkdir(join(pluginRoot, "dist", "commands"), { recursive: true });

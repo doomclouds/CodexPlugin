@@ -5,10 +5,11 @@
   "type": "module",
   "private": true,
   "bin": {
-    "codex-deep-research": "./scripts/run.mjs"
+    "codex-deep-research": "../../plugins/codex-deep-research/bin/codex-deep-research.mjs"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build-windows-cli.mjs",
+    "pretest": "npm run build",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx runner/src/cli.ts"
@@ -19,6 +20,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
+    "esbuild": "^0.23.1",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3",
     "vitest": "^1.6.0"

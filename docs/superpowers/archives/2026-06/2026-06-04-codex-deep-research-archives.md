@@ -8,16 +8,17 @@
 
 ## Summary
 
-本归档记录 `codex-deep-research` v0 的首个可用插件骨架：它把 Codex 中的 dynamic workflow research 设想落到一个可安装的插件、一个可由 skill 启动的 TypeScript runner，以及一套可观察、可取消、可读取报告的运行目录协议。v0 的重点不是完整自动研究质量，而是先把插件入口、异步运行状态、并发/worker 抽象、报告骨架和后续 search/fetch/verify 扩展点打通。
+本归档记录 `codex-deep-research` v0 的首个可用插件骨架：它把 Codex 中的 dynamic workflow research 设想落到一个可安装的插件、一个可由 skill 启动的预构建 Windows CLI，以及一套可观察、可取消、可读取报告的运行目录协议。v0 的重点不是完整自动研究质量，而是先把插件入口、异步运行状态、并发/worker 抽象、报告骨架和后续 search/fetch/verify 扩展点打通。
 
 ## Delivered Scope
 
-- 新增 `plugins/codex-deep-research` 插件，包含 `.codex-plugin/plugin.json`、README、`skills/deep-research/SKILL.md`、TypeScript runner package 和 dependency-free installed wrapper。
+- 新增 `plugins/codex-deep-research` 插件，包含 `.codex-plugin/plugin.json`、README、`skills/deep-research/SKILL.md` 和预构建 Windows CLI。
+- 将 TypeScript runner package 移出插件目录，放到 `src/codex-deep-research`，由 `npm --prefix src\codex-deep-research run build` 生成 `plugins/codex-deep-research/bin/codex-deep-research.mjs` 和 `.cmd`。
 - 将 `codex-deep-research` 加入仓库 marketplace 和根 README，使它可通过 `codex-deep-research@codex-plugin` 被发现和安装。
 - 实现 runner CLI：`start`、`run`、`status`、`watch`、`report`、`cancel`、`list`，运行产物默认写入 caller workspace 的 `.codex-deep-research/runs/<run_id>/`。
 - 实现 run store、status、events、checkpoint、bounded scheduler、persona/context/prompt primitives、fake worker 和 `codex exec --json` worker。
 - 实现 v0 workflow skeleton：规划 scope、写 checkpoint、生成 `report.md`、`report.summary.md`、`report.sources.md`，并提供 source id/status citation verifier。
-- 安装后 wrapper 支持无 `dist/`、无 `node_modules/` 的 clean cache 场景下运行 dependency-free 的 `list/status/watch/report/cancel/help`。
+- 安装后 CLI 支持无 `dist/`、无 `node_modules/`、无 post-install build 的 clean cache 场景下运行 `start/status/watch/report/cancel/list/help`。
 - `cancel` 使用 cooperative cancellation：写 marker、更新 status/events，并在 workflow final completion 前保护 `cancelled` 终态不被 `completed` 或 cancellation emit failure 覆盖。
 - `watch` 支持持续 tail events，并在 terminal status 后做 final drain，降低漏掉最后事件的风险。
 
@@ -27,7 +28,7 @@
 - v0 不支持自定义 `--output`，运行目录固定为 `.codex-deep-research/runs/<run_id>/`。
 - v0 不实现 `pipeline` primitive，不提供 claim decision consistency verifier，也不保证每个事实性结论都有真实外部来源引用。
 - v0 cooperative cancellation 不负责 kill detached OS process；它只保证 runner 状态和事件语义一致。
-- clean installed wrapper 的 `start/run` 仍需要 built runner 或 repository dev dependencies；dependency-free installed commands 只覆盖观察和管理类命令。
+- 当前提交的预构建 CLI 只面向 Windows；跨平台 shell shim 和 native binary packaging 留到后续。
 
 ## Verification Snapshot
 
@@ -35,9 +36,9 @@
 - Final tests：`npm test` 通过，`12` test files / `71` tests passed。
 - TypeScript checks：`npm run typecheck` 通过，exit 0。
 - Build：`npm run build` 通过，exit 0。
-- Source development smoke：`npm --prefix plugins\codex-deep-research run dev -- list` 通过，当前无 runs，输出为空。
-- Installed wrapper smoke：`node plugins\codex-deep-research\scripts\run.mjs list` 和 `node plugins\codex-deep-research\scripts\run.mjs --help` 均通过。
-- Clean tracked-copy smoke：`installed-runner.test.ts` 覆盖仅跟踪文件副本、显式无 `dist/` 和无 `node_modules/` 的 wrapper 场景。
+- Source development smoke：`npm --prefix src\codex-deep-research run dev -- list` 通过，当前无 runs，输出为空。
+- Installed CLI smoke：`plugins\codex-deep-research\bin\codex-deep-research.cmd list` 和 `node plugins\codex-deep-research\bin\codex-deep-research.mjs --help` 均通过。
+- Clean tracked-copy smoke：`installed-runner.test.ts` 覆盖仅跟踪文件副本、显式无 `dist/` 和无 `node_modules/` 的预构建 CLI 场景。
 - Git hygiene：`git diff --check c66db1d...HEAD` 通过；feature worktree `git status --short --branch` 仅显示 `## feature/codex-deep-research-v0`。
 
 ## Source Documents

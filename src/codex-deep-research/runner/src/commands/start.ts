@@ -53,6 +53,14 @@ export function resolveStartLauncher(currentModuleUrl: string): StartLauncher {
     };
   }
 
+  if (normalized.endsWith("/bin/codex-deep-research.mjs")) {
+    assertFileExists(currentFile, "Windows CLI");
+    return {
+      command: process.execPath,
+      args: (runId) => [currentFile, "run", runId],
+    };
+  }
+
   if (normalized.endsWith("/runner/src/commands/start.ts")) {
     const pluginRoot = join(dirname(currentFile), "..", "..", "..");
     const tsxCliPath = join(pluginRoot, "node_modules", "tsx", "dist", "cli.mjs");

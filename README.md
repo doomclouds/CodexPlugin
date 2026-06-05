@@ -58,8 +58,7 @@ plugins/
   codex-deep-research/
     .codex-plugin/
       plugin.json
-    runner/
-    scripts/
+    bin/
     skills/
   drawio/
     .codex-plugin/
@@ -75,6 +74,12 @@ plugins/
     skills/
     hooks/
     tests/
+src/
+  codex-deep-research/
+    runner/
+    scripts/
+    package.json
+    tsconfig.json
 ```
 
 ## License

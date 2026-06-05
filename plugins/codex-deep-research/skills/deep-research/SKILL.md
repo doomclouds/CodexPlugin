@@ -9,46 +9,44 @@ Use this skill when the user asks for deep research, dynamic workflow research, 
 
 ## Commands
 
-Run these commands from the caller workspace root. Resolve `<plugin-root>` to the installed plugin directory that contains this `SKILL.md` under `skills\deep-research\SKILL.md`, then use its dependency-free wrapper at `scripts\run.mjs`.
+Run these commands from the caller workspace root. Resolve `<plugin-root>` to the installed plugin directory that contains this `SKILL.md` under `skills\deep-research\SKILL.md`, then use its prebuilt Windows CLI at `bin\codex-deep-research.cmd`.
 
-The wrapper preserves the caller workspace through `INIT_CWD`. In a clean installed plugin copy, `list`, `status`, `watch`, `report`, and `cancel` are dependency-free. `start` and `run` still require `dist\cli.js` or repository development dependencies; when those are missing, the wrapper exits with setup instructions.
+The CLI preserves the caller workspace through `INIT_CWD`. In a clean installed plugin copy, `start`, `status`, `watch`, `report`, `cancel`, and `list` run without `npm install`, `node_modules\`, or a post-install TypeScript build.
 
 Start:
 
 ```powershell
-node "<plugin-root>\scripts\run.mjs" start "<question>"
+& "<plugin-root>\bin\codex-deep-research.cmd" start "<question>"
 ```
-
-Use `start` only when this plugin copy has a built runner or repository development dependencies available.
 
 Status:
 
 ```powershell
-node "<plugin-root>\scripts\run.mjs" status <run_id>
+& "<plugin-root>\bin\codex-deep-research.cmd" status <run_id>
 ```
 
 Watch:
 
 ```powershell
-node "<plugin-root>\scripts\run.mjs" watch <run_id>
+& "<plugin-root>\bin\codex-deep-research.cmd" watch <run_id>
 ```
 
 Report:
 
 ```powershell
-node "<plugin-root>\scripts\run.mjs" report <run_id>
+& "<plugin-root>\bin\codex-deep-research.cmd" report <run_id>
 ```
 
 Cancel:
 
 ```powershell
-node "<plugin-root>\scripts\run.mjs" cancel <run_id>
+& "<plugin-root>\bin\codex-deep-research.cmd" cancel <run_id>
 ```
 
 ## Behavior
 
 - Start returns a `run_id`.
-- The runner writes runs under the caller workspace, using `INIT_CWD` when launched through the wrapper.
+- The runner writes runs under the caller workspace, using `INIT_CWD` when launched through the CLI.
 - `watch` follows `events.jsonl` and exits when status reaches `completed`, `partial`, `failed`, or `cancelled`.
 - `cancel` writes a cooperative cancellation marker, emits a cancellation event, and marks active runs `cancelled`; v0 does not kill detached OS processes.
 - Full reports are written to `.codex-deep-research/runs/<run_id>/report.md`.
@@ -60,5 +58,5 @@ node "<plugin-root>\scripts\run.mjs" cancel <run_id>
 When working inside this repository checkout, the development runner is still available:
 
 ```powershell
-npm --prefix plugins\codex-deep-research run dev -- list
+npm --prefix src\codex-deep-research run dev -- list
 ```

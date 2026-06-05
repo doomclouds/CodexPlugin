@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -11,6 +12,10 @@ const testDir = dirname(fileURLToPath(import.meta.url));
 const pluginRoot = resolve(testDir, "..", "..");
 const repoRoot = resolve(pluginRoot, "..", "..");
 const pluginRelativePath = "plugins/codex-deep-research";
+const requiredRuntimeFiles = [
+  "plugins/codex-deep-research/bin/codex-deep-research.mjs",
+  "plugins/codex-deep-research/bin/codex-deep-research.cmd",
+];
 
 async function createTrackedPluginCopy(): Promise<{ copyRoot: string; workspace: string; cleanup: () => Promise<void> }> {
   const tempRoot = await mkdtemp(join(tmpdir(), "cdr-installed-runner-"));
@@ -22,8 +27,13 @@ async function createTrackedPluginCopy(): Promise<{ copyRoot: string; workspace:
     windowsHide: true,
   });
 
-  for (const relativePath of stdout.split("\0").filter(Boolean)) {
+  const relativePaths = new Set([...stdout.split("\0").filter(Boolean), ...requiredRuntimeFiles]);
+
+  for (const relativePath of relativePaths) {
     const source = join(repoRoot, relativePath);
+    if (!existsSync(source)) {
+      continue;
+    }
     const target = join(tempRoot, relativePath);
     await mkdir(dirname(target), { recursive: true });
     await copyFile(source, target);
@@ -43,7 +53,7 @@ async function createTrackedPluginCopy(): Promise<{ copyRoot: string; workspace:
   };
 }
 
-describe("installed wrapper", () => {
+describe("installed CLI", () => {
   it("runs installed commands from a tracked-file plugin copy without dist or node_modules", async () => {
     const copy = await createTrackedPluginCopy();
 
@@ -54,11 +64,15 @@ describe("installed wrapper", () => {
         encoding: "utf8" as const,
         windowsHide: true,
       };
-      const list = await execFileAsync(process.execPath, [join(copy.copyRoot, "scripts", "run.mjs"), "list"], commonOptions);
-      const help = await execFileAsync(process.execPath, [join(copy.copyRoot, "scripts", "run.mjs"), "--help"], commonOptions);
+      const cli = join(copy.copyRoot, "bin", "codex-deep-research.mjs");
+      const cmd = join(copy.copyRoot, "bin", "codex-deep-research.cmd");
+      const list = await execFileAsync(process.execPath, [cli, "list"], commonOptions);
+      const help = await execFileAsync(process.execPath, [cli, "--help"], commonOptions);
+      const cmdHelp = await execFileAsync("cmd.exe", ["/c", cmd, "--help"], commonOptions);
 
       expect(list.stdout).toBe("\n");
-      expect(help.stdout).toContain("Usage: codex-deep-research <command>");
+      expect(help.stdout).toContain("Usage: codex-deep-research [options] [command]");
+      expect(cmdHelp.stdout).toContain("Usage: codex-deep-research [options] [command]");
       expect(help.stdout).toContain("list");
       expect(help.stdout).toContain("watch");
       expect(help.stdout).toContain("cancel");
@@ -71,7 +85,7 @@ describe("installed wrapper", () => {
         JSON.stringify(
           {
             runId,
-            question: "Can installed wrapper inspect tracked copies?",
+            question: "Can installed CLI inspect tracked copies?",
             workspace: copy.workspace,
             outputDir,
             mode: "mixed",
@@ -91,7 +105,7 @@ describe("installed wrapper", () => {
         JSON.stringify(
           {
             runId,
-            question: "Can installed wrapper inspect tracked copies?",
+            question: "Can installed CLI inspect tracked copies?",
             phase: "synthesizing",
             state: "running",
             startedAt: "2026-01-02T03:04:05.678Z",
@@ -132,27 +146,27 @@ describe("installed wrapper", () => {
 
       const listedRun = await execFileAsync(
         process.execPath,
-        [join(copy.copyRoot, "scripts", "run.mjs"), "list"],
+        [cli, "list"],
         commonOptions,
       );
       const status = await execFileAsync(
         process.execPath,
-        [join(copy.copyRoot, "scripts", "run.mjs"), "status", runId],
+        [cli, "status", runId],
         commonOptions,
       );
       const report = await execFileAsync(
         process.execPath,
-        [join(copy.copyRoot, "scripts", "run.mjs"), "report", runId],
+        [cli, "report", runId],
         commonOptions,
       );
       const cancel = await execFileAsync(
         process.execPath,
-        [join(copy.copyRoot, "scripts", "run.mjs"), "cancel", runId],
+        [cli, "cancel", runId],
         commonOptions,
       );
       const watch = await execFileAsync(
         process.execPath,
-        [join(copy.copyRoot, "scripts", "run.mjs"), "watch", runId],
+        [cli, "watch", runId],
         commonOptions,
       );
 

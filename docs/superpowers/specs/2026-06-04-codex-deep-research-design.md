@@ -78,13 +78,20 @@ plugins/
     .codex-plugin/
       plugin.json
     README.md
-    package.json
-    tsconfig.json
+    bin/
+      codex-deep-research.cmd
+      codex-deep-research.mjs
 
     skills/
       deep-research/
         SKILL.md
 
+src/
+  codex-deep-research/
+    package.json
+    tsconfig.json
+    scripts/
+      build-windows-cli.mjs
     runner/
       src/
         cli.ts
@@ -112,31 +119,31 @@ plugins/
           list.ts
 ```
 
-skill 只负责识别用户意图、补足参数、调用 runner CLI、返回 `run_id` 和报告路径。研究逻辑必须放在
-runner 中，便于命令行、skill 和未来 MCP 复用。
+skill 只负责识别用户意图、补足参数、调用已预构建的 Windows runner CLI、返回 `run_id` 和报告路径。研究逻辑必须放在
+`src/codex-deep-research/runner` 中，便于命令行、skill 和未来 MCP 复用；安装后的插件不再要求客户端执行 TypeScript build。
 
 ## 用户入口
 
-用户运行命令必须从 caller workspace root 调用插件 runner。安装后的插件通过相对于插件根目录的 wrapper 启动，不要求业务 workspace 存在 `plugins\codex-deep-research`：
+用户运行命令必须从 caller workspace root 调用插件 runner。安装后的插件通过相对于插件根目录的预构建 Windows CLI 启动，不要求业务 workspace 存在 `plugins\codex-deep-research`，也不要求安装后执行 `npm install` 或 build：
 
 ```text
-node "<installed-plugin-root>\scripts\run.mjs" start "研究 Codex plugin 是否适合实现 deep research"
-node "<installed-plugin-root>\scripts\run.mjs" status <run_id>
-node "<installed-plugin-root>\scripts\run.mjs" watch <run_id>
-node "<installed-plugin-root>\scripts\run.mjs" report <run_id>
-node "<installed-plugin-root>\scripts\run.mjs" cancel <run_id>
-node "<installed-plugin-root>\scripts\run.mjs" list
+"<installed-plugin-root>\bin\codex-deep-research.cmd" start "研究 Codex plugin 是否适合实现 deep research"
+"<installed-plugin-root>\bin\codex-deep-research.cmd" status <run_id>
+"<installed-plugin-root>\bin\codex-deep-research.cmd" watch <run_id>
+"<installed-plugin-root>\bin\codex-deep-research.cmd" report <run_id>
+"<installed-plugin-root>\bin\codex-deep-research.cmd" cancel <run_id>
+"<installed-plugin-root>\bin\codex-deep-research.cmd" list
 ```
 
 仓库开发时可从本仓库 root 使用：
 
 ```text
-npm --prefix plugins\codex-deep-research run dev -- start "研究 Codex plugin 是否适合实现 deep research"
-npm --prefix plugins\codex-deep-research run dev -- status <run_id>
-npm --prefix plugins\codex-deep-research run dev -- watch <run_id>
-npm --prefix plugins\codex-deep-research run dev -- report <run_id>
-npm --prefix plugins\codex-deep-research run dev -- cancel <run_id>
-npm --prefix plugins\codex-deep-research run dev -- list
+npm --prefix src\codex-deep-research run dev -- start "研究 Codex plugin 是否适合实现 deep research"
+npm --prefix src\codex-deep-research run dev -- status <run_id>
+npm --prefix src\codex-deep-research run dev -- watch <run_id>
+npm --prefix src\codex-deep-research run dev -- report <run_id>
+npm --prefix src\codex-deep-research run dev -- cancel <run_id>
+npm --prefix src\codex-deep-research run dev -- list
 ```
 
 常用参数：
@@ -864,6 +871,7 @@ later phases 引入该能力时，默认保存脱敏 `prompt_envelopes.jsonl`：
 ## v0 skeleton 必做 / 已交付边界
 
 - 插件目录 `plugins/codex-deep-research`。
+- 源码目录 `src/codex-deep-research`，构建输出 Windows CLI 到 `plugins/codex-deep-research/bin/`。
 - Skill 入口 `skills/deep-research/SKILL.md`。
 - Runner CLI：`start`、`status`、`watch`、`report`、`cancel`、`list`。
 - TS workflow runtime skeleton：`phase`、`agent`、`parallel` 的最小可运行骨架；`pipeline`、`checkpoint`、`emit` 为 later-phase primitive。

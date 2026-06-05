@@ -26,36 +26,36 @@ Create:
 
 - `plugins/codex-deep-research/.codex-plugin/plugin.json`：Codex plugin manifest。
 - `plugins/codex-deep-research/README.md`：安装、命令、输出目录、隐私和调试说明。
-- `plugins/codex-deep-research/package.json`：runner package、scripts、dependencies。
+- `src/codex-deep-research/package.json`：runner package、scripts、dependencies。
 - `plugins/codex-deep-research/tsconfig.json`：TypeScript config。
 - `plugins/codex-deep-research/vitest.config.ts`：test config。
 - `plugins/codex-deep-research/skills/deep-research/SKILL.md`：Codex skill 入口。
-- `plugins/codex-deep-research/runner/src/cli.ts`：CLI dispatcher。
-- `plugins/codex-deep-research/runner/src/commands/start.ts`：创建 run 并启动 runner。
-- `plugins/codex-deep-research/runner/src/commands/status.ts`：读取状态快照。
-- `plugins/codex-deep-research/runner/src/commands/watch.ts`：tail 事件流。
-- `plugins/codex-deep-research/runner/src/commands/report.ts`：定位并打印报告路径/摘要。
-- `plugins/codex-deep-research/runner/src/commands/cancel.ts`：写 cancel marker。
-- `plugins/codex-deep-research/runner/src/commands/list.ts`：列出 runs。
-- `plugins/codex-deep-research/runner/src/commands/run.ts`：后台执行指定 run。
-- `plugins/codex-deep-research/runner/src/runtime/types.ts`：核心类型。
-- `plugins/codex-deep-research/runner/src/runtime/ids.ts`：run/task/source/claim id。
-- `plugins/codex-deep-research/runner/src/runtime/jsonl.ts`：JSONL 读写。
-- `plugins/codex-deep-research/runner/src/runtime/run-store.ts`：run directory、manifest、status、events、artifacts。
-- `plugins/codex-deep-research/runner/src/runtime/context-selector.ts`：最小上下文投影。
-- `plugins/codex-deep-research/runner/src/runtime/prompt-builder.ts`：PromptEnvelope 生成和脱敏记录。
-- `plugins/codex-deep-research/runner/src/runtime/persona-registry.ts`：role/persona registry。
-- `plugins/codex-deep-research/runner/src/runtime/scheduler.ts`：bounded concurrency。
-- `plugins/codex-deep-research/runner/src/runtime/checkpoint.ts`：checkpoint 保存和恢复。
-- `plugins/codex-deep-research/runner/src/workflow/schemas.ts`：Zod schemas。
-- `plugins/codex-deep-research/runner/src/workflow/primitives.ts`：v0 exports `phase/agent/parallel`; later phases add `pipeline/checkpoint/emit` as needed.
-- `plugins/codex-deep-research/runner/src/workflow/deep-research.workflow.ts`：v0 workflow。
-- `plugins/codex-deep-research/runner/src/workers/worker-client.ts`：worker 接口。
-- `plugins/codex-deep-research/runner/src/workers/codex-exec-worker.ts`：`codex exec --json` worker。
-- `plugins/codex-deep-research/runner/src/workers/fake-worker.ts`：测试 worker。
-- `plugins/codex-deep-research/runner/src/report/report-writer.ts`：Markdown 报告。
-- `plugins/codex-deep-research/runner/src/report/report-verifier.ts`：引用和裁决一致性检查。
-- `plugins/codex-deep-research/runner/tests/*.test.ts`：单元测试。
+- `src/codex-deep-research/runner/src/cli.ts`：CLI dispatcher。
+- `src/codex-deep-research/runner/src/commands/start.ts`：创建 run 并启动 runner。
+- `src/codex-deep-research/runner/src/commands/status.ts`：读取状态快照。
+- `src/codex-deep-research/runner/src/commands/watch.ts`：tail 事件流。
+- `src/codex-deep-research/runner/src/commands/report.ts`：定位并打印报告路径/摘要。
+- `src/codex-deep-research/runner/src/commands/cancel.ts`：写 cancel marker。
+- `src/codex-deep-research/runner/src/commands/list.ts`：列出 runs。
+- `src/codex-deep-research/runner/src/commands/run.ts`：后台执行指定 run。
+- `src/codex-deep-research/runner/src/runtime/types.ts`：核心类型。
+- `src/codex-deep-research/runner/src/runtime/ids.ts`：run/task/source/claim id。
+- `src/codex-deep-research/runner/src/runtime/jsonl.ts`：JSONL 读写。
+- `src/codex-deep-research/runner/src/runtime/run-store.ts`：run directory、manifest、status、events、artifacts。
+- `src/codex-deep-research/runner/src/runtime/context-selector.ts`：最小上下文投影。
+- `src/codex-deep-research/runner/src/runtime/prompt-builder.ts`：PromptEnvelope 生成和脱敏记录。
+- `src/codex-deep-research/runner/src/runtime/persona-registry.ts`：role/persona registry。
+- `src/codex-deep-research/runner/src/runtime/scheduler.ts`：bounded concurrency。
+- `src/codex-deep-research/runner/src/runtime/checkpoint.ts`：checkpoint 保存和恢复。
+- `src/codex-deep-research/runner/src/workflow/schemas.ts`：Zod schemas。
+- `src/codex-deep-research/runner/src/workflow/primitives.ts`：v0 exports `phase/agent/parallel`; later phases add `pipeline/checkpoint/emit` as needed.
+- `src/codex-deep-research/runner/src/workflow/deep-research.workflow.ts`：v0 workflow。
+- `src/codex-deep-research/runner/src/workers/worker-client.ts`：worker 接口。
+- `src/codex-deep-research/runner/src/workers/codex-exec-worker.ts`：`codex exec --json` worker。
+- `src/codex-deep-research/runner/src/workers/fake-worker.ts`：测试 worker。
+- `src/codex-deep-research/runner/src/report/report-writer.ts`：Markdown 报告。
+- `src/codex-deep-research/runner/src/report/report-verifier.ts`：引用和裁决一致性检查。
+- `src/codex-deep-research/runner/tests/*.test.ts`：单元测试。
 
 Modify:
 
@@ -66,7 +66,7 @@ Modify:
 **Files:**
 
 - Create: `plugins/codex-deep-research/.codex-plugin/plugin.json`
-- Create: `plugins/codex-deep-research/package.json`
+- Create: `src/codex-deep-research/package.json`
 - Create: `plugins/codex-deep-research/tsconfig.json`
 - Create: `plugins/codex-deep-research/vitest.config.ts`
 - Create: `plugins/codex-deep-research/README.md`
@@ -74,7 +74,7 @@ Modify:
 
 - [ ] **Step 1: Create package metadata**
 
-Create `plugins/codex-deep-research/package.json`:
+Create `src/codex-deep-research/package.json`:
 
 ```json
 {
@@ -84,7 +84,7 @@ Create `plugins/codex-deep-research/package.json`:
   "type": "module",
   "private": true,
   "bin": {
-    "codex-deep-research": "./dist/cli.js"
+    "codex-deep-research": "../../plugins/codex-deep-research/bin/codex-deep-research.mjs"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -188,12 +188,12 @@ Create `plugins/codex-deep-research/README.md`:
 ## Commands
 
 ```text
-npm --prefix plugins\codex-deep-research run dev -- start "<question>"
-npm --prefix plugins\codex-deep-research run dev -- status <run_id>
-npm --prefix plugins\codex-deep-research run dev -- watch <run_id>
-npm --prefix plugins\codex-deep-research run dev -- report <run_id>
-npm --prefix plugins\codex-deep-research run dev -- cancel <run_id>
-npm --prefix plugins\codex-deep-research run dev -- list
+npm --prefix src\codex-deep-research run dev -- start "<question>"
+npm --prefix src\codex-deep-research run dev -- status <run_id>
+npm --prefix src\codex-deep-research run dev -- watch <run_id>
+npm --prefix src\codex-deep-research run dev -- report <run_id>
+npm --prefix src\codex-deep-research run dev -- cancel <run_id>
+npm --prefix src\codex-deep-research run dev -- list
 ```
 
 ## Output
@@ -231,8 +231,8 @@ Append to `.gitignore` if not already present:
 Run:
 
 ```powershell
-npm --prefix plugins\codex-deep-research install
-npm --prefix plugins\codex-deep-research run typecheck
+npm --prefix src\codex-deep-research install
+npm --prefix src\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -256,16 +256,16 @@ git commit -m "feat: scaffold codex deep research plugin"
 
 **Files:**
 
-- Create: `plugins/codex-deep-research/runner/src/runtime/types.ts`
-- Create: `plugins/codex-deep-research/runner/src/runtime/ids.ts`
-- Create: `plugins/codex-deep-research/runner/src/runtime/jsonl.ts`
-- Create: `plugins/codex-deep-research/runner/src/workflow/schemas.ts`
-- Create: `plugins/codex-deep-research/runner/tests/jsonl.test.ts`
-- Create: `plugins/codex-deep-research/runner/tests/schemas.test.ts`
+- Create: `src/codex-deep-research/runner/src/runtime/types.ts`
+- Create: `src/codex-deep-research/runner/src/runtime/ids.ts`
+- Create: `src/codex-deep-research/runner/src/runtime/jsonl.ts`
+- Create: `src/codex-deep-research/runner/src/workflow/schemas.ts`
+- Create: `src/codex-deep-research/runner/tests/jsonl.test.ts`
+- Create: `src/codex-deep-research/runner/tests/schemas.test.ts`
 
 - [ ] **Step 1: Write JSONL failing test**
 
-Create `plugins/codex-deep-research/runner/tests/jsonl.test.ts`:
+Create `src/codex-deep-research/runner/tests/jsonl.test.ts`:
 
 ```ts
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -298,7 +298,7 @@ describe("jsonl", () => {
 Run:
 
 ```powershell
-npm --prefix plugins\codex-deep-research test -- runner/tests/jsonl.test.ts
+npm --prefix src\codex-deep-research test -- runner/tests/jsonl.test.ts
 ```
 
 Expected:
@@ -310,7 +310,7 @@ Cannot find module '../src/runtime/jsonl.js'
 
 - [ ] **Step 3: Implement JSONL utility**
 
-Create `plugins/codex-deep-research/runner/src/runtime/jsonl.ts`:
+Create `src/codex-deep-research/runner/src/runtime/jsonl.ts`:
 
 ```ts
 import { mkdir, readFile } from "node:fs/promises";
@@ -340,7 +340,7 @@ export async function readJsonl<T = unknown>(path: string): Promise<T[]> {
 
 - [ ] **Step 4: Add core ids**
 
-Create `plugins/codex-deep-research/runner/src/runtime/ids.ts`:
+Create `src/codex-deep-research/runner/src/runtime/ids.ts`:
 
 ```ts
 export function createRunId(now = new Date()): string {
@@ -355,7 +355,7 @@ export function createSequentialId(prefix: string, index: number): string {
 
 - [ ] **Step 5: Add core types**
 
-Create `plugins/codex-deep-research/runner/src/runtime/types.ts`:
+Create `src/codex-deep-research/runner/src/runtime/types.ts`:
 
 ```ts
 export type PhaseName =
@@ -484,7 +484,7 @@ export interface ClaimDecision {
 
 - [ ] **Step 6: Write schema tests**
 
-Create `plugins/codex-deep-research/runner/tests/schemas.test.ts`:
+Create `src/codex-deep-research/runner/tests/schemas.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -517,7 +517,7 @@ describe("workflow schemas", () => {
 
 - [ ] **Step 7: Implement schemas**
 
-Create `plugins/codex-deep-research/runner/src/workflow/schemas.ts`:
+Create `src/codex-deep-research/runner/src/workflow/schemas.ts`:
 
 ```ts
 import { z } from "zod";
@@ -592,8 +592,8 @@ export const ReportSchema = z.object({
 Run:
 
 ```powershell
-npm --prefix plugins\codex-deep-research test -- runner/tests/jsonl.test.ts runner/tests/schemas.test.ts
-npm --prefix plugins\codex-deep-research run typecheck
+npm --prefix src\codex-deep-research test -- runner/tests/jsonl.test.ts runner/tests/schemas.test.ts
+npm --prefix src\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -617,12 +617,12 @@ git commit -m "feat: add deep research core schemas"
 
 **Files:**
 
-- Create: `plugins/codex-deep-research/runner/src/runtime/run-store.ts`
-- Create: `plugins/codex-deep-research/runner/tests/run-store.test.ts`
+- Create: `src/codex-deep-research/runner/src/runtime/run-store.ts`
+- Create: `src/codex-deep-research/runner/tests/run-store.test.ts`
 
 - [ ] **Step 1: Write run-store test**
 
-Create `plugins/codex-deep-research/runner/tests/run-store.test.ts`:
+Create `src/codex-deep-research/runner/tests/run-store.test.ts`:
 
 ```ts
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -665,7 +665,7 @@ describe("RunStore", () => {
 Run:
 
 ```powershell
-npm --prefix plugins\codex-deep-research test -- runner/tests/run-store.test.ts
+npm --prefix src\codex-deep-research test -- runner/tests/run-store.test.ts
 ```
 
 Expected:
@@ -677,7 +677,7 @@ Cannot find module '../src/runtime/run-store.js'
 
 - [ ] **Step 3: Implement RunStore**
 
-Create `plugins/codex-deep-research/runner/src/runtime/run-store.ts`:
+Create `src/codex-deep-research/runner/src/runtime/run-store.ts`:
 
 ```ts
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -784,8 +784,8 @@ export class RunStore {
 Run:
 
 ```powershell
-npm --prefix plugins\codex-deep-research test -- runner/tests/run-store.test.ts
-npm --prefix plugins\codex-deep-research run typecheck
+npm --prefix src\codex-deep-research test -- runner/tests/run-store.test.ts
+npm --prefix src\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -809,16 +809,16 @@ git commit -m "feat: add deep research run store"
 
 **Files:**
 
-- Create: `plugins/codex-deep-research/runner/src/runtime/scheduler.ts`
-- Create: `plugins/codex-deep-research/runner/src/runtime/persona-registry.ts`
-- Create: `plugins/codex-deep-research/runner/src/runtime/context-selector.ts`
-- Create: `plugins/codex-deep-research/runner/src/runtime/prompt-builder.ts`
-- Create: `plugins/codex-deep-research/runner/tests/scheduler.test.ts`
-- Create: `plugins/codex-deep-research/runner/tests/prompt-builder.test.ts`
+- Create: `src/codex-deep-research/runner/src/runtime/scheduler.ts`
+- Create: `src/codex-deep-research/runner/src/runtime/persona-registry.ts`
+- Create: `src/codex-deep-research/runner/src/runtime/context-selector.ts`
+- Create: `src/codex-deep-research/runner/src/runtime/prompt-builder.ts`
+- Create: `src/codex-deep-research/runner/tests/scheduler.test.ts`
+- Create: `src/codex-deep-research/runner/tests/prompt-builder.test.ts`
 
 - [ ] **Step 1: Write scheduler test**
 
-Create `plugins/codex-deep-research/runner/tests/scheduler.test.ts`:
+Create `src/codex-deep-research/runner/tests/scheduler.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -847,7 +847,7 @@ describe("runBounded", () => {
 
 - [ ] **Step 2: Implement scheduler**
 
-Create `plugins/codex-deep-research/runner/src/runtime/scheduler.ts`:
+Create `src/codex-deep-research/runner/src/runtime/scheduler.ts`:
 
 ```ts
 export async function runBounded<T>(tasks: Array<() => Promise<T>>, concurrency: number): Promise<T[]> {
@@ -874,7 +874,7 @@ export async function runBounded<T>(tasks: Array<() => Promise<T>>, concurrency:
 
 - [ ] **Step 3: Write prompt builder test**
 
-Create `plugins/codex-deep-research/runner/tests/prompt-builder.test.ts`:
+Create `src/codex-deep-research/runner/tests/prompt-builder.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -908,7 +908,7 @@ describe("prompt builder", () => {
 
 - [ ] **Step 4: Implement persona registry**
 
-Create `plugins/codex-deep-research/runner/src/runtime/persona-registry.ts`:
+Create `src/codex-deep-research/runner/src/runtime/persona-registry.ts`:
 
 ```ts
 import type { Role } from "./types.js";
@@ -960,7 +960,7 @@ export function getPersona(id: string): Persona {
 
 - [ ] **Step 5: Implement context selector**
 
-Create `plugins/codex-deep-research/runner/src/runtime/context-selector.ts`:
+Create `src/codex-deep-research/runner/src/runtime/context-selector.ts`:
 
 ```ts
 import type { Claim, SourceCard } from "./types.js";
@@ -993,7 +993,7 @@ export function selectSkepticContext(input: SkepticContextInput): Record<string,
 
 - [ ] **Step 6: Implement prompt builder**
 
-Create `plugins/codex-deep-research/runner/src/runtime/prompt-builder.ts`:
+Create `src/codex-deep-research/runner/src/runtime/prompt-builder.ts`:
 
 ```ts
 import type { PhaseName, Role } from "./types.js";
@@ -1046,8 +1046,8 @@ function redactValue(value: unknown): unknown {
 Run:
 
 ```powershell
-npm --prefix plugins\codex-deep-research test -- runner/tests/scheduler.test.ts runner/tests/prompt-builder.test.ts
-npm --prefix plugins\codex-deep-research run typecheck
+npm --prefix src\codex-deep-research test -- runner/tests/scheduler.test.ts runner/tests/prompt-builder.test.ts
+npm --prefix src\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -1071,14 +1071,14 @@ git commit -m "feat: add deep research runtime primitives"
 
 **Files:**
 
-- Create: `plugins/codex-deep-research/runner/src/workers/worker-client.ts`
-- Create: `plugins/codex-deep-research/runner/src/workers/fake-worker.ts`
-- Create: `plugins/codex-deep-research/runner/src/workers/codex-exec-worker.ts`
-- Create: `plugins/codex-deep-research/runner/tests/fake-worker.test.ts`
+- Create: `src/codex-deep-research/runner/src/workers/worker-client.ts`
+- Create: `src/codex-deep-research/runner/src/workers/fake-worker.ts`
+- Create: `src/codex-deep-research/runner/src/workers/codex-exec-worker.ts`
+- Create: `src/codex-deep-research/runner/tests/fake-worker.test.ts`
 
 - [ ] **Step 1: Write fake worker test**
 
-Create `plugins/codex-deep-research/runner/tests/fake-worker.test.ts`:
+Create `src/codex-deep-research/runner/tests/fake-worker.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -1096,7 +1096,7 @@ describe("FakeWorkerClient", () => {
 
 - [ ] **Step 2: Implement worker interface**
 
-Create `plugins/codex-deep-research/runner/src/workers/worker-client.ts`:
+Create `src/codex-deep-research/runner/src/workers/worker-client.ts`:
 
 ```ts
 export interface WorkerTask {
@@ -1113,7 +1113,7 @@ export interface WorkerClient {
 
 - [ ] **Step 3: Implement fake worker**
 
-Create `plugins/codex-deep-research/runner/src/workers/fake-worker.ts`:
+Create `src/codex-deep-research/runner/src/workers/fake-worker.ts`:
 
 ```ts
 import type { WorkerClient, WorkerTask } from "./worker-client.js";
@@ -1132,7 +1132,7 @@ export class FakeWorkerClient implements WorkerClient {
 
 - [ ] **Step 4: Implement codex exec worker**
 
-Create `plugins/codex-deep-research/runner/src/workers/codex-exec-worker.ts`:
+Create `src/codex-deep-research/runner/src/workers/codex-exec-worker.ts`:
 
 ```ts
 import { spawn } from "node:child_process";
@@ -1213,8 +1213,8 @@ function parseLastJsonObject(stdout: string): unknown {
 Run:
 
 ```powershell
-npm --prefix plugins\codex-deep-research test -- runner/tests/fake-worker.test.ts
-npm --prefix plugins\codex-deep-research run typecheck
+npm --prefix src\codex-deep-research test -- runner/tests/fake-worker.test.ts
+npm --prefix src\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -1238,14 +1238,14 @@ git commit -m "feat: add codex deep research workers"
 
 **Files:**
 
-- Create: `plugins/codex-deep-research/runner/src/workflow/primitives.ts`
-- Create: `plugins/codex-deep-research/runner/src/workflow/deep-research.workflow.ts`
-- Create: `plugins/codex-deep-research/runner/src/runtime/checkpoint.ts`
-- Create: `plugins/codex-deep-research/runner/tests/deep-research.workflow.test.ts`
+- Create: `src/codex-deep-research/runner/src/workflow/primitives.ts`
+- Create: `src/codex-deep-research/runner/src/workflow/deep-research.workflow.ts`
+- Create: `src/codex-deep-research/runner/src/runtime/checkpoint.ts`
+- Create: `src/codex-deep-research/runner/tests/deep-research.workflow.test.ts`
 
 - [ ] **Step 1: Write workflow smoke test**
 
-Create `plugins/codex-deep-research/runner/tests/deep-research.workflow.test.ts`:
+Create `src/codex-deep-research/runner/tests/deep-research.workflow.test.ts`:
 
 ```ts
 import { mkdtemp, rm } from "node:fs/promises";
@@ -1294,7 +1294,7 @@ describe("runDeepResearch", () => {
 
 - [ ] **Step 2: Implement checkpoint helper**
 
-Create `plugins/codex-deep-research/runner/src/runtime/checkpoint.ts`:
+Create `src/codex-deep-research/runner/src/runtime/checkpoint.ts`:
 
 ```ts
 import { mkdir, writeFile } from "node:fs/promises";
@@ -1311,7 +1311,7 @@ export async function writeCheckpoint(outputDir: string, name: string, state: un
 
 - [ ] **Step 3: Implement primitives**
 
-Create `plugins/codex-deep-research/runner/src/workflow/primitives.ts`:
+Create `src/codex-deep-research/runner/src/workflow/primitives.ts`:
 
 ```ts
 import type { RunStatus } from "../runtime/types.js";
@@ -1362,7 +1362,7 @@ export async function parallel<T>(tasks: Array<() => Promise<T>>, concurrency: n
 
 - [ ] **Step 4: Implement minimal workflow**
 
-Create `plugins/codex-deep-research/runner/src/workflow/deep-research.workflow.ts`:
+Create `src/codex-deep-research/runner/src/workflow/deep-research.workflow.ts`:
 
 ```ts
 import { join } from "node:path";
@@ -1429,8 +1429,8 @@ export async function runDeepResearch(input: DeepResearchRunInput): Promise<void
 Run:
 
 ```powershell
-npm --prefix plugins\codex-deep-research test -- runner/tests/deep-research.workflow.test.ts
-npm --prefix plugins\codex-deep-research run typecheck
+npm --prefix src\codex-deep-research test -- runner/tests/deep-research.workflow.test.ts
+npm --prefix src\codex-deep-research run typecheck
 ```
 
 Expected:
@@ -1454,18 +1454,18 @@ git commit -m "feat: add deep research workflow skeleton"
 
 **Files:**
 
-- Create: `plugins/codex-deep-research/runner/src/cli.ts`
-- Create: `plugins/codex-deep-research/runner/src/commands/start.ts`
-- Create: `plugins/codex-deep-research/runner/src/commands/run.ts`
-- Create: `plugins/codex-deep-research/runner/src/commands/status.ts`
-- Create: `plugins/codex-deep-research/runner/src/commands/report.ts`
-- Create: `plugins/codex-deep-research/runner/src/commands/cancel.ts`
-- Create: `plugins/codex-deep-research/runner/src/commands/list.ts`
-- Create: `plugins/codex-deep-research/runner/src/commands/watch.ts`
+- Create: `src/codex-deep-research/runner/src/cli.ts`
+- Create: `src/codex-deep-research/runner/src/commands/start.ts`
+- Create: `src/codex-deep-research/runner/src/commands/run.ts`
+- Create: `src/codex-deep-research/runner/src/commands/status.ts`
+- Create: `src/codex-deep-research/runner/src/commands/report.ts`
+- Create: `src/codex-deep-research/runner/src/commands/cancel.ts`
+- Create: `src/codex-deep-research/runner/src/commands/list.ts`
+- Create: `src/codex-deep-research/runner/src/commands/watch.ts`
 
 - [ ] **Step 1: Implement CLI dispatcher**
 
-Create `plugins/codex-deep-research/runner/src/cli.ts`:
+Create `src/codex-deep-research/runner/src/cli.ts`:
 
 ```ts
 #!/usr/bin/env node
@@ -1504,7 +1504,7 @@ await program.parseAsync(process.argv);
 
 - [ ] **Step 2: Implement command helpers**
 
-Create `plugins/codex-deep-research/runner/src/commands/start.ts`:
+Create `src/codex-deep-research/runner/src/commands/start.ts`:
 
 ```ts
 import { spawn } from "node:child_process";
@@ -1542,7 +1542,7 @@ export async function startCommand(question: string, options: StartOptions): Pro
 }
 ```
 
-Create `plugins/codex-deep-research/runner/src/commands/run.ts`:
+Create `src/codex-deep-research/runner/src/commands/run.ts`:
 
 ```ts
 import { RunStore } from "../runtime/run-store.js";
@@ -1557,7 +1557,7 @@ export async function runCommand(runId: string): Promise<void> {
 }
 ```
 
-Create `plugins/codex-deep-research/runner/src/commands/status.ts`:
+Create `src/codex-deep-research/runner/src/commands/status.ts`:
 
 ```ts
 import { RunStore } from "../runtime/run-store.js";
@@ -1568,7 +1568,7 @@ export async function statusCommand(runId: string): Promise<void> {
 }
 ```
 
-Create `plugins/codex-deep-research/runner/src/commands/report.ts`:
+Create `src/codex-deep-research/runner/src/commands/report.ts`:
 
 ```ts
 import { readFile } from "node:fs/promises";
@@ -1585,7 +1585,7 @@ export async function reportCommand(runId: string): Promise<void> {
 }
 ```
 
-Create `plugins/codex-deep-research/runner/src/commands/cancel.ts`:
+Create `src/codex-deep-research/runner/src/commands/cancel.ts`:
 
 ```ts
 import { writeFile } from "node:fs/promises";
@@ -1599,7 +1599,7 @@ export async function cancelCommand(runId: string): Promise<void> {
 }
 ```
 
-Create `plugins/codex-deep-research/runner/src/commands/list.ts`:
+Create `src/codex-deep-research/runner/src/commands/list.ts`:
 
 ```ts
 import { readdir } from "node:fs/promises";
@@ -1616,7 +1616,7 @@ export async function listCommand(): Promise<void> {
 }
 ```
 
-Create `plugins/codex-deep-research/runner/src/commands/watch.ts`:
+Create `src/codex-deep-research/runner/src/commands/watch.ts`:
 
 ```ts
 import { readFile } from "node:fs/promises";
@@ -1634,8 +1634,8 @@ export async function watchCommand(runId: string): Promise<void> {
 Run:
 
 ```powershell
-npm --prefix plugins\codex-deep-research run typecheck
-npm --prefix plugins\codex-deep-research run build
+npm --prefix src\codex-deep-research run typecheck
+npm --prefix src\codex-deep-research run build
 ```
 
 Expected:
@@ -1652,7 +1652,7 @@ Both commands exit with code `0`.
 Run:
 
 ```powershell
-npm --prefix plugins\codex-deep-research run dev -- list
+npm --prefix src\codex-deep-research run dev -- list
 ```
 
 Expected:
@@ -1676,15 +1676,15 @@ git commit -m "feat: add deep research runner cli"
 
 **Files:**
 
-- Create: `plugins/codex-deep-research/runner/src/report/report-verifier.ts`
-- Create: `plugins/codex-deep-research/runner/src/report/report-writer.ts`
-- Create: `plugins/codex-deep-research/runner/tests/report-verifier.test.ts`
+- Create: `src/codex-deep-research/runner/src/report/report-verifier.ts`
+- Create: `src/codex-deep-research/runner/src/report/report-writer.ts`
+- Create: `src/codex-deep-research/runner/tests/report-verifier.test.ts`
 - Create: `plugins/codex-deep-research/skills/deep-research/SKILL.md`
 - Modify: `plugins/codex-deep-research/README.md`
 
 - [ ] **Step 1: Write report verifier test**
 
-Create `plugins/codex-deep-research/runner/tests/report-verifier.test.ts`:
+Create `src/codex-deep-research/runner/tests/report-verifier.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -1706,7 +1706,7 @@ describe("verifyReportCitations", () => {
 
 - [ ] **Step 2: Implement report verifier**
 
-Create `plugins/codex-deep-research/runner/src/report/report-verifier.ts`:
+Create `src/codex-deep-research/runner/src/report/report-verifier.ts`:
 
 ```ts
 export interface VerifiableSource {
@@ -1729,7 +1729,7 @@ export function verifyReportCitations(markdown: string, sources: VerifiableSourc
 
 - [ ] **Step 3: Implement report writer**
 
-Create `plugins/codex-deep-research/runner/src/report/report-writer.ts`:
+Create `src/codex-deep-research/runner/src/report/report-writer.ts`:
 
 ```ts
 import { writeFile } from "node:fs/promises";
@@ -1781,31 +1781,31 @@ Use the plugin runner from the caller workspace root.
 Start:
 
 ```powershell
-npm --prefix plugins\codex-deep-research run dev -- start "<question>"
+npm --prefix src\codex-deep-research run dev -- start "<question>"
 ```
 
 Status:
 
 ```powershell
-npm --prefix plugins\codex-deep-research run dev -- status <run_id>
+npm --prefix src\codex-deep-research run dev -- status <run_id>
 ```
 
 Watch:
 
 ```powershell
-npm --prefix plugins\codex-deep-research run dev -- watch <run_id>
+npm --prefix src\codex-deep-research run dev -- watch <run_id>
 ```
 
 Report:
 
 ```powershell
-npm --prefix plugins\codex-deep-research run dev -- report <run_id>
+npm --prefix src\codex-deep-research run dev -- report <run_id>
 ```
 
 Cancel:
 
 ```powershell
-npm --prefix plugins\codex-deep-research run dev -- cancel <run_id>
+npm --prefix src\codex-deep-research run dev -- cancel <run_id>
 ```
 
 ## Behavior
@@ -1827,9 +1827,9 @@ Append to `plugins/codex-deep-research/README.md`:
 The plugin includes a `deep-research` skill. In Codex, use it to start and inspect runs:
 
 ```text
-npm --prefix plugins\codex-deep-research run dev -- start "your research question"
-npm --prefix plugins\codex-deep-research run dev -- status <run_id>
-npm --prefix plugins\codex-deep-research run dev -- report <run_id>
+npm --prefix src\codex-deep-research run dev -- start "your research question"
+npm --prefix src\codex-deep-research run dev -- status <run_id>
+npm --prefix src\codex-deep-research run dev -- report <run_id>
 ```
 ```
 
@@ -1838,9 +1838,9 @@ npm --prefix plugins\codex-deep-research run dev -- report <run_id>
 Run:
 
 ```powershell
-npm --prefix plugins\codex-deep-research test
-npm --prefix plugins\codex-deep-research run typecheck
-npm --prefix plugins\codex-deep-research run build
+npm --prefix src\codex-deep-research test
+npm --prefix src\codex-deep-research run typecheck
+npm --prefix src\codex-deep-research run build
 ```
 
 Expected:
@@ -1856,7 +1856,7 @@ and both typecheck/build exit with code `0`.
 Run from repository root:
 
 ```powershell
-npm --prefix plugins\codex-deep-research run dev -- list
+npm --prefix src\codex-deep-research run dev -- list
 ```
 
 Expected:
@@ -1888,4 +1888,3 @@ git commit -m "feat: add codex deep research v0"
 - No placeholder terms are used as implementation instructions.
 - Type names are consistent across tasks: `RunStore`, `WorkerClient`, `PromptEnvelope`, `RunManifest`, `RunStatus`.
 - The plan intentionally implements a runnable v0 skeleton first. Full search/fetch/verify depth can be expanded after the skeleton passes tests.
-
