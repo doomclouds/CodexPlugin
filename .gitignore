@@ -9,7 +9,6 @@ Thumbs.db
 .env.*
 !.env.example
 .worktrees/
-.codex-deep-research/
 .codegraph/
 node_modules/
 dist/
