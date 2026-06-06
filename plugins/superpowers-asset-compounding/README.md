@@ -2,11 +2,14 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.2.7` combines four skills with plugin-bundled Codex lifecycle hooks.
-This patch improves hook audit diagnostics by reporting invalid JSONL health and
-privacy-preserving unknown command clusters. It keeps the v0.2.6 closeout UX
-improvements for push-only closeouts, cleanup-only abandonment turns, and
-workspace/worktree context.
+Version `0.2.8` combines four skills with plugin-bundled Codex lifecycle hooks.
+This patch improves hook audit reliability by serializing `events.jsonl` writes
+with a cross-process lock, treating problem/inbox-only topics as not requiring a
+requirement archive in `asset_status.py`, classifying more common diagnostic
+commands, and forcing UTF-8 stdout in the inbox lifecycle inspector. It keeps
+the v0.2.7 audit report diagnostics and the v0.2.6 closeout UX improvements for
+push-only closeouts, cleanup-only abandonment turns, and workspace/worktree
+context.
 
 The plugin provides four skills:
 
@@ -89,7 +92,8 @@ verification results, user feedback, and plan-boundary checkpoints, then routes
 or defers them at the final `asset_gate`.
 
 Hook usage events are written under `PLUGIN_DATA` as per-session `events.jsonl`
-files. They record structured metadata such as hook event name, decision,
+files. Appends are serialized with a per-file lock so concurrent hook processes
+do not interleave JSONL lines. Events record structured metadata such as hook event name, decision,
 reason code, command kind, command hash/length, hook duration, exit code, signal
 names, per-tool signal deltas, asset-write markers, and candidate counts. They do
 not record prompts, diffs, command output, full commands, or full repository paths.
@@ -104,6 +108,11 @@ The report includes unknown command tool/repo counts, top unknown command
 clusters keyed by command hash and length, and invalid JSONL line/file counts.
 It intentionally omits raw command text even if an event accidentally contains
 one.
+
+`asset_status.py --topic <topic>` distinguishes completed requirement status
+from problem/inbox signals. When a topic only matches problem or inbox assets,
+the requirement archive and completion gate are reported as `not_required`
+instead of forcing a missing archive finding.
 
 When this plugin is upgraded, bump `.codex-plugin/plugin.json` version, sync the
 local cache, validate the plugin, and commit the source plugin repository.

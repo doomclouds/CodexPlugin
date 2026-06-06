@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import importlib.util
 from pathlib import Path
 
 
@@ -567,6 +568,70 @@ Promote if repeated.
         self.assertEqual(result["inbox_assets"], [])
         self.assertEqual(result["indexes"]["status"], "pass")
         self.assertEqual(result["completion_gate"]["status"], "pass")
+
+    def test_asset_status_treats_inbox_only_topic_as_not_requiring_archive(self) -> None:
+        repo = self.create_repo()
+        inbox_root = repo / "docs/superpowers/inbox/2026-06"
+        inbox_root.mkdir(parents=True, exist_ok=True)
+        inbox = inbox_root / "2026-06-06-ros-2-wsl-python-environment-inbox.md"
+        inbox.write_text(
+            """# ROS 2 WSL Python Environment Inbox
+
+- Date: `2026-06-06`
+- Topic slug: `ros-2-wsl-python-environment`
+- Lifecycle: `Open`
+- Route candidate: `unknown`
+- Revisit trigger: `WSL Python path evidence becomes stable.`
+
+## Signal
+
+ROS 2 WSL Python environment is an uncertain inbox signal, not a completed requirement.
+""",
+            encoding="utf-8",
+        )
+        (repo / "docs/superpowers/inbox/INDEX.md").write_text(
+            "# Inbox\n\n## 2026-06\n\n"
+            "- [2026-06-06-ros-2-wsl-python-environment-inbox.md](./2026-06/2026-06-06-ros-2-wsl-python-environment-inbox.md): ROS 2 WSL Python environment signal.\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json(ASSET_STATUS, repo, "--topic", "ROS 2 WSL Python environment", "--json")
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["requirement_archive"]["status"], "not_required")
+        self.assertEqual(result["completion_gate"]["status"], "not_required")
+        self.assertEqual(result["inbox_assets"][0]["path"], inbox.relative_to(repo).as_posix())
+
+    def test_asset_status_still_requires_archive_when_spec_plan_match_inbox_topic(self) -> None:
+        repo = self.create_repo()
+        inbox_root = repo / "docs/superpowers/inbox/2026-06"
+        inbox_root.mkdir(parents=True, exist_ok=True)
+        (inbox_root / "2026-06-06-demo-feature-inbox.md").write_text(
+            """# Demo Feature Inbox
+
+- Date: `2026-06-06`
+- Topic slug: `demo-feature`
+- Lifecycle: `Open`
+- Route candidate: `archive`
+- Revisit trigger: `Demo feature closes without archive.`
+
+## Signal
+
+Demo feature has inbox context, but the spec and plan still need requirement archive coverage.
+""",
+            encoding="utf-8",
+        )
+        (repo / "docs/superpowers/inbox/INDEX.md").write_text(
+            "# Inbox\n\n## 2026-06\n\n"
+            "- [2026-06-06-demo-feature-inbox.md](./2026-06/2026-06-06-demo-feature-inbox.md): Demo feature archive signal.\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json_fail(ASSET_STATUS, repo, "--topic", "demo feature", "--json")
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["requirement_archive"]["status"], "missing")
+        self.assertEqual(result["completion_gate"]["issues"][0]["code"], "missing_requirement_archive")
 
     def test_asset_closeout_blocks_completed_topic_without_archive(self) -> None:
         repo = self.create_repo()
@@ -1506,6 +1571,56 @@ Promote if repeated.
         self.assertEqual(report["unknown_command_clusters"][0]["repoName"], "CodexPlugin")
         self.assertNotIn("command", report["unknown_command_clusters"][0])
 
+    def test_hook_jsonl_append_helper_serializes_concurrent_writers(self) -> None:
+        spec = importlib.util.spec_from_file_location("asset_hook_under_test", HOOK_SCRIPT)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        events_path = self.temp_root / "plugin-data" / "session-1" / "events.jsonl"
+        writer = self.temp_root / "writer.py"
+        writer.write_text(
+            f"""
+import importlib.util
+import sys
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location("asset_hook_under_test", {str(HOOK_SCRIPT)!r})
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+for index in range(25):
+    module.append_jsonl_event(Path(sys.argv[1]), {{"writer": sys.argv[2], "index": index}})
+""",
+            encoding="utf-8",
+        )
+
+        processes = [
+            subprocess.Popen(
+                ["python", str(writer), str(events_path), str(index)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            for index in range(8)
+        ]
+        results = []
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=10)
+            results.append((process.returncode, stdout, stderr))
+        for returncode, stdout, stderr in results:
+            self.assertEqual(returncode, 0, stderr or stdout)
+
+        lines = events_path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 200)
+        events = [json.loads(line) for line in lines]
+        self.assertEqual(
+            {(event["writer"], event["index"]) for event in events},
+            {(str(writer), index) for writer in range(8) for index in range(25)},
+        )
+
     def test_post_tool_use_classifies_common_diagnostic_commands(self) -> None:
         repo = self.create_repo()
         plugin_data = self.temp_root / "plugin-data"
@@ -1525,6 +1640,15 @@ Promote if repeated.
             ),
             ("functions.exec_command", {"cmd": "codex plugin list"}, "codex-plugin-cli"),
             ("apply_patch", {"patch": "*** Begin Patch\n*** End Patch"}, "file-edit"),
+            ("functions.exec_command", {"cmd": "wsl -d Ubuntu -- uname -a"}, "wsl"),
+            ("functions.exec_command", {"cmd": "wsl -d Ubuntu -- ros2 topic list"}, "ros2"),
+            ("functions.exec_command", {"cmd": "colcon build --symlink-install"}, "colcon"),
+            ("functions.exec_command", {"cmd": "curl.exe -I http://localhost:5088"}, "http-request"),
+            (
+                "functions.exec_command",
+                {"cmd": "Get-Content -Encoding utf8 AGENTS.md; Test-Path docs\\superpowers"},
+                "powershell-multi-command",
+            ),
         ]
 
         for index, (tool_name, tool_input, expected_kind) in enumerate(commands):
@@ -1550,6 +1674,46 @@ Promote if repeated.
             [event["commandKind"] for event in events],
             [expected_kind for _tool_name, _tool_input, expected_kind in commands],
         )
+
+    def test_inbox_lifecycle_script_forces_utf8_stdout_for_chinese_text(self) -> None:
+        repo = self.create_repo()
+        inbox_root = repo / "docs/superpowers/inbox/2026-06"
+        inbox_root.mkdir(parents=True, exist_ok=True)
+        (inbox_root / "2026-06-06-ros-2-wsl-python-environment-inbox.md").write_text(
+            """# ROS 2 WSL Python Environment Inbox
+
+- Date: `2026-06-06`
+- Topic slug: `ros-2-wsl-python-environment`
+- Lifecycle: `Open`
+- Route candidate: `unknown`
+- Revisit trigger: `再次验证 WSL Python 环境。`
+
+## Signal
+
+ROS 2 WSL Python environment.
+""",
+            encoding="utf-8",
+        )
+        (repo / "docs/superpowers/inbox/INDEX.md").write_text(
+            "# Inbox\n\n## 2026-06\n\n"
+            "- [2026-06-06-ros-2-wsl-python-environment-inbox.md](./2026-06/2026-06-06-ros-2-wsl-python-environment-inbox.md): ROS 2 WSL Python environment signal.\n",
+            encoding="utf-8",
+        )
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "ascii"
+
+        completed = subprocess.run(
+            ["python", str(INBOX_INSPECTOR), str(repo), "ROS", "WSL"],
+            check=False,
+            text=True,
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("再次验证 WSL Python 环境", completed.stdout)
 
 
 if __name__ == "__main__":

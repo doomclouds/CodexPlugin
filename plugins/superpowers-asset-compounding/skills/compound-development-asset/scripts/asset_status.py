@@ -64,10 +64,29 @@ def build_status(root: Path, topic: str) -> dict[str, object]:
     repo_root = repo_root_for(superpowers_root)
     grouped = find_assets(superpowers_root, repo_root, topic)
     archive_assets = grouped["archives"]
+    non_requirement_assets = grouped["problems"] or grouped["inbox"]
+    completion_issues = check_archive_coverage(repo_root, [topic])
+    non_requirement_only = (
+        bool(non_requirement_assets)
+        and not archive_assets
+        and completion_issues
+        and all(issue["code"] == "completed_topic_not_found" for issue in completion_issues)
+    )
+    if non_requirement_only:
+        completion_issues = []
+    archive_required = not non_requirement_only
     requirement_archive = (
         {"status": "found", **archive_assets[0]}
         if archive_assets
-        else {"status": "missing", "path": None}
+        else (
+            {"status": "missing", "path": None}
+            if archive_required
+            else {
+                "status": "not_required",
+                "path": None,
+                "reason": "topic matched problem or inbox assets without requirement archive coverage",
+            }
+        )
     )
 
     index_issues = []
@@ -75,11 +94,10 @@ def build_status(root: Path, topic: str) -> dict[str, object]:
         index_issues.extend(check_area(superpowers_root, area))
     index_errors = [issue for issue in index_issues if issue["severity"] == "error"]
 
-    completion_issues = check_archive_coverage(repo_root, [topic])
     completion_errors = [issue for issue in completion_issues if issue["severity"] == "error"]
 
     status = "pass"
-    if index_errors or completion_errors or requirement_archive["status"] != "found":
+    if index_errors or completion_errors or requirement_archive["status"] == "missing":
         status = "needs_attention"
 
     return {
@@ -95,7 +113,9 @@ def build_status(root: Path, topic: str) -> dict[str, object]:
             "issues": index_issues,
         },
         "completion_gate": {
-            "status": "pass" if not completion_issues else "needs_attention",
+            "status": "pass" if archive_required and not completion_issues else (
+                "needs_attention" if completion_issues else "not_required"
+            ),
             "issues": completion_issues,
         },
     }

@@ -11,9 +11,10 @@ import sys
 import importlib
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, Iterator
 
 
 def main() -> int:
@@ -468,9 +469,7 @@ def append_usage_event(
             payload[key] = value
     path = events_path(event)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8", newline="\n") as stream:
-            stream.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+        append_jsonl_event(path, payload)
     except OSError:
         return
 
@@ -496,9 +495,74 @@ def append_raw_usage_event(
     plugin_data = Path(os.environ.get("PLUGIN_DATA") or ".asset-plugin-data")
     path = plugin_data / "_hook" / "events.jsonl"
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        append_jsonl_event(path, payload)
+    except OSError:
+        return
+
+
+def append_jsonl_event(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n"
+    with event_file_lock(path):
         with path.open("a", encoding="utf-8", newline="\n") as stream:
-            stream.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+            stream.write(line)
+            stream.flush()
+
+
+@contextmanager
+def event_file_lock(path: Path) -> Iterator[None]:
+    lock_path = path.with_name(path.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as lock_stream:
+        acquire_lock(lock_stream)
+        try:
+            yield
+        finally:
+            release_lock(lock_stream)
+
+
+def acquire_lock(stream: BinaryIO) -> None:
+    timeout_ms = int(os.environ.get("ASSET_HOOK_EVENT_LOCK_TIMEOUT_MS", "1000"))
+    deadline = time.monotonic() + max(1, timeout_ms) / 1000
+    while True:
+        try:
+            lock_stream(stream)
+            return
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
+def lock_stream(stream: BinaryIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        stream.seek(0)
+        if not stream.read(1):
+            stream.seek(0)
+            stream.write(b"\0")
+            stream.flush()
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def release_lock(stream: BinaryIO) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
     except OSError:
         return
 
@@ -636,6 +700,14 @@ def classify_command_kind(command: str, tool_name: str = "") -> str:
         return "npm-run-typecheck"
     if re.search(r"\bcodex\s+plugin\b", command):
         return "codex-plugin-cli"
+    if re.search(r"\bcolcon(?:\.exe)?\s+", command):
+        return "colcon"
+    if re.search(r"\bros2(?:\.exe)?\s+", command):
+        return "ros2"
+    if re.search(r"\bwsl(?:\.exe)?\b", command):
+        return "wsl"
+    if re.search(r"\b(?:curl|curl\.exe|invoke-webrequest|iwr)\b", command, re.IGNORECASE):
+        return "http-request"
     git_match = re.search(r"\bgit\s+(commit|push|merge|status|diff|show|log|add|branch|worktree)\b", command)
     if git_match:
         return f"git-{git_match.group(1)}"
@@ -643,6 +715,12 @@ def classify_command_kind(command: str, tool_name: str = "") -> str:
         return "asset-search-readonly"
     if re.search(r"\brg\s+", command):
         return "rg-search-readonly"
+    if ";" in command and re.search(
+        r"\b(?:get-content|select-string|get-childitem|test-path|set-location|where-object|foreach-object)\b",
+        command,
+        re.IGNORECASE,
+    ):
+        return "powershell-multi-command"
     if re.search(r"\b(?:get-content|select-string|get-childitem|test-path)\b", command, re.IGNORECASE):
         return "powershell-readonly"
     return "unknown"

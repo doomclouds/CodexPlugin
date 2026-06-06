@@ -14,6 +14,13 @@ OPEN_LIFECYCLES = {"Open", "Partially promoted"}
 VALID_LIFECYCLES = OPEN_LIFECYCLES | {"Promoted", "Closed"}
 
 
+def configure_utf8_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def discover_superpowers_root(root: Path) -> Path:
     root = root.resolve()
     if root.name == "superpowers" and root.is_dir():
@@ -101,6 +108,7 @@ def inspect_inbox(superpowers_root: Path, terms: list[str]) -> list[dict[str, ob
 
 
 def main() -> int:
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser(description="Inspect related inbox notes and lifecycle status.")
     parser.add_argument("root", help="Repository root or docs/superpowers path.")
     parser.add_argument("keywords", nargs="*", help="Keywords or slug fragments. Omit to list all inbox notes.")
