@@ -6,6 +6,7 @@ import hashlib
 import os
 import queue
 import re
+import subprocess
 import sys
 import importlib
 import threading
@@ -117,7 +118,8 @@ def handle_session_start(event: dict[str, Any]) -> dict[str, Any] | None:
             "This repository uses hook-assisted asset compounding. Keep asset "
             "workflow concise: subagents report candidates, the main agent owns "
             "route decisions and writes, and meaningful closeout needs an "
-            "auditable asset_gate block."
+            "auditable asset_gate block. "
+            f"{workspace_context(event)}"
         ),
     )
 
@@ -160,6 +162,7 @@ def handle_post_tool_use(event: dict[str, Any]) -> dict[str, Any] | None:
         )
     if is_git_closeout_command(command):
         signals.add("git-closeout")
+        state["lastGitCloseoutKind"] = classify_command_kind(command)
     if asset_files_changed(tool_name, tool_input, command):
         asset_files_changed_this_tool = True
         state["assetFilesChanged"] = True
@@ -240,6 +243,33 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
             hasAssetGate=False,
             hasMeaningfulWork=False,
         )
+        return None
+    if is_push_only_closeout(state):
+        append_usage_event(
+            event,
+            "Stop",
+            decision="allow",
+            reason_code="push_only_closeout",
+            hasAssetGate=False,
+            hasMeaningfulWork=True,
+            signals=state.get("meaningfulWorkSignals", []),
+        )
+        clear_closeout_state(state)
+        save_state(event, state)
+        return None
+    if is_cleanup_only_closeout(state, message):
+        append_usage_event(
+            event,
+            "Stop",
+            decision="allow",
+            reason_code="cleanup_only_auto_none",
+            hasAssetGate=False,
+            hasMeaningfulWork=True,
+            signals=state.get("meaningfulWorkSignals", []),
+            cleanupOnly=True,
+        )
+        clear_closeout_state(state)
+        save_state(event, state)
         return None
     if event.get("stop_hook_active") or state.get("stopContinuationUsed"):
         append_usage_event(
@@ -335,6 +365,38 @@ def additional_context(event_name: str, context: str) -> dict[str, Any]:
     }
 
 
+def workspace_context(event: dict[str, Any]) -> str:
+    cwd = Path(str(event.get("cwd") or "."))
+    parts = [f"Workspace: `{cwd.name}`."]
+    if any(part.lower() == ".worktrees" for part in cwd.parts):
+        parts.append("This workspace appears to be a git worktree; verify repository scope before cleanup or closeout.")
+    branch = current_git_branch(cwd)
+    if branch:
+        parts.append(f"Git branch: `{branch}`.")
+    return " ".join(parts)
+
+
+def current_git_branch(cwd: Path) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--abbrev-ref", "HEAD"],
+            check=False,
+            text=True,
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=0.35,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if completed.returncode != 0:
+        return ""
+    branch = completed.stdout.strip()
+    if not branch or branch == "HEAD":
+        return ""
+    return branch[:120]
+
+
 def repo_has_assets(event: dict[str, Any]) -> bool:
     cwd = Path(str(event.get("cwd") or "."))
     return (cwd / "docs" / "superpowers").is_dir()
@@ -408,8 +470,7 @@ def append_usage_event(
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8", newline="\n") as stream:
-            stream.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-            stream.write("\n")
+            stream.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
     except OSError:
         return
 
@@ -437,8 +498,7 @@ def append_raw_usage_event(
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8", newline="\n") as stream:
-            stream.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-            stream.write("\n")
+            stream.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
     except OSError:
         return
 
@@ -472,6 +532,7 @@ def load_state(event: dict[str, Any]) -> dict[str, Any]:
         "assetFilesChanged": False,
         "stopContinuationUsed": False,
         "assetGateDue": False,
+        "lastGitCloseoutKind": "",
     }
 
 
@@ -618,6 +679,33 @@ def has_stop_closeout_work(state: dict[str, Any]) -> bool:
     )
 
 
+def is_push_only_closeout(state: dict[str, Any]) -> bool:
+    signals = set(state.get("meaningfulWorkSignals") or [])
+    return bool(
+        signals == {"git-closeout"}
+        and state.get("lastGitCloseoutKind") == "git-push"
+        and not state.get("subagentCandidates")
+        and not state.get("assetFilesChanged")
+        and not state.get("verificationEvidence")
+    )
+
+
+def is_cleanup_only_closeout(state: dict[str, Any], message: str) -> bool:
+    if not (
+        state.get("assetFilesChanged")
+        or "edited-files" in set(state.get("meaningfulWorkSignals") or [])
+        or "git-closeout" in set(state.get("meaningfulWorkSignals") or [])
+    ):
+        return False
+    normalized = message.lower()
+    return bool(
+        re.search(
+            r"cleanup-only|清理|删除|移除|放弃|废弃|不再|remove|delete|cleanup|abandon|deprecated",
+            normalized,
+        )
+    )
+
+
 def clear_closeout_state(state: dict[str, Any]) -> None:
     state["meaningfulWorkSignals"] = []
     state["verificationEvidence"] = []
@@ -625,6 +713,7 @@ def clear_closeout_state(state: dict[str, Any]) -> None:
     state["assetFilesChanged"] = False
     state["stopContinuationUsed"] = False
     state["assetGateDue"] = False
+    state["lastGitCloseoutKind"] = ""
 
 
 if __name__ == "__main__":

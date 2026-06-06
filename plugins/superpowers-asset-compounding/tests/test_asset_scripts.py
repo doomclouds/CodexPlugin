@@ -1026,6 +1026,113 @@ Promote if repeated.
         self.assertEqual(state["meaningfulWorkSignals"], [])
         self.assertEqual(state["verificationEvidence"], [])
 
+    def test_stop_allows_push_only_closeout_without_reprompting_asset_gate(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "git push origin main"},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "已 push，main 和 origin/main 已同步。",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        events = [
+            json.loads(line)
+            for line in (plugin_data / "session-1" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["reasonCode"], "push_only_closeout")
+        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["meaningfulWorkSignals"], [])
+
+    def test_stop_allows_cleanup_only_abandonment_without_reprompting_asset_gate(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "apply_patch",
+                "tool_input": {
+                    "patch": "*** Begin Patch\n*** Delete File: docs/superpowers/specs/old-feature.md\n*** End Patch"
+                },
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "已清理并删除废弃需求，放弃这个插件方向。",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        events = [
+            json.loads(line)
+            for line in (plugin_data / "session-1" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["reasonCode"], "cleanup_only_auto_none")
+        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["meaningfulWorkSignals"], [])
+        self.assertFalse(state["assetFilesChanged"])
+
+    def test_session_start_context_mentions_worktree_workspace(self) -> None:
+        repo = self.temp_root / ".worktrees" / "feature-demo"
+        for area in ("specs", "plans", "archives", "problems"):
+            (repo / "docs" / "superpowers" / area).mkdir(parents=True, exist_ok=True)
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        payload = json.loads(stdout)
+        context = payload["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("feature-demo", context)
+        self.assertIn("worktree", context.lower())
+
     def test_post_tool_use_records_failed_verification_separately(self) -> None:
         repo = self.create_repo()
         plugin_data = self.temp_root / "plugin-data"

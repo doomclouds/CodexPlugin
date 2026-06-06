@@ -2,10 +2,10 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.2.5` combines four skills with plugin-bundled Codex lifecycle hooks.
-This patch keeps subagent lifecycle asset prompts removed and adds a
-main-agent reminder when a completed plan step makes the asset gate due before
-the next planned task.
+Version `0.2.6` combines four skills with plugin-bundled Codex lifecycle hooks.
+This patch reduces noisy closeout prompts by allowing push-only closeouts and
+cleanup-only abandonment turns to finish without a repeated `asset_gate`
+continuation, while adding workspace/worktree context to session startup.
 
 The plugin provides four skills:
 
@@ -20,6 +20,11 @@ The plugin also bundles hooks under `hooks/hooks.json`:
 - `PostToolUse`: records compact lifecycle signals from edits, verification commands, git closeout commands, and main-agent plan updates.
 - `Stop`: asks the main agent for one continuation when meaningful work is ending without an `asset_gate` block.
 - `PreCompact` / `PostCompact`: preserve and restore compact pending asset state across compaction.
+
+The `Stop` hook intentionally auto-allows two low-value closeout cases:
+push-only synchronization after work has already been closed out, and explicit
+cleanup-only abandonment messages such as deleting or abandoning obsolete asset
+work. Both are still recorded in the audit stream with dedicated reason codes.
 
 `UserPromptSubmit` is intentionally not part of the asset lifecycle. It is better suited for prompt risk checks than workflow routing.
 

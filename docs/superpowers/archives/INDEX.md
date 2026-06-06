@@ -2,7 +2,7 @@
 
 ## 2026-06
 
-No archived deliveries.
+- [2026-06-06-asset-hook-closeout-ux-archives.md](./2026-06/2026-06-06-asset-hook-closeout-ux-archives.md): Asset Hook Closeout UX v0.2.6 降低 push-only 和 cleanup-only 收尾提示噪音，并在 SessionStart 增加 worktree 上下文。
 
 ## 2026-05
 
