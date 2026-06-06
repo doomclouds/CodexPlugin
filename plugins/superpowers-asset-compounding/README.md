@@ -2,10 +2,11 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.2.6` combines four skills with plugin-bundled Codex lifecycle hooks.
-This patch reduces noisy closeout prompts by allowing push-only closeouts and
-cleanup-only abandonment turns to finish without a repeated `asset_gate`
-continuation, while adding workspace/worktree context to session startup.
+Version `0.2.7` combines four skills with plugin-bundled Codex lifecycle hooks.
+This patch improves hook audit diagnostics by reporting invalid JSONL health and
+privacy-preserving unknown command clusters. It keeps the v0.2.6 closeout UX
+improvements for push-only closeouts, cleanup-only abandonment turns, and
+workspace/worktree context.
 
 The plugin provides four skills:
 
@@ -98,6 +99,11 @@ Summarize collected usage data with:
 ```powershell
 python <plugin>\hooks\asset_hook_report.py <PLUGIN_DATA> --json
 ```
+
+The report includes unknown command tool/repo counts, top unknown command
+clusters keyed by command hash and length, and invalid JSONL line/file counts.
+It intentionally omits raw command text even if an event accidentally contains
+one.
 
 When this plugin is upgraded, bump `.codex-plugin/plugin.json` version, sync the
 local cache, validate the plugin, and commit the source plugin repository.

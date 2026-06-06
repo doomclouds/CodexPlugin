@@ -3,6 +3,7 @@
 ## 2026-06
 
 - [2026-06-06-asset-hook-closeout-ux-archives.md](./2026-06/2026-06-06-asset-hook-closeout-ux-archives.md): Asset Hook Closeout UX v0.2.6 降低 push-only 和 cleanup-only 收尾提示噪音，并在 SessionStart 增加 worktree 上下文。
+- [2026-06-06-audit-report-unknown-command-archives.md](./2026-06/2026-06-06-audit-report-unknown-command-archives.md): Audit Report Unknown Command v0.2.7 通过脱敏聚类、JSONL 健康统计和常见诊断命令分类提升 hook 审计可解释性。
 
 ## 2026-05
 

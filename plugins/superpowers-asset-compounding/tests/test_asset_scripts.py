@@ -1444,6 +1444,113 @@ Promote if repeated.
         self.assertGreaterEqual(report["hook_duration_ms"]["max"], 0)
         self.assertEqual(len(report["slow_events"]), 3)
 
+    def test_hook_report_clusters_unknown_commands_without_raw_command_text(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session_dir = plugin_data / "session-unknown"
+        session_dir.mkdir(parents=True)
+        events_path = session_dir / "events.jsonl"
+        events = [
+            {
+                "hookEventName": "PostToolUse",
+                "decision": "recorded",
+                "reasonCode": "tool_observed",
+                "toolName": "Bash",
+                "commandKind": "unknown",
+                "commandHash": "abc123",
+                "commandLength": 42,
+                "commandPresent": True,
+                "repoName": "CodexPlugin",
+                "durationMs": 4,
+                "command": "this raw command must not be reported",
+            },
+            {
+                "hookEventName": "PostToolUse",
+                "decision": "recorded",
+                "reasonCode": "tool_observed",
+                "toolName": "Bash",
+                "commandKind": "unknown",
+                "commandHash": "abc123",
+                "commandLength": 42,
+                "commandPresent": True,
+                "repoName": "CodexPlugin",
+                "durationMs": 5,
+            },
+            {
+                "hookEventName": "PostToolUse",
+                "decision": "recorded",
+                "reasonCode": "tool_observed",
+                "toolName": "apply_patch",
+                "commandKind": "unknown",
+                "commandPresent": False,
+                "repoName": "CodexPlugin",
+                "durationMs": 2,
+            },
+        ]
+        events_path.write_text(
+            "\n".join(json.dumps(event, ensure_ascii=False) for event in events)
+            + "\n{broken json\n",
+            encoding="utf-8",
+        )
+
+        report = self.run_json(HOOK_REPORT, plugin_data, "--json")
+
+        self.assertEqual(report["invalid_json_lines"], 1)
+        self.assertEqual(report["invalid_json_files"], 1)
+        self.assertEqual(report["unknown_command_tools"]["Bash"], 2)
+        self.assertEqual(report["unknown_command_tools"]["apply_patch"], 1)
+        self.assertEqual(report["unknown_command_repos"]["CodexPlugin"], 3)
+        self.assertEqual(report["unknown_command_clusters"][0]["count"], 2)
+        self.assertEqual(report["unknown_command_clusters"][0]["commandHash"], "abc123")
+        self.assertEqual(report["unknown_command_clusters"][0]["commandLength"], 42)
+        self.assertEqual(report["unknown_command_clusters"][0]["toolName"], "Bash")
+        self.assertEqual(report["unknown_command_clusters"][0]["repoName"], "CodexPlugin")
+        self.assertNotIn("command", report["unknown_command_clusters"][0])
+
+    def test_post_tool_use_classifies_common_diagnostic_commands(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        commands = [
+            ("Bash", {"command": "git status --short --branch"}, "git-status"),
+            ("Bash", {"command": "git diff -- AGENTS.md"}, "git-diff"),
+            ("Bash", {"command": "rg -n asset_hook plugins"}, "rg-search-readonly"),
+            (
+                "functions.exec_command",
+                {"cmd": "Get-Content -LiteralPath 'AGENTS.md' -Encoding utf8"},
+                "powershell-readonly",
+            ),
+            (
+                "functions.exec_command",
+                {"cmd": "python -m unittest plugins.superpowers-asset-compounding.tests.test_asset_scripts"},
+                "python-unittest",
+            ),
+            ("functions.exec_command", {"cmd": "codex plugin list"}, "codex-plugin-cli"),
+            ("apply_patch", {"patch": "*** Begin Patch\n*** End Patch"}, "file-edit"),
+        ]
+
+        for index, (tool_name, tool_input, expected_kind) in enumerate(commands):
+            self.run_hook(
+                {
+                    "hook_event_name": "PostToolUse",
+                    "session_id": "session-1",
+                    "turn_id": f"turn-{index}",
+                    "cwd": str(repo),
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                    "tool_response": {"exit_code": 0},
+                },
+                plugin_data=plugin_data,
+            )
+
+        events = [
+            json.loads(line)
+            for line in (plugin_data / "session-1" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+
+        self.assertEqual(
+            [event["commandKind"] for event in events],
+            [expected_kind for _tool_name, _tool_input, expected_kind in commands],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

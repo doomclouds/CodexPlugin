@@ -173,7 +173,7 @@ def handle_post_tool_use(event: dict[str, Any]) -> dict[str, Any] | None:
 
     state["meaningfulWorkSignals"] = sorted(signals)
     save_state(event, state)
-    command_kind = "plan-update" if is_plan_update_tool(tool_name) else classify_command_kind(command)
+    command_kind = "plan-update" if is_plan_update_tool(tool_name) else classify_command_kind(command, tool_name)
     append_usage_event(
         event,
         "PostToolUse",
@@ -619,22 +619,32 @@ def plan_has_completed_step(tool_input: Any) -> bool:
     return False
 
 
-def classify_command_kind(command: str) -> str:
+def classify_command_kind(command: str, tool_name: str = "") -> str:
+    if tool_name in {"apply_patch", "Edit", "Write"}:
+        return "file-edit"
     if re.search(r"\bdotnet\s+test\b", command):
         return "dotnet-test"
     if re.search(r"\bdotnet\s+build\b", command):
         return "dotnet-build"
+    if re.search(r"\bpython(?:\.exe)?\s+-m\s+unittest\b", command):
+        return "python-unittest"
     if re.search(r"\bnpm\s+test\b", command):
         return "npm-test"
     if re.search(r"\bnpm\s+run\s+build\b", command):
         return "npm-run-build"
     if re.search(r"\bnpm\s+run\s+typecheck\b", command):
         return "npm-run-typecheck"
-    git_match = re.search(r"\bgit\s+(commit|push|merge)\b", command)
+    if re.search(r"\bcodex\s+plugin\b", command):
+        return "codex-plugin-cli"
+    git_match = re.search(r"\bgit\s+(commit|push|merge|status|diff|show|log|add|branch|worktree)\b", command)
     if git_match:
         return f"git-{git_match.group(1)}"
     if "docs/superpowers" in command.replace("\\", "/") and re.search(r"\b(?:rg|findstr|select-string)\b", command):
         return "asset-search-readonly"
+    if re.search(r"\brg\s+", command):
+        return "rg-search-readonly"
+    if re.search(r"\b(?:get-content|select-string|get-childitem|test-path)\b", command, re.IGNORECASE):
+        return "powershell-readonly"
     return "unknown"
 
 

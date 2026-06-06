@@ -9,26 +9,39 @@ from pathlib import Path
 from typing import Any
 
 
-def iter_events(root: Path) -> list[dict[str, Any]]:
+def iter_event_records(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     events: list[dict[str, Any]] = []
+    invalid_records: list[dict[str, Any]] = []
     for path in sorted(root.rglob("events.jsonl")):
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except OSError:
             continue
-        for line in lines:
+        for line_number, line in enumerate(lines, start=1):
             if not line.strip():
                 continue
             try:
                 payload = json.loads(line)
             except json.JSONDecodeError:
+                invalid_records.append(
+                    {
+                        "file": str(path),
+                        "line": line_number,
+                    }
+                )
                 continue
             if isinstance(payload, dict):
                 events.append(payload)
+    return events, invalid_records
+
+
+def iter_events(root: Path) -> list[dict[str, Any]]:
+    events, _invalid_records = iter_event_records(root)
     return events
 
 
-def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize(events: list[dict[str, Any]], invalid_records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    invalid_records = invalid_records or []
     by_hook = Counter(str(event.get("hookEventName") or "unknown") for event in events)
     decisions = Counter(str(event.get("decision") or "unknown") for event in events)
     reason_codes = Counter(str(event.get("reasonCode") or "unknown") for event in events)
@@ -38,6 +51,11 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
         if event.get("hookEventName") == "PostToolUse"
     )
     post_tool_events = [event for event in events if event.get("hookEventName") == "PostToolUse"]
+    unknown_command_events = [
+        event
+        for event in post_tool_events
+        if str(event.get("commandKind") or "none") == "unknown"
+    ]
     durations = sorted(
         int(event["durationMs"])
         for event in events
@@ -78,6 +96,15 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "command_kinds": dict(sorted(command_kinds.items())),
         "unknown_command_kind_ratio": ratio(command_kinds.get("unknown", 0), len(post_tool_events)),
+        "unknown_command_tools": dict(
+            sorted(Counter(str(event.get("toolName") or "unknown") for event in unknown_command_events).items())
+        ),
+        "unknown_command_repos": dict(
+            sorted(Counter(str(event.get("repoName") or "unknown") for event in unknown_command_events).items())
+        ),
+        "unknown_command_clusters": unknown_command_clusters(unknown_command_events),
+        "invalid_json_lines": len(invalid_records),
+        "invalid_json_files": len({str(record.get("file") or "") for record in invalid_records}),
         "hook_duration_ms": duration_summary(durations),
         "slow_events": [
             {
@@ -93,6 +120,42 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
         ],
         "repos": repo_names,
     }
+
+
+def unknown_command_clusters(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: Counter[tuple[str | None, int | None, str, str]] = Counter()
+    for event in events:
+        command_hash = event.get("commandHash")
+        command_length = event.get("commandLength")
+        key = (
+            command_hash if isinstance(command_hash, str) else None,
+            command_length if isinstance(command_length, int) else None,
+            str(event.get("toolName") or "unknown"),
+            str(event.get("repoName") or "unknown"),
+        )
+        grouped[key] += 1
+
+    clusters = []
+    for (command_hash, command_length, tool_name, repo_name), count in grouped.items():
+        clusters.append(
+            {
+                "count": count,
+                "commandHash": command_hash,
+                "commandLength": command_length,
+                "toolName": tool_name,
+                "repoName": repo_name,
+            }
+        )
+    clusters.sort(
+        key=lambda item: (
+            -int(item["count"]),
+            str(item["toolName"]),
+            str(item["repoName"]),
+            str(item["commandHash"] or ""),
+            int(item["commandLength"] or -1),
+        )
+    )
+    return clusters[:10]
 
 
 def ratio(numerator: int, denominator: int) -> float:
@@ -134,10 +197,21 @@ def print_text(summary: dict[str, Any]) -> None:
     print(f"subagent_candidates_collected: {summary['subagent_candidates_collected']}")
     print(f"verification_failed_detected: {summary['verification_failed_detected']}")
     print(f"unknown_command_kind_ratio: {summary['unknown_command_kind_ratio']}")
+    print(f"invalid_json_lines: {summary['invalid_json_lines']}")
+    print(f"invalid_json_files: {summary['invalid_json_files']}")
     print(f"hook_duration_ms: {summary['hook_duration_ms']}")
     print("command_kinds:")
     for name, count in summary["command_kinds"].items():
         print(f"- {name}: {count}")
+    print("unknown_command_tools:")
+    for name, count in summary["unknown_command_tools"].items():
+        print(f"- {name}: {count}")
+    print("unknown_command_clusters:")
+    for cluster in summary["unknown_command_clusters"]:
+        print(
+            f"- count={cluster['count']} tool={cluster['toolName']} repo={cluster['repoName']} "
+            f"hash={cluster['commandHash']} length={cluster['commandLength']}"
+        )
 
 
 def main() -> int:
@@ -151,8 +225,8 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    events = iter_events(Path(args.plugin_data).resolve())
-    summary = summarize(events)
+    events, invalid_records = iter_event_records(Path(args.plugin_data).resolve())
+    summary = summarize(events, invalid_records)
     if args.json:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
     else:
