@@ -2,14 +2,13 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.2.8` combines four skills with plugin-bundled Codex lifecycle hooks.
-This patch improves hook audit reliability by serializing `events.jsonl` writes
-with a cross-process lock, treating problem/inbox-only topics as not requiring a
-requirement archive in `asset_status.py`, classifying more common diagnostic
-commands, and forcing UTF-8 stdout in the inbox lifecycle inspector. It keeps
-the v0.2.7 audit report diagnostics and the v0.2.6 closeout UX improvements for
-push-only closeouts, cleanup-only abandonment turns, and workspace/worktree
-context.
+Version `0.2.9` combines four skills with plugin-bundled Codex lifecycle hooks.
+This patch routes hook execution through plugin-owned launchers instead of naked
+`python` commands, so Windows sessions use Git Bash and the shared shell launcher
+skips WindowsApps Python aliases before running `asset_hook.py`. It also names
+per-session audit directories as `<project>--<session-id>` for easier local
+inspection. It keeps the v0.2.8 audit reliability updates, v0.2.7 audit report
+diagnostics, and v0.2.6 closeout UX improvements.
 
 The plugin provides four skills:
 
@@ -92,7 +91,7 @@ verification results, user feedback, and plan-boundary checkpoints, then routes
 or defers them at the final `asset_gate`.
 
 Hook usage events are written under `PLUGIN_DATA` as per-session `events.jsonl`
-files. Appends are serialized with a per-file lock so concurrent hook processes
+files in `<project>--<session-id>` directories. Appends are serialized with a per-file lock so concurrent hook processes
 do not interleave JSONL lines. Events record structured metadata such as hook event name, decision,
 reason code, command kind, command hash/length, hook duration, exit code, signal
 names, per-tool signal deltas, asset-write markers, and candidate counts. They do

@@ -25,6 +25,8 @@ INBOX_INSPECTOR = SKILLS / "write-superpowers-problem" / "scripts" / "inspect_in
 HOOKS_CONFIG = ROOT / "hooks" / "hooks.json"
 HOOK_SCRIPT = ROOT / "hooks" / "asset_hook.py"
 HOOK_REPORT = ROOT / "hooks" / "asset_hook_report.py"
+HOOK_LAUNCHER = ROOT / "hooks" / "run_asset_hook.cmd"
+HOOK_BASH_LAUNCHER = ROOT / "hooks" / "run_asset_hook.sh"
 
 
 class AssetScriptTests(unittest.TestCase):
@@ -107,6 +109,9 @@ class AssetScriptTests(unittest.TestCase):
             encoding="utf-8",
         )
         return repo
+
+    def audit_dir(self, plugin_data: Path, repo: Path, session_id: str = "session-1") -> Path:
+        return plugin_data / f"{repo.name}--{session_id}"
 
     def add_archive(self, repo: Path) -> Path:
         archive = repo / "docs/superpowers/archives/2026-05/2026-05-01-demo-feature-archives.md"
@@ -705,12 +710,45 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         ):
             self.assertIn(event_name, hooks)
             command = hooks[event_name][0]["hooks"][0]["command"]
-            self.assertIn("asset_hook.py", command)
+            self.assertIn("run_asset_hook.cmd", command)
 
         self.assertNotIn("UserPromptSubmit", hooks)
         self.assertNotIn("SubagentStart", hooks)
         self.assertNotIn("SubagentStop", hooks)
         self.assertIn("functions.update_plan", hooks["PostToolUse"][0]["matcher"])
+
+    def test_hook_config_uses_launcher_instead_of_naked_interpreter(self) -> None:
+        config = json.loads(HOOKS_CONFIG.read_text(encoding="utf-8"))
+        forbidden = r'(^|[;&|]\s*)(python|python\.exe|py|bash|node|npm)\b'
+
+        self.assertTrue(HOOK_LAUNCHER.is_file())
+        self.assertTrue(HOOK_BASH_LAUNCHER.is_file())
+        for registrations in config["hooks"].values():
+            command = registrations[0]["hooks"][0]["command"]
+            self.assertIn("run_asset_hook.cmd", command)
+            self.assertNotRegex(command, forbidden)
+
+    def test_hook_state_directory_includes_project_name_and_session_id(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "git status --short"},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        self.assertTrue((plugin_data / "repo--session-1" / "state.json").is_file())
+        self.assertTrue((plugin_data / "repo--session-1" / "events.jsonl").is_file())
 
     def test_session_start_injects_context_only_for_asset_repo(self) -> None:
         repo = self.create_repo()
@@ -829,8 +867,8 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
             self.assertEqual(code, 0, stderr)
             self.assertEqual(stdout, "")
 
-        self.assertFalse((plugin_data / "session-1" / "state.json").exists())
-        self.assertFalse((plugin_data / "session-1" / "events.jsonl").exists())
+        self.assertFalse((self.audit_dir(plugin_data, repo) / "state.json").exists())
+        self.assertFalse((self.audit_dir(plugin_data, repo) / "events.jsonl").exists())
 
     def test_post_tool_use_update_plan_marks_plan_boundary_without_prompting(self) -> None:
         repo = self.create_repo()
@@ -856,12 +894,12 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
 
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout, "")
-        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["meaningfulWorkSignals"], ["plan-boundary"])
 
         events = [
             json.loads(line)
-            for line in (plugin_data / "session-1" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
         self.assertEqual(events[-1]["hookEventName"], "PostToolUse")
         self.assertEqual(events[-1]["commandKind"], "plan-update")
@@ -891,7 +929,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
 
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout, "")
-        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertTrue(state["assetGateDue"])
 
         code, stdout, stderr = self.run_hook(
@@ -956,7 +994,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
 
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout, "")
-        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertTrue(state["assetGateDue"])
         self.assertEqual(state["meaningfulWorkSignals"], ["plan-boundary"])
 
@@ -990,7 +1028,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
 
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout, "")
-        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertFalse(state["assetGateDue"])
 
     def test_post_tool_use_marks_meaningful_work_and_stop_requires_asset_gate(self) -> None:
@@ -1087,7 +1125,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
 
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout, "")
-        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["meaningfulWorkSignals"], [])
         self.assertEqual(state["verificationEvidence"], [])
 
@@ -1126,10 +1164,10 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(stdout, "")
         events = [
             json.loads(line)
-            for line in (plugin_data / "session-1" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
         self.assertEqual(events[-1]["reasonCode"], "push_only_closeout")
-        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["meaningfulWorkSignals"], [])
 
     def test_stop_allows_cleanup_only_abandonment_without_reprompting_asset_gate(self) -> None:
@@ -1169,10 +1207,10 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(stdout, "")
         events = [
             json.loads(line)
-            for line in (plugin_data / "session-1" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
         self.assertEqual(events[-1]["reasonCode"], "cleanup_only_auto_none")
-        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["meaningfulWorkSignals"], [])
         self.assertFalse(state["assetFilesChanged"])
 
@@ -1217,7 +1255,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
 
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout, "")
-        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["meaningfulWorkSignals"], ["verification-failed"])
         self.assertEqual(state["verificationEvidence"][0]["status"], "failed")
         self.assertEqual(state["verificationEvidence"][0]["exitCode"], 1)
@@ -1241,7 +1279,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
 
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout, "")
-        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["meaningfulWorkSignals"], [])
         self.assertEqual(state["verificationEvidence"], [])
 
@@ -1279,7 +1317,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout, "")
         self.assertFalse((repo / "AGENTS.md").exists())
-        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertFalse(state["assetFilesChanged"])
         self.assertEqual(state["meaningfulWorkSignals"], [])
 
@@ -1329,7 +1367,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertTrue((repo / "docs/superpowers/problems").is_dir())
         self.assertTrue((repo / "docs/superpowers/inbox").is_dir())
 
-        state = json.loads((plugin_data / "session-1" / "state.json").read_text(encoding="utf-8"))
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertTrue(state["assetFilesChanged"])
         self.assertEqual(state["assetBootstrap"]["action"], "written")
         self.assertIn("docs/superpowers/problems", state["assetBootstrap"]["createdDirs"])
@@ -1395,7 +1433,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(stdout, "")
         events = [
             json.loads(line)
-            for line in (plugin_data / "session-1" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
         post_compact_event = events[-1]
         self.assertEqual(post_compact_event["hookEventName"], "PostCompact")
@@ -1433,7 +1471,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
 
         events = [
             json.loads(line)
-            for line in (plugin_data / "session-1" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
 
         self.assertGreaterEqual(len(events), 2)
@@ -1667,7 +1705,7 @@ for index in range(25):
 
         events = [
             json.loads(line)
-            for line in (plugin_data / "session-1" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
 
         self.assertEqual(

@@ -434,13 +434,18 @@ def import_bootstrap_module() -> Any:
 
 
 def state_path(event: dict[str, Any]) -> Path:
-    session_id = safe_segment(str(event.get("session_id") or "unknown-session"))
     plugin_data = Path(os.environ.get("PLUGIN_DATA") or ".asset-plugin-data")
-    return plugin_data / session_id / "state.json"
+    return plugin_data / audit_session_segment(event) / "state.json"
 
 
 def events_path(event: dict[str, Any]) -> Path:
     return state_path(event).with_name("events.jsonl")
+
+
+def audit_session_segment(event: dict[str, Any]) -> str:
+    project_name = Path(str(event.get("cwd") or "unknown-project")).name or "unknown-project"
+    session_id = str(event.get("session_id") or "unknown-session")
+    return f"{safe_segment(project_name)}--{safe_segment(session_id)}"
 
 
 def append_usage_event(
