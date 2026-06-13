@@ -371,6 +371,123 @@ Promote if repeated.
         )
         return inbox
 
+    def add_project_index_assets(self, repo: Path, *, duplicate_checklist_link: bool = False) -> None:
+        milestone_root = repo / "docs/milestones/2026-06/demo-milestone"
+        milestone_root.mkdir(parents=True, exist_ok=True)
+        (milestone_root / "README.md").write_text(
+            "# Demo Milestone\n\n## Strategic Significance\n\nImportant.\n",
+            encoding="utf-8",
+        )
+        (milestone_root / "CHECKLIST.md").write_text(
+            """# Demo Milestone Checklist
+
+## Progress Summary
+
+- Status: In Progress
+- Progress: 0/1
+- Done: 0
+- In progress: 1
+- Not started: 0
+
+## Checklist
+
+- [ ] 1. Demo slice
+  - Status: In Progress
+  - Related spec: None yet.
+  - Related plan: None yet.
+  - Related archive: None yet.
+  - Completion signal: Pending.
+""",
+            encoding="utf-8",
+        )
+        checklist_cell = "[Checklist](2026-06/demo-milestone/CHECKLIST.md)"
+        if duplicate_checklist_link:
+            checklist_cell = (
+                "[Checklist](2026-06/demo-milestone/CHECKLIST.md) "
+                "[Checklist copy](2026-06/demo-milestone/CHECKLIST.md)"
+            )
+        (repo / "docs/milestones/INDEX.md").write_text(
+            f"""# Milestones
+
+| Month | Milestone | Checklist | Status | Progress | Notes |
+| --- | --- | --- | --- | --- | --- |
+| 2026-06 | [Demo Milestone](2026-06/demo-milestone/README.md) | {checklist_cell} | In Progress | 0/1 | Important |
+""",
+            encoding="utf-8",
+        )
+        debt_root = repo / "docs/technical-debt/2026-06"
+        debt_root.mkdir(parents=True, exist_ok=True)
+        (debt_root / "2026-06-13-demo-debt-debt.md").write_text(
+            """# Demo Debt
+
+- Date: `2026-06-13`
+- Topic slug: `demo-debt`
+- Status: `Open`
+- Milestone: `Demo Milestone`
+- Debt type: `Architecture`
+- Priority: `Medium`
+- Revisit trigger: `Before adding another demo slice.`
+- Scope: `Demo`
+- Related slice: `Demo slice`
+
+## Summary
+
+Debt.
+
+## Why This Is Debt
+
+It blocks future work.
+
+## Current Impact
+
+More code drift.
+
+## Resolution Criteria
+
+- Shared helper exists.
+
+## Initial Resolution Direction
+
+Extract helper.
+
+## Non-Goals
+
+- New behavior.
+
+## Related Assets
+
+- None yet.
+""",
+            encoding="utf-8",
+        )
+        (repo / "docs/technical-debt/INDEX.md").write_text(
+            """# Technical Debt Index
+
+| Month | Debt | Status | Priority | Milestone | Revisit Trigger | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-06 | [Demo debt](2026-06/2026-06-13-demo-debt-debt.md) | Open | Medium | Demo Milestone | Before adding another demo slice. | Demo |
+""",
+            encoding="utf-8",
+        )
+
+    def load_index_module(self) -> object:
+        scripts_root = SKILLS / "compound-development-asset" / "scripts"
+        sys.path.insert(0, str(scripts_root))
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "asset_core_indexes",
+                scripts_root / "asset_core" / "indexes.py",
+            )
+            self.assertIsNotNone(spec)
+            module = importlib.util.module_from_spec(spec)
+            assert spec and spec.loader
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+            return module
+        finally:
+            sys.modules.pop("asset_core_indexes", None)
+            sys.path.remove(str(scripts_root))
+
     def test_spec_plan_without_archive_routes_to_archive(self) -> None:
         repo = self.create_repo()
         result = self.run_json(ROUTER, repo, "--keywords", "demo", "feature", "--json")
@@ -524,99 +641,45 @@ Promote if repeated.
         self.assertEqual(self.run_json(PROBLEM_VALIDATOR, problem, "--json")["issues"], [])
         self.assertEqual(self.run_json(CHECKER, repo, "--json")["issues"], [])
 
+    def test_check_area_accepts_repo_root_for_superpowers_indexes(self) -> None:
+        repo = self.create_repo()
+        self.add_archive(repo)
+        (repo / "docs/superpowers/archives/INDEX.md").write_text(
+            """# Superpowers Archive Index
+
+## 2026-05
+
+- [missing-archive.md](./2026-05/missing-archive.md): Missing archive.
+""",
+            encoding="utf-8",
+        )
+        module = self.load_index_module()
+
+        issues = module.check_area(repo, "archives")
+
+        self.assertIn("dead_link", {issue["code"] for issue in issues})
+
+    def test_check_indexes_accepts_docs_root_for_all_areas(self) -> None:
+        repo = self.create_repo()
+        self.add_archive(repo)
+        self.add_problem(repo)
+        self.add_project_index_assets(repo)
+
+        result = self.run_json(CHECKER, repo / "docs", "--area", "all", "--json")
+
+        self.assertEqual(result["issues"], [])
+
+    def test_check_indexes_reports_duplicate_table_local_links(self) -> None:
+        repo = self.create_repo()
+        self.add_project_index_assets(repo, duplicate_checklist_link=True)
+
+        result = self.run_json_fail(CHECKER, repo, "--area", "milestones", "--json")
+
+        self.assertIn("duplicate_entry", {issue["code"] for issue in result["issues"]})
+
     def test_check_indexes_accepts_milestone_and_technical_debt_areas(self) -> None:
         repo = self.create_repo()
-        milestone_root = repo / "docs/milestones/2026-06/demo-milestone"
-        milestone_root.mkdir(parents=True, exist_ok=True)
-        (milestone_root / "README.md").write_text(
-            "# Demo Milestone\n\n## Strategic Significance\n\nImportant.\n",
-            encoding="utf-8",
-        )
-        (milestone_root / "CHECKLIST.md").write_text(
-            """# Demo Milestone Checklist
-
-## Progress Summary
-
-- Status: In Progress
-- Progress: 0/1
-- Done: 0
-- In progress: 1
-- Not started: 0
-
-## Checklist
-
-- [ ] 1. Demo slice
-  - Status: In Progress
-  - Related spec: None yet.
-  - Related plan: None yet.
-  - Related archive: None yet.
-  - Completion signal: Pending.
-""",
-            encoding="utf-8",
-        )
-        (repo / "docs/milestones/INDEX.md").write_text(
-            """# Milestones
-
-| Month | Milestone | Checklist | Status | Progress | Notes |
-| --- | --- | --- | --- | --- | --- |
-| 2026-06 | [Demo Milestone](2026-06/demo-milestone/README.md) | [Checklist](2026-06/demo-milestone/CHECKLIST.md) | In Progress | 0/1 | Important |
-""",
-            encoding="utf-8",
-        )
-        debt_root = repo / "docs/technical-debt/2026-06"
-        debt_root.mkdir(parents=True, exist_ok=True)
-        (debt_root / "2026-06-13-demo-debt-debt.md").write_text(
-            """# Demo Debt
-
-- Date: `2026-06-13`
-- Topic slug: `demo-debt`
-- Status: `Open`
-- Milestone: `Demo Milestone`
-- Debt type: `Architecture`
-- Priority: `Medium`
-- Revisit trigger: `Before adding another demo slice.`
-- Scope: `Demo`
-- Related slice: `Demo slice`
-
-## Summary
-
-Debt.
-
-## Why This Is Debt
-
-It blocks future work.
-
-## Current Impact
-
-More code drift.
-
-## Resolution Criteria
-
-- Shared helper exists.
-
-## Initial Resolution Direction
-
-Extract helper.
-
-## Non-Goals
-
-- New behavior.
-
-## Related Assets
-
-- None yet.
-""",
-            encoding="utf-8",
-        )
-        (repo / "docs/technical-debt/INDEX.md").write_text(
-            """# Technical Debt Index
-
-| Month | Debt | Status | Priority | Milestone | Revisit Trigger | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| 2026-06 | [Demo debt](2026-06/2026-06-13-demo-debt-debt.md) | Open | Medium | Demo Milestone | Before adding another demo slice. | Demo |
-""",
-            encoding="utf-8",
-        )
+        self.add_project_index_assets(repo)
 
         self.assertEqual(self.run_json(CHECKER, repo, "--area", "milestones", "--json")["issues"], [])
         self.assertEqual(self.run_json(CHECKER, repo, "--area", "technical-debt", "--json")["issues"], [])

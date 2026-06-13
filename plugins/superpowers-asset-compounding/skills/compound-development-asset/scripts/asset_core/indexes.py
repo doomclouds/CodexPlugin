@@ -10,6 +10,7 @@ from asset_core.topics import date_slug_from_name
 ENTRY_RE = re.compile(r"^- \[(?P<label>[^\]]+)\]\((?P<link>[^)]+)\):(?P<summary>.*)$")
 MONTH_RE = re.compile(r"^## (?P<month>\d{4}-\d{2})\s*$")
 TABLE_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+INDEXED_AREAS = ("archives", "problems", "inbox")
 
 
 def parse_index(index_file: Path) -> tuple[list[str], list[dict[str, str]]]:
@@ -52,22 +53,32 @@ def parse_table_index(index_file: Path) -> list[dict[str, object]]:
     return entries
 
 
-def _repo_root_from_superpowers_root(root: Path) -> Path:
+def _normalize_roots(root: Path) -> tuple[Path, Path]:
+    root = root.resolve()
     if root.name == "superpowers" and root.parent.name == "docs":
-        return root.parent.parent
+        return root.parent.parent, root
+    if root.name == "docs" and (root / "superpowers").is_dir():
+        return root.parent, root / "superpowers"
     if (root / "docs" / "superpowers").is_dir():
-        return root
-    return root
+        return root, root / "docs" / "superpowers"
+    if any((root / area).is_dir() for area in INDEXED_AREAS):
+        return root, root
+    return root, root / "docs" / "superpowers"
 
 
 def _area_root(root: Path, area: str) -> Path:
     config = ASSET_AREAS[area]
     configured_root = str(config.get("root", ""))
+    repo_root, superpowers_root = _normalize_roots(root)
     if configured_root.startswith("docs/superpowers/"):
-        return root / area
+        return superpowers_root / area
     if configured_root.startswith("docs/"):
-        return _repo_root_from_superpowers_root(root) / Path(configured_root)
+        return repo_root / Path(configured_root)
     return root / area
+
+
+def _is_local_link(link: str) -> bool:
+    return bool(link) and "://" not in link and not link.startswith("#")
 
 
 def _issue(severity: str, area: str, code: str, message: str) -> dict[str, str]:
@@ -172,19 +183,22 @@ def _check_table_index(area: str, area_root: Path, index_name: str, suffix: str)
         assert isinstance(links, list)
         for link_info in links:
             link = str(link_info["link"]).split("#", 1)[0]
+            if not _is_local_link(link):
+                continue
             target = (index_file.parent / link).resolve()
+            if str(target) in seen_targets:
+                issues.append(
+                    _issue(
+                        "error",
+                        area,
+                        "duplicate_entry",
+                        f"Duplicate link at line {entry['line']}: {link_info['link']}",
+                    )
+                )
+            seen_targets[str(target)] = str(entry["line"])
+
             if target.name.endswith(suffix):
                 indexed_targets.add(target)
-                if str(target) in seen_targets:
-                    issues.append(
-                        _issue(
-                            "error",
-                            area,
-                            "duplicate_entry",
-                            f"Duplicate link at line {entry['line']}: {link_info['link']}",
-                        )
-                    )
-                seen_targets[str(target)] = str(entry["line"])
 
             if not target.exists():
                 issues.append(
