@@ -19,6 +19,7 @@ CHECKER = SKILLS / "compound-development-asset" / "scripts" / "check_indexes.py"
 COMPLETION_GATE = SKILLS / "compound-development-asset" / "scripts" / "check_completion_gate.py"
 ASSET_STATUS = SKILLS / "compound-development-asset" / "scripts" / "asset_status.py"
 ASSET_CLOSEOUT = SKILLS / "compound-development-asset" / "scripts" / "asset_closeout.py"
+MILESTONE_ASSETS = SKILLS / "compound-development-asset" / "scripts" / "milestone_assets.py"
 BOOTSTRAP = SKILLS / "compound-development-asset" / "scripts" / "bootstrap_asset_compounding.py"
 ARCHIVE_VALIDATOR = SKILLS / "archive-superpowers-feature" / "scripts" / "validate_archive_asset.py"
 PROBLEM_VALIDATOR = SKILLS / "write-superpowers-problem" / "scripts" / "validate_problem_asset.py"
@@ -716,6 +717,85 @@ Extract helper.
 
         self.assertEqual(self.run_json(CHECKER, repo, "--area", "milestones", "--json")["issues"], [])
         self.assertEqual(self.run_json(CHECKER, repo, "--area", "technical-debt", "--json")["issues"], [])
+
+    def test_milestone_assets_create_recompute_and_check(self) -> None:
+        repo = self.create_repo()
+        result = self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "First Slice",
+            "--slice",
+            "Second Slice",
+            "--strategic-significance",
+            "Demo Alpha proves a strategically important two-stage project path.",
+            "--acceptance",
+            "Demo Alpha can complete both tracked stages.",
+            "--write",
+            "--json",
+        )
+        self.assertEqual(result["status"], "created")
+        checklist = repo / "docs/milestones/2026-06/demo-alpha/CHECKLIST.md"
+        self.assertTrue(checklist.is_file())
+
+        updated = self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "update-slice",
+            "--slug",
+            "demo-alpha",
+            "--slice",
+            "First Slice",
+            "--status",
+            "Done",
+            "--spec",
+            "../../../superpowers/specs/2026-05-01-demo-feature-design.md",
+            "--plan",
+            "../../../superpowers/plans/2026-05-01-demo-feature.md",
+            "--archive",
+            "../../../superpowers/archives/2026-05/2026-05-01-demo-feature-archives.md",
+            "--completion-signal",
+            "Demo feature archive exists.",
+            "--write",
+            "--json",
+        )
+        self.assertEqual(updated["status"], "updated")
+        recomputed = self.run_json(MILESTONE_ASSETS, repo, "recompute", "--slug", "demo-alpha", "--write", "--json")
+        self.assertEqual(recomputed["progress"], "1/2")
+        checked = self.run_json(MILESTONE_ASSETS, repo, "check", "--slug", "demo-alpha", "--json")
+        self.assertEqual(checked["issues"], [])
+
+    def test_milestone_check_warns_for_small_milestone_without_strategic_significance(self) -> None:
+        repo = self.create_repo()
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "thin-alpha",
+            "--title",
+            "Thin Alpha",
+            "--slice",
+            "First Slice",
+            "--slice",
+            "Second Slice",
+            "--acceptance",
+            "Thin Alpha completes both stages.",
+            "--write",
+            "--json",
+        )
+        result = self.run_json(MILESTONE_ASSETS, repo, "check", "--slug", "thin-alpha", "--json")
+        self.assertEqual(result["issues"][0]["code"], "small_milestone_missing_strategic_significance")
+        self.assertEqual(result["issues"][0]["severity"], "warning")
 
     def test_archive_validator_rejects_missing_contract_sections(self) -> None:
         repo = self.create_repo()
