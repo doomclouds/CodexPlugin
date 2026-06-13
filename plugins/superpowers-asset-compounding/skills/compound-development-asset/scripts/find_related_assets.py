@@ -15,7 +15,11 @@ AREA_WEIGHTS = {
     "inbox": 3,
     "specs": 2,
     "plans": 2,
+    "milestones": 1,
+    "technical-debt": 1,
 }
+
+DEFAULT_AREAS = ["archives", "problems", "inbox", "specs", "plans", "milestones", "technical-debt"]
 
 
 def score_asset(path: Path, text: str, terms: list[str]) -> tuple[int, list[str]]:
@@ -45,7 +49,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Find related specs/plans/archives/problems/inbox notes.")
     parser.add_argument("root", help="Repository root or docs/superpowers path.")
     parser.add_argument("keywords", nargs="+", help="Slug fragments or keywords.")
-    parser.add_argument("--area", action="append", choices=["specs", "plans", "archives", "problems", "inbox"], help="Limit search area. Can be repeated.")
+    parser.add_argument(
+        "--area",
+        action="append",
+        choices=["specs", "plans", "archives", "problems", "inbox", "milestones", "technical-debt"],
+        help="Limit search area. Can be repeated.",
+    )
     parser.add_argument("--limit", type=int, default=12)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -53,7 +62,7 @@ def main() -> int:
     terms = tokenize_query(args.keywords)
     superpowers_root = discover_superpowers_root(Path(args.root))
     results = []
-    for asset in iter_assets(superpowers_root, args.area):
+    for asset in iter_assets(superpowers_root, args.area or DEFAULT_AREAS):
         text = read_text(asset.path)
         score, hits = score_asset(asset.path, text, terms)
         if not score:

@@ -562,11 +562,56 @@ Extract helper.
         result = self.run_json(FINDER, repo, "demo", "feature", "--json")
         self.assertIn("plans", {item["area"] for item in result["results"]})
 
+    def test_finder_includes_project_level_ledgers_by_default(self) -> None:
+        repo = self.create_repo()
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "Demo Feature",
+            "--strategic-significance",
+            "Demo Alpha proves a strategically important project path.",
+            "--acceptance",
+            "Demo Alpha can complete tracked stages.",
+            "--write",
+            "--json",
+        )
+        self.create_technical_debt(repo, slug="demo-feature", title="Demo Feature Debt")
+
+        result = self.run_json(FINDER, repo, "demo", "feature", "--json")
+
+        self.assertIn("milestones", {item["area"] for item in result["results"]})
+        self.assertIn("technical-debt", {item["area"] for item in result["results"]})
+
     def test_existing_archive_routes_to_update_existing(self) -> None:
         repo = self.create_repo()
         self.add_archive(repo)
         result = self.run_json(ROUTER, repo, "--keywords", "demo", "feature", "completed", "--json")
         self.assertEqual(result["routes"], ["update-existing"])
+
+    def test_changed_milestone_and_technical_debt_assets_route_to_update_existing(self) -> None:
+        repo = self.create_repo()
+
+        result = self.run_json(
+            ROUTER,
+            repo,
+            "--changed-file",
+            "docs/milestones/2026-06/demo-alpha/README.md",
+            "--changed-file",
+            "docs/technical-debt/2026-06/2026-06-13-demo-feature-debt.md",
+            "--json",
+        )
+
+        self.assertEqual(result["routes"], ["update-existing"])
+        self.assertIn("Changed files include milestone assets.", result["facts"])
+        self.assertIn("Changed files include technical-debt assets.", result["facts"])
 
     def test_lightweight_polish_signal_routes_to_none(self) -> None:
         repo = self.temp_root / "lightweight_repo"
@@ -1373,6 +1418,78 @@ Extract helper.
         self.assertEqual(result["inbox_assets"], [])
         self.assertEqual(result["indexes"]["status"], "pass")
         self.assertEqual(result["completion_gate"]["status"], "pass")
+
+    def test_asset_status_and_closeout_report_milestone_and_debt_gaps(self) -> None:
+        repo = self.create_repo()
+        self.add_archive(repo)
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "Demo Feature",
+            "--slice",
+            "Second Slice",
+            "--strategic-significance",
+            "Demo Alpha proves a strategically important two-stage project path.",
+            "--acceptance",
+            "Demo Alpha can complete both tracked stages.",
+            "--write",
+            "--json",
+        )
+        self.run_json(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "create",
+            "--date",
+            "2026-06-13",
+            "--slug",
+            "demo-feature",
+            "--title",
+            "Demo Feature Debt",
+            "--milestone",
+            "Demo Alpha",
+            "--debt-type",
+            "Architecture",
+            "--priority",
+            "Medium",
+            "--revisit-trigger",
+            "Before adding another demo feature.",
+            "--scope",
+            "Demo",
+            "--related-slice",
+            "Demo Feature",
+            "--summary",
+            "Demo feature debt remains open.",
+            "--why",
+            "It affects future feature work.",
+            "--impact",
+            "Future slices will copy behavior.",
+            "--resolution-criteria",
+            "Archive proves repayment.",
+            "--resolution-direction",
+            "Refactor helper.",
+            "--non-goal",
+            "Changing behavior.",
+            "--write",
+            "--json",
+        )
+
+        status = self.run_json(ASSET_STATUS, repo, "--topic", "demo-feature", "--json")
+        self.assertEqual(status["requirement_archive"]["status"], "found")
+        self.assertEqual(len(status["milestone_assets"]), 1)
+        self.assertEqual(len(status["technical_debt_assets"]), 1)
+
+        closeout = self.run_json_fail(ASSET_CLOSEOUT, repo, "--topic", "demo-feature", "--json")
+        self.assertEqual(closeout["route"], "update-existing")
+        self.assertIn("update milestone progress", closeout["required_actions"])
+        self.assertIn("resolve or update technical debt records", closeout["required_actions"])
 
     def test_asset_status_treats_inbox_only_topic_as_not_requiring_archive(self) -> None:
         repo = self.create_repo()

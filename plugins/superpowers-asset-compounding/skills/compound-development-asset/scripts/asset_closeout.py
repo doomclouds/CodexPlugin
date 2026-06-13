@@ -9,6 +9,33 @@ from pathlib import Path
 from asset_status import build_status
 
 
+def has_milestone_progress_issue(status: dict[str, object]) -> bool:
+    milestone_status = status.get("milestone_status", {})
+    if not isinstance(milestone_status, dict):
+        return False
+    issues = milestone_status.get("issues", [])
+    if not isinstance(issues, list):
+        return False
+    for item in issues:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code", ""))
+        message = str(item.get("message", "")).lower()
+        if code in {"milestone_status_progress_drift", "milestone_progress_mismatch", "milestone_index_mismatch"}:
+            return True
+        if "status/progress" in message or ("progress" in message and "milestone" in message):
+            return True
+    return False
+
+
+def has_technical_debt_issue(status: dict[str, object]) -> bool:
+    technical_debt_status = status.get("technical_debt_status", {})
+    if not isinstance(technical_debt_status, dict):
+        return False
+    issues = technical_debt_status.get("issues", [])
+    return isinstance(issues, list) and bool(issues)
+
+
 def build_closeout(root: Path, topic: str) -> dict[str, object]:
     status = build_status(root, topic)
     missing: list[str] = []
@@ -30,6 +57,12 @@ def build_closeout(root: Path, topic: str) -> dict[str, object]:
     if completion_gate["status"] != "pass" and "requirement_archive" not in missing:
         missing.append("completion_gate")
         required_actions.append("resolve completion gate issues")
+    if has_milestone_progress_issue(status):
+        missing.append("milestone_progress")
+        required_actions.append("update milestone progress")
+    if has_technical_debt_issue(status):
+        missing.append("technical_debt")
+        required_actions.append("resolve or update technical debt records")
 
     route = "none"
     if "requirement_archive" in missing:
@@ -48,6 +81,8 @@ def build_closeout(root: Path, topic: str) -> dict[str, object]:
             "archive": requirement_archive.get("path"),
             "problems": [item["path"] for item in status["problem_assets"]],
             "inbox": [item["path"] for item in status["inbox_assets"]],
+            "milestones": [item["path"] for item in status["milestone_assets"]],
+            "technical_debt": [item["path"] for item in status["technical_debt_assets"]],
         },
         "asset_candidates": [],
         "handoff_block": {

@@ -48,6 +48,12 @@ def classify_from_files(files: list[str]) -> tuple[set[str], list[str]]:
     if any("/docs/superpowers/archives/" in f or f.startswith("docs/superpowers/archives/") for f in normalized):
         routes.add("archive")
         facts.append("Changed files include archive assets.")
+    if any("/docs/milestones/" in f or f.startswith("docs/milestones/") for f in normalized):
+        routes.add("update-existing")
+        facts.append("Changed files include milestone assets.")
+    if any("/docs/technical-debt/" in f or f.startswith("docs/technical-debt/") for f in normalized):
+        routes.add("update-existing")
+        facts.append("Changed files include technical-debt assets.")
     if any("/docs/superpowers/specs/" in f or "/docs/superpowers/plans/" in f or f.startswith("docs/superpowers/specs/") or f.startswith("docs/superpowers/plans/") for f in normalized):
         routes.add("archive")
         facts.append("Changed files include specs/plans; a completed thread may need archive coverage.")
@@ -274,8 +280,16 @@ def main() -> int:
     terms = tokenize_query(args.keywords + files)
     file_routes, file_facts = classify_from_files(files)
     text_routes, text_facts = classify_from_text(query_text, problem_gate=args.problem_gate)
+    changed_project_ledger = any(
+        fact in file_facts
+        for fact in ("Changed files include milestone assets.", "Changed files include technical-debt assets.")
+    )
+    if not args.keywords and changed_project_ledger:
+        text_routes.discard("archive")
     related = find_related(superpowers_root, terms, args.limit)
     related_routes, related_facts = classify_from_related_assets(related)
+    if not args.keywords and changed_project_ledger:
+        related_routes.discard("archive")
     routes = normalize_routes(file_routes | text_routes | related_routes, related)
     result = {
         "routes": routes,
