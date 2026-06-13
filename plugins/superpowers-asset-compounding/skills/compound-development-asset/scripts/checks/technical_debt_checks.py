@@ -11,6 +11,18 @@ ALLOWED_PRIORITIES = {"Low", "Medium", "High"}
 
 META_RE = re.compile(r"^\s*- (?P<key>[^:]+): (?P<value>.*)\s*$")
 DEBT_LINK_RE = re.compile(r"\[[^\]]+\]\((?P<link>[^)]+-debt\.md)\)")
+DEBT_FILENAME_RE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>.+)-debt\.md$")
+REQUIRED_METADATA = {
+    "date": "Date",
+    "topic_slug": "Topic slug",
+    "status": "Status",
+    "milestone": "Milestone",
+    "debt_type": "Debt type",
+    "priority": "Priority",
+    "revisit_trigger": "Revisit trigger",
+    "scope": "Scope",
+    "related_slice": "Related slice",
+}
 
 
 def _repo_root(root: Path) -> Path:
@@ -68,6 +80,10 @@ def _has_meaningful_text(text: str) -> bool:
     return bool(cleaned) and cleaned not in {"None yet.", "TBD", "- TBD", "{{related_assets}}"}
 
 
+def _has_archive_reference(text: str) -> bool:
+    return "-archives.md" in text or "docs/superpowers/archives" in text
+
+
 def _debt_files(root: Path) -> list[Path]:
     debt_root = _technical_debt_root(root)
     if not debt_root.is_dir():
@@ -75,12 +91,47 @@ def _debt_files(root: Path) -> list[Path]:
     return sorted(path for path in debt_root.glob("*/*-debt.md") if path.name != "INDEX.md")
 
 
+def _filename_metadata(path: Path) -> tuple[str, str] | None:
+    match = DEBT_FILENAME_RE.match(path.name)
+    if not match:
+        return None
+    return match.group("date"), match.group("slug")
+
+
+def _filename_slug(path: Path) -> str:
+    parsed = _filename_metadata(path)
+    return parsed[1] if parsed else path.stem.removesuffix("-debt")
+
+
+def find_debts(root: Path, slug: str) -> list[Path]:
+    return [path for path in _debt_files(root) if _filename_slug(path) == slug]
+
+
 def find_debt(root: Path, slug: str) -> Path | None:
-    suffix = f"-{slug}-debt.md"
-    for path in _debt_files(root):
-        if path.name.endswith(suffix):
-            return path
-    return None
+    matches = find_debts(root, slug)
+    return matches[0] if len(matches) == 1 else None
+
+
+def duplicate_slug_issues(root: Path, debts: list[Path]) -> list[dict[str, str]]:
+    repo_root = _repo_root(root)
+    grouped: dict[str, list[Path]] = {}
+    for debt in debts:
+        grouped.setdefault(_filename_slug(debt), []).append(debt)
+
+    issues: list[dict[str, str]] = []
+    for slug, matches in sorted(grouped.items()):
+        if len(matches) <= 1:
+            continue
+        paths = ", ".join(_relative(repo_root, path) for path in matches)
+        issues.append(
+            issue(
+                "error",
+                "duplicate_technical_debt_slug",
+                f"Technical debt slug is ambiguous: {slug} ({paths})",
+                path=_relative(repo_root, _technical_debt_root(root)),
+            )
+        )
+    return issues
 
 
 def parse_debt_metadata(path: Path) -> dict[str, str]:
@@ -117,19 +168,42 @@ def _index_rows(index_file: Path) -> dict[str, dict[str, str]]:
     return rows
 
 
-def _has_archive_reference(path: Path) -> bool:
-    text = path.read_text(encoding="utf-8")
-    return "-archives.md" in text or "docs/superpowers/archives" in text
-
-
 def _check_one(root: Path, debt: Path, index_rows: dict[str, dict[str, str]], has_index: bool) -> list[dict[str, str]]:
     repo_root = _repo_root(root)
     issues: list[dict[str, str]] = []
     metadata = parse_debt_metadata(debt)
     status = metadata.get("status", "")
     priority = metadata.get("priority", "")
+    missing = [label for key, label in REQUIRED_METADATA.items() if not _has_meaningful_text(metadata.get(key, ""))]
+    if missing:
+        issues.append(
+            issue(
+                "error",
+                "missing_debt_metadata",
+                f"Missing required technical debt metadata: {', '.join(missing)}.",
+                path=_relative(repo_root, debt),
+            )
+        )
 
-    if status not in ALLOWED_DEBT_STATUSES:
+    filename = _filename_metadata(debt)
+    if filename is not None:
+        filename_date, filename_slug = filename
+        mismatches: list[str] = []
+        if metadata.get("date") and metadata["date"] != filename_date:
+            mismatches.append(f"Date {metadata['date']!r} != filename date {filename_date!r}")
+        if metadata.get("topic_slug") and metadata["topic_slug"] != filename_slug:
+            mismatches.append(f"Topic slug {metadata['topic_slug']!r} != filename slug {filename_slug!r}")
+        if mismatches:
+            issues.append(
+                issue(
+                    "error",
+                    "debt_filename_metadata_mismatch",
+                    "; ".join(mismatches),
+                    path=_relative(repo_root, debt),
+                )
+            )
+
+    if status and status not in ALLOWED_DEBT_STATUSES:
         issues.append(
             issue(
                 "error",
@@ -139,7 +213,7 @@ def _check_one(root: Path, debt: Path, index_rows: dict[str, dict[str, str]], ha
             )
         )
 
-    if priority not in ALLOWED_PRIORITIES:
+    if priority and priority not in ALLOWED_PRIORITIES:
         issues.append(
             issue(
                 "error",
@@ -150,7 +224,8 @@ def _check_one(root: Path, debt: Path, index_rows: dict[str, dict[str, str]], ha
         )
 
     if status == "Closed":
-        if not _has_meaningful_text(_section_text(debt, "Closure")):
+        closure = _section_text(debt, "Closure")
+        if not _has_meaningful_text(closure):
             issues.append(
                 issue(
                     "error",
@@ -159,7 +234,7 @@ def _check_one(root: Path, debt: Path, index_rows: dict[str, dict[str, str]], ha
                     path=_relative(repo_root, debt),
                 )
             )
-        if not _has_archive_reference(debt):
+        if not _has_archive_reference(closure):
             issues.append(
                 issue(
                     "error",
@@ -221,8 +296,7 @@ def check_technical_debt(root: Path, slug: str | None = None) -> list[dict[str, 
     repo_root = _repo_root(root)
     debt_root = _technical_debt_root(root)
     issues: list[dict[str, str]] = []
-    debts = [find_debt(root, slug)] if slug else _debt_files(root)
-    debts = [path for path in debts if path is not None]
+    debts = find_debts(root, slug) if slug else _debt_files(root)
 
     if slug and not debts:
         return [
@@ -233,6 +307,8 @@ def check_technical_debt(root: Path, slug: str | None = None) -> list[dict[str, 
                 path=_relative(repo_root, debt_root / "*" / f"*-{slug}-debt.md"),
             )
         ]
+
+    issues.extend(duplicate_slug_issues(root, debts if slug else _debt_files(root)))
 
     index_file = debt_root / "INDEX.md"
     has_index = index_file.exists()

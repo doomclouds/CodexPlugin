@@ -11,7 +11,7 @@ from checks.technical_debt_checks import (
     ALLOWED_DEBT_STATUSES,
     ALLOWED_PRIORITIES,
     check_technical_debt,
-    find_debt,
+    find_debts,
     parse_debt_metadata,
 )
 
@@ -19,6 +19,14 @@ from checks.technical_debt_checks import (
 SCRIPTS_ROOT = Path(__file__).resolve().parent
 SKILLS_ROOT = SCRIPTS_ROOT.parents[1]
 TEMPLATE = SKILLS_ROOT / "manage-technical-debt" / "references" / "technical-debt-template.md"
+
+
+class CommandError(Exception):
+    def __init__(self, code: str, message: str, *, path: str | None = None) -> None:
+        super().__init__(message)
+        self.issue = {"severity": "error", "code": code, "message": message}
+        if path:
+            self.issue["path"] = path
 
 
 def repo_root(root: Path) -> Path:
@@ -53,7 +61,7 @@ def render_template(values: dict[str, str]) -> str:
 def month_from_date(date: str) -> str:
     match = re.match(r"^\d{4}-\d{2}-\d{2}$", date)
     if not match:
-        raise SystemExit(f"Invalid date: {date}")
+        raise CommandError("invalid_debt_date", f"Invalid date: {date}")
     return date[:7]
 
 
@@ -114,10 +122,21 @@ def write_index(root: Path, debt: Path, notes: str) -> None:
 
 
 def require_debt(root: Path, slug: str) -> Path:
-    debt = find_debt(root, slug)
-    if debt is None:
-        raise SystemExit(f"Technical debt asset not found: {slug}")
-    return debt
+    matches = find_debts(root, slug)
+    if not matches:
+        raise CommandError(
+            "technical_debt_not_found",
+            f"Technical debt asset not found: {slug}",
+            path=relative(root, technical_debt_root(root) / "*" / f"*-{slug}-debt.md"),
+        )
+    if len(matches) > 1:
+        paths = ", ".join(relative(root, path) for path in matches)
+        raise CommandError(
+            "duplicate_technical_debt_slug",
+            f"Technical debt slug is ambiguous: {slug} ({paths})",
+            path=relative(root, technical_debt_root(root)),
+        )
+    return matches[0]
 
 
 def replace_metadata_value(text: str, key: str, value: str) -> str:
@@ -131,7 +150,7 @@ def replace_metadata_value(text: str, key: str, value: str) -> str:
         else:
             lines.append(line)
     if not replaced:
-        raise SystemExit(f"Missing metadata key: {key}")
+        raise CommandError("missing_debt_metadata", f"Missing metadata key: {key}")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -164,19 +183,21 @@ def append_or_replace_section(text: str, heading: str, body: str) -> str:
 
 def create_debt(args: argparse.Namespace) -> dict[str, object]:
     if args.priority not in ALLOWED_PRIORITIES:
-        raise SystemExit(f"Invalid priority: {args.priority}")
+        raise CommandError("invalid_debt_priority", f"Invalid priority: {args.priority}")
     root = repo_root(Path(args.root))
     month = month_from_date(args.date)
     debt = technical_debt_root(root) / month / f"{args.date}-{args.slug}-debt.md"
-    if debt.exists():
+    existing = find_debts(root, args.slug)
+    if existing:
+        paths = ", ".join(relative(root, path) for path in existing)
         return {
             "status": "needs_attention",
             "issues": [
                 {
                     "severity": "error",
-                    "code": "technical_debt_already_exists",
-                    "message": f"Technical debt asset already exists: {args.slug}",
-                    "path": relative(root, debt),
+                    "code": "duplicate_technical_debt_slug",
+                    "message": f"Technical debt slug already exists: {args.slug} ({paths})",
+                    "path": relative(root, existing[0]),
                 }
             ],
         }
@@ -213,7 +234,7 @@ def create_debt(args: argparse.Namespace) -> dict[str, object]:
 
 def set_status(args: argparse.Namespace) -> dict[str, object]:
     if args.status not in ALLOWED_DEBT_STATUSES:
-        raise SystemExit(f"Invalid status: {args.status}")
+        raise CommandError("invalid_debt_status", f"Invalid status: {args.status}")
     root = repo_root(Path(args.root))
     debt = require_debt(root, args.slug)
     if args.write:
@@ -309,9 +330,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    if args.command in {"create", "set-status", "close"} and not args.write:
-        raise SystemExit(f"{args.command} requires --write to modify files.")
-    result = args.func(args)
+    try:
+        if args.command in {"create", "set-status", "close"} and not args.write:
+            raise CommandError("write_required", f"{args.command} requires --write to modify files.")
+        result = args.func(args)
+    except CommandError as error:
+        result = {"status": "needs_attention", "issues": [error.issue]}
+        print_result(result, getattr(args, "json", False))
+        return 1
     print_result(result, args.json)
     issues = result.get("issues", [])
     if isinstance(issues, list):

@@ -487,6 +487,53 @@ Extract helper.
             encoding="utf-8",
         )
 
+    def create_technical_debt(
+        self,
+        repo: Path,
+        *,
+        date: str = "2026-06-13",
+        slug: str = "demo-debt",
+        title: str = "Demo Debt",
+        priority: str = "Medium",
+    ) -> dict[str, object]:
+        return self.run_json(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "create",
+            "--date",
+            date,
+            "--slug",
+            slug,
+            "--title",
+            title,
+            "--milestone",
+            "Demo Alpha",
+            "--debt-type",
+            "Architecture",
+            "--priority",
+            priority,
+            "--revisit-trigger",
+            "Before adding another demo slice.",
+            "--scope",
+            "Demo runtime",
+            "--related-slice",
+            "Demo Slice",
+            "--summary",
+            "Demo runtime owns duplicated helper logic.",
+            "--why",
+            "The duplication will make future slices drift.",
+            "--impact",
+            "Future search tools will copy fallback behavior.",
+            "--resolution-criteria",
+            "Shared helper is extracted and used by both call sites.",
+            "--resolution-direction",
+            "Extract shared helper functions.",
+            "--non-goal",
+            "Changing public behavior.",
+            "--write",
+            "--json",
+        )
+
     def load_index_module(self) -> object:
         scripts_root = SKILLS / "compound-development-asset" / "scripts"
         sys.path.insert(0, str(scripts_root))
@@ -821,6 +868,128 @@ Extract helper.
         debt.write_text(text + "\n## Closure\n\nClosed without archive.\n", encoding="utf-8")
         result = self.run_json_fail(TECHNICAL_DEBT_ASSETS, repo, "check", "--slug", "unlinked-debt", "--json")
         self.assertEqual(result["issues"][0]["code"], "closed_debt_missing_archive")
+
+    def test_technical_debt_check_requires_archive_link_in_closure_section(self) -> None:
+        repo = self.create_repo()
+        archive = self.add_archive(repo)
+        self.create_technical_debt(repo, slug="closure-link-debt", title="Closure Link Debt")
+        debt = repo / "docs/technical-debt/2026-06/2026-06-13-closure-link-debt-debt.md"
+        archive_link = str(archive.relative_to(repo).as_posix())
+        text = debt.read_text(encoding="utf-8")
+        text = text.replace("- Status: `Open`", "- Status: `Closed`")
+        text = text.replace("- None yet.", f"- Archive: [{archive.name}]({archive_link})")
+        debt.write_text(text + "\n## Closure\n\nClosed without a closure-local archive link.\n", encoding="utf-8")
+
+        result = self.run_json_fail(TECHNICAL_DEBT_ASSETS, repo, "check", "--slug", "closure-link-debt", "--json")
+
+        self.assertIn("closed_debt_missing_archive", {issue["code"] for issue in result["issues"]})
+
+    def test_technical_debt_create_rejects_duplicate_slug_across_months(self) -> None:
+        repo = self.create_repo()
+        self.create_technical_debt(repo, date="2026-06-13", slug="duplicate-debt", title="Duplicate Debt")
+
+        result = self.run_json_fail(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "create",
+            "--date",
+            "2026-07-01",
+            "--slug",
+            "duplicate-debt",
+            "--title",
+            "Duplicate Debt Again",
+            "--milestone",
+            "Demo Alpha",
+            "--debt-type",
+            "Architecture",
+            "--priority",
+            "Medium",
+            "--revisit-trigger",
+            "Before adding another demo slice.",
+            "--scope",
+            "Demo runtime",
+            "--related-slice",
+            "Demo Slice",
+            "--summary",
+            "Demo runtime owns duplicated helper logic.",
+            "--why",
+            "The duplication will make future slices drift.",
+            "--impact",
+            "Future search tools will copy fallback behavior.",
+            "--resolution-criteria",
+            "Shared helper is extracted and used by both call sites.",
+            "--resolution-direction",
+            "Extract shared helper functions.",
+            "--non-goal",
+            "Changing public behavior.",
+            "--write",
+            "--json",
+        )
+
+        self.assertEqual(result["issues"][0]["code"], "duplicate_technical_debt_slug")
+
+    def test_technical_debt_check_and_commands_reject_duplicate_slugs(self) -> None:
+        repo = self.create_repo()
+        self.create_technical_debt(repo, date="2026-06-13", slug="ambiguous-debt", title="Ambiguous Debt")
+        first = repo / "docs/technical-debt/2026-06/2026-06-13-ambiguous-debt-debt.md"
+        second = repo / "docs/technical-debt/2026-07/2026-07-01-ambiguous-debt-debt.md"
+        second.parent.mkdir(parents=True)
+        second.write_text(
+            first.read_text(encoding="utf-8").replace("- Date: `2026-06-13`", "- Date: `2026-07-01`"),
+            encoding="utf-8",
+        )
+
+        checked = self.run_json_fail(TECHNICAL_DEBT_ASSETS, repo, "check", "--slug", "ambiguous-debt", "--json")
+        updated = self.run_json_fail(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "set-status",
+            "--slug",
+            "ambiguous-debt",
+            "--status",
+            "In Progress",
+            "--write",
+            "--json",
+        )
+
+        self.assertEqual(checked["issues"][0]["code"], "duplicate_technical_debt_slug")
+        self.assertEqual(updated["issues"][0]["code"], "duplicate_technical_debt_slug")
+
+    def test_technical_debt_check_requires_metadata_and_filename_match(self) -> None:
+        repo = self.create_repo()
+        self.create_technical_debt(repo, slug="metadata-debt", title="Metadata Debt")
+        debt = repo / "docs/technical-debt/2026-06/2026-06-13-metadata-debt-debt.md"
+        lines = [
+            line
+            for line in debt.read_text(encoding="utf-8").splitlines()
+            if not line.startswith("- Milestone: ")
+        ]
+        text = "\n".join(lines).replace("- Topic slug: `metadata-debt`", "- Topic slug: `different-debt`")
+        debt.write_text(text + "\n", encoding="utf-8")
+
+        result = self.run_json_fail(TECHNICAL_DEBT_ASSETS, repo, "check", "--slug", "metadata-debt", "--json")
+        codes = {issue["code"] for issue in result["issues"]}
+
+        self.assertIn("missing_debt_metadata", codes)
+        self.assertIn("debt_filename_metadata_mismatch", codes)
+
+    def test_technical_debt_set_status_missing_slug_returns_json_error(self) -> None:
+        repo = self.create_repo()
+
+        result = self.run_json_fail(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "set-status",
+            "--slug",
+            "missing-debt",
+            "--status",
+            "In Progress",
+            "--write",
+            "--json",
+        )
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["issues"][0]["code"], "technical_debt_not_found")
 
     def test_milestone_assets_create_recompute_and_check(self) -> None:
         repo = self.create_repo()
