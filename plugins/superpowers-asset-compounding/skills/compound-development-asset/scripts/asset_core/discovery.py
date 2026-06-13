@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from asset_core.areas import ASSET_AREAS, SUPERPOWERS_AREAS
+from asset_core.areas import ASSET_AREAS, PROJECT_INDEXED_AREAS, SUPERPOWERS_AREAS
 
 
 DATE_SLUG_RE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>.+)$")
@@ -64,8 +64,12 @@ def _repo_root_from_asset_root(root: Path) -> Path:
 
 
 def _area_root(root: Path, area: str) -> Path:
-    configured_root = str(ASSET_AREAS[area].get("root", ""))
-    if configured_root.startswith("docs/"):
+    if area in SUPERPOWERS_AREAS:
+        if (root / "docs" / "superpowers").is_dir():
+            return root / "docs" / "superpowers" / area
+        return root / area
+    if area in PROJECT_INDEXED_AREAS:
+        configured_root = str(ASSET_AREAS[area].get("root", ""))
         return _repo_root_from_asset_root(root) / Path(configured_root)
     return root / area
 

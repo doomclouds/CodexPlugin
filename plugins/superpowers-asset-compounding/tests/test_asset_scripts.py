@@ -178,6 +178,42 @@ class AssetScriptTests(unittest.TestCase):
         debt_assets = module.iter_assets(superpowers_root, ["technical-debt"])
         self.assertEqual([(asset.area, asset.title) for asset in debt_assets], [("technical-debt", "Demo Debt")])
 
+    def test_asset_core_iter_assets_preserves_legacy_asset_root_inputs(self) -> None:
+        scripts_root = SKILLS / "compound-development-asset" / "scripts"
+        sys.path.insert(0, str(scripts_root))
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "asset_core_discovery",
+                scripts_root / "asset_core" / "discovery.py",
+            )
+            self.assertIsNotNone(spec)
+            module = importlib.util.module_from_spec(spec)
+            assert spec and spec.loader
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop("asset_core_discovery", None)
+            sys.path.remove(str(scripts_root))
+
+        repo = self.create_repo()
+        superpowers_assets = module.iter_assets(repo / "docs/superpowers")
+        self.assertIn(("specs", "demo-feature"), {(asset.area, asset.slug) for asset in superpowers_assets})
+        self.assertIn(("plans", "demo-feature"), {(asset.area, asset.slug) for asset in superpowers_assets})
+
+        asset_root = self.temp_root / "standalone_asset_root"
+        archive_root = asset_root / "archives/2026-05"
+        archive_root.mkdir(parents=True)
+        (archive_root / "2026-05-01-standalone-feature-archives.md").write_text(
+            "# Standalone Feature Archive\n",
+            encoding="utf-8",
+        )
+
+        loose_assets = module.iter_assets(asset_root)
+        self.assertEqual(
+            [(asset.area, asset.slug, asset.title) for asset in loose_assets],
+            [("archives", "standalone-feature", "Standalone Feature Archive")],
+        )
+
     def add_archive(self, repo: Path) -> Path:
         archive = repo / "docs/superpowers/archives/2026-05/2026-05-01-demo-feature-archives.md"
         archive.write_text(
