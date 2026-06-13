@@ -39,6 +39,22 @@ class AssetScriptTests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.temp_root, ignore_errors=True)
 
+    def test_v030_skills_exist_with_required_metadata(self) -> None:
+        milestone_skill = SKILLS / "manage-superpowers-milestone" / "SKILL.md"
+        debt_skill = SKILLS / "manage-technical-debt" / "SKILL.md"
+        self.assertTrue(milestone_skill.is_file())
+        self.assertTrue(debt_skill.is_file())
+        milestone_text = milestone_skill.read_text(encoding="utf-8")
+        debt_text = debt_skill.read_text(encoding="utf-8")
+        self.assertIn("name: manage-superpowers-milestone", milestone_text)
+        self.assertIn("description:", milestone_text)
+        self.assertIn("milestone_assets.py", milestone_text)
+        self.assertIn("strategic significance", milestone_text.lower())
+        self.assertIn("name: manage-technical-debt", debt_text)
+        self.assertIn("description:", debt_text)
+        self.assertIn("technical_debt_assets.py", debt_text)
+        self.assertIn("technical debt is not split into large and small", debt_text.lower())
+
     def run_json(self, *args: object) -> dict[str, object]:
         completed = subprocess.run(
             ["python", *map(str, args)],
