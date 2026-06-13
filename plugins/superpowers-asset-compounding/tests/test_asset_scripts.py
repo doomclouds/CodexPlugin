@@ -524,6 +524,103 @@ Promote if repeated.
         self.assertEqual(self.run_json(PROBLEM_VALIDATOR, problem, "--json")["issues"], [])
         self.assertEqual(self.run_json(CHECKER, repo, "--json")["issues"], [])
 
+    def test_check_indexes_accepts_milestone_and_technical_debt_areas(self) -> None:
+        repo = self.create_repo()
+        milestone_root = repo / "docs/milestones/2026-06/demo-milestone"
+        milestone_root.mkdir(parents=True, exist_ok=True)
+        (milestone_root / "README.md").write_text(
+            "# Demo Milestone\n\n## Strategic Significance\n\nImportant.\n",
+            encoding="utf-8",
+        )
+        (milestone_root / "CHECKLIST.md").write_text(
+            """# Demo Milestone Checklist
+
+## Progress Summary
+
+- Status: In Progress
+- Progress: 0/1
+- Done: 0
+- In progress: 1
+- Not started: 0
+
+## Checklist
+
+- [ ] 1. Demo slice
+  - Status: In Progress
+  - Related spec: None yet.
+  - Related plan: None yet.
+  - Related archive: None yet.
+  - Completion signal: Pending.
+""",
+            encoding="utf-8",
+        )
+        (repo / "docs/milestones/INDEX.md").write_text(
+            """# Milestones
+
+| Month | Milestone | Checklist | Status | Progress | Notes |
+| --- | --- | --- | --- | --- | --- |
+| 2026-06 | [Demo Milestone](2026-06/demo-milestone/README.md) | [Checklist](2026-06/demo-milestone/CHECKLIST.md) | In Progress | 0/1 | Important |
+""",
+            encoding="utf-8",
+        )
+        debt_root = repo / "docs/technical-debt/2026-06"
+        debt_root.mkdir(parents=True, exist_ok=True)
+        (debt_root / "2026-06-13-demo-debt-debt.md").write_text(
+            """# Demo Debt
+
+- Date: `2026-06-13`
+- Topic slug: `demo-debt`
+- Status: `Open`
+- Milestone: `Demo Milestone`
+- Debt type: `Architecture`
+- Priority: `Medium`
+- Revisit trigger: `Before adding another demo slice.`
+- Scope: `Demo`
+- Related slice: `Demo slice`
+
+## Summary
+
+Debt.
+
+## Why This Is Debt
+
+It blocks future work.
+
+## Current Impact
+
+More code drift.
+
+## Resolution Criteria
+
+- Shared helper exists.
+
+## Initial Resolution Direction
+
+Extract helper.
+
+## Non-Goals
+
+- New behavior.
+
+## Related Assets
+
+- None yet.
+""",
+            encoding="utf-8",
+        )
+        (repo / "docs/technical-debt/INDEX.md").write_text(
+            """# Technical Debt Index
+
+| Month | Debt | Status | Priority | Milestone | Revisit Trigger | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-06 | [Demo debt](2026-06/2026-06-13-demo-debt-debt.md) | Open | Medium | Demo Milestone | Before adding another demo slice. | Demo |
+""",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(self.run_json(CHECKER, repo, "--area", "milestones", "--json")["issues"], [])
+        self.assertEqual(self.run_json(CHECKER, repo, "--area", "technical-debt", "--json")["issues"], [])
+
     def test_archive_validator_rejects_missing_contract_sections(self) -> None:
         repo = self.create_repo()
         bad_archive = repo / "docs/superpowers/archives/2026-05/2026-05-02-bad-archive-archives.md"
