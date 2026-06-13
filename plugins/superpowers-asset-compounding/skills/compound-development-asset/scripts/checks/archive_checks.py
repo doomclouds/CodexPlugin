@@ -4,7 +4,28 @@ from pathlib import Path
 
 from asset_core.discovery import discover_superpowers_root, iter_assets
 from asset_core.issues import issue
-from asset_core.topics import canonical_slug
+
+
+ARCHIVE_TOPIC_SUFFIXES = (
+    "-implementation-plan",
+    "-implementation",
+    "-design",
+    "-archives",
+    "-problem",
+    "-inbox",
+)
+
+
+def canonical_archive_topic(slug: object) -> str:
+    value = str(slug).strip().lower().replace("_", "-").replace(" ", "-")
+    if value.endswith(".md"):
+        value = value[:-3]
+    if len(value) > 11 and value[4] == "-" and value[7] == "-":
+        value = value[11:]
+    for suffix in ARCHIVE_TOPIC_SUFFIXES:
+        if value.endswith(suffix):
+            return value[: -len(suffix)]
+    return value
 
 
 def relative(root: Path, path: Path) -> str:
@@ -30,7 +51,7 @@ def collect_archive_coverage(root: Path) -> tuple[dict[str, set[str]], dict[str,
     by_slug: dict[str, set[str]] = {}
     paths_by_slug: dict[str, list[Path]] = {}
     for asset in assets:
-        slug = canonical_slug(asset.slug)
+        slug = canonical_archive_topic(asset.slug)
         by_slug.setdefault(slug, set()).add(asset.kind)
         paths_by_slug.setdefault(slug, []).append(asset.path)
     return by_slug, paths_by_slug, []
@@ -38,7 +59,7 @@ def collect_archive_coverage(root: Path) -> tuple[dict[str, set[str]], dict[str,
 
 def check_archive_coverage(root: Path, topics: list[str]) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
-    normalized_topics = {canonical_slug(topic) for topic in topics if str(topic).strip()}
+    normalized_topics = {canonical_archive_topic(topic) for topic in topics if str(topic).strip()}
     by_slug, paths_by_slug, discovery_issues = collect_archive_coverage(root)
     if discovery_issues:
         if normalized_topics:

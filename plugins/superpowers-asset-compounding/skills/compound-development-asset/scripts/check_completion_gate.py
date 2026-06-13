@@ -7,10 +7,11 @@ import sys
 from pathlib import Path
 
 from asset_core.issues import issue
-from asset_core.topics import canonical_slug
-from checks.archive_checks import check_archive_coverage
+from checks.archive_checks import canonical_archive_topic, check_archive_coverage
 from checks.handoff_checks import check_asset_gate_text
 from checks.repo_structure_checks import check_relayout_leftovers, check_solution_folders, discover_possible_root_dirs
+
+canonical_slug = canonical_archive_topic
 
 
 def parse_args() -> argparse.Namespace:
@@ -69,7 +70,7 @@ def main() -> int:
         "checks": {
             "asset_gate_required": args.require_asset_gate,
             "asset_candidates_required": args.require_asset_candidates,
-            "completed_topics": [canonical_slug(topic) for topic in args.completed_topic],
+            "completed_topics": [canonical_archive_topic(topic) for topic in args.completed_topic],
             "structure_checks": not args.skip_structure_checks,
             "possible_root_dirs": discover_possible_root_dirs(root) if root.is_dir() else [],
         },

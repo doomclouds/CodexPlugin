@@ -111,6 +111,21 @@ class AssetScriptTests(unittest.TestCase):
         )
         return repo
 
+    def create_debt_named_repo(self) -> Path:
+        repo = self.temp_root / "debt_named_repo"
+        for area in ("specs", "plans", "archives/2026-06"):
+            (repo / "docs" / "superpowers" / area).mkdir(parents=True, exist_ok=True)
+        topic = "asset-compounding-v0.3.0-milestones-and-debt"
+        (repo / f"docs/superpowers/specs/2026-06-13-{topic}-design.md").write_text(
+            "# Asset Compounding Milestones And Debt Design\n\nSpec.\n",
+            encoding="utf-8",
+        )
+        (repo / f"docs/superpowers/plans/2026-06-13-{topic}.md").write_text(
+            "# Asset Compounding Milestones And Debt Plan\n\nPlan.\n",
+            encoding="utf-8",
+        )
+        return repo
+
     def audit_dir(self, plugin_data: Path, repo: Path, session_id: str = "session-1") -> Path:
         return plugin_data / f"{repo.name}--{session_id}"
 
@@ -819,6 +834,42 @@ Extract helper.
 
         self.assertEqual(result["status"], "needs_attention")
         self.assertEqual(result["issues"][0]["code"], "possible_missing_requirement_archive")
+
+    def test_completion_gate_preserves_debt_suffix_in_archive_warning(self) -> None:
+        repo = self.create_debt_named_repo()
+
+        result = self.run_json(COMPLETION_GATE, repo, "--json")
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["issues"][0]["code"], "possible_missing_requirement_archive")
+        self.assertIn("asset-compounding-v0.3.0-milestones-and-debt", result["issues"][0]["message"])
+
+    def test_completion_gate_completed_topic_without_debt_does_not_match_debt_topic(self) -> None:
+        repo = self.create_debt_named_repo()
+
+        result = self.run_json_fail(
+            COMPLETION_GATE,
+            repo,
+            "--completed-topic",
+            "asset-compounding-v0.3.0-milestones-and",
+            "--json",
+        )
+
+        self.assertEqual(result["issues"][0]["code"], "completed_topic_not_found")
+
+    def test_completion_gate_archive_topic_normalization_keeps_legacy_suffix_stripping(self) -> None:
+        repo = self.create_repo()
+
+        result = self.run_json_fail(
+            COMPLETION_GATE,
+            repo,
+            "--completed-topic",
+            "2026-05-01-demo-feature-implementation-plan.md",
+            "--json",
+        )
+
+        self.assertEqual(result["issues"][0]["code"], "missing_requirement_archive")
+        self.assertEqual(result["checks"]["completed_topics"], ["demo-feature"])
 
     def test_completion_gate_domain_checks_are_importable(self) -> None:
         scripts_root = SKILLS / "compound-development-asset" / "scripts"
