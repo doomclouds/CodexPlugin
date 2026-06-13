@@ -20,6 +20,7 @@ COMPLETION_GATE = SKILLS / "compound-development-asset" / "scripts" / "check_com
 ASSET_STATUS = SKILLS / "compound-development-asset" / "scripts" / "asset_status.py"
 ASSET_CLOSEOUT = SKILLS / "compound-development-asset" / "scripts" / "asset_closeout.py"
 MILESTONE_ASSETS = SKILLS / "compound-development-asset" / "scripts" / "milestone_assets.py"
+TECHNICAL_DEBT_ASSETS = SKILLS / "compound-development-asset" / "scripts" / "technical_debt_assets.py"
 BOOTSTRAP = SKILLS / "compound-development-asset" / "scripts" / "bootstrap_asset_compounding.py"
 ARCHIVE_VALIDATOR = SKILLS / "archive-superpowers-feature" / "scripts" / "validate_archive_asset.py"
 PROBLEM_VALIDATOR = SKILLS / "write-superpowers-problem" / "scripts" / "validate_problem_asset.py"
@@ -717,6 +718,109 @@ Extract helper.
 
         self.assertEqual(self.run_json(CHECKER, repo, "--area", "milestones", "--json")["issues"], [])
         self.assertEqual(self.run_json(CHECKER, repo, "--area", "technical-debt", "--json")["issues"], [])
+
+    def test_technical_debt_assets_create_close_and_check(self) -> None:
+        repo = self.create_repo()
+        archive = self.add_archive(repo)
+        created = self.run_json(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "create",
+            "--date",
+            "2026-06-13",
+            "--slug",
+            "demo-debt",
+            "--title",
+            "Demo Debt",
+            "--milestone",
+            "Demo Alpha",
+            "--debt-type",
+            "Architecture",
+            "--priority",
+            "Medium",
+            "--revisit-trigger",
+            "Before adding another demo slice.",
+            "--scope",
+            "Demo runtime",
+            "--related-slice",
+            "Demo Slice",
+            "--summary",
+            "Demo runtime owns duplicated helper logic.",
+            "--why",
+            "The duplication will make future slices drift.",
+            "--impact",
+            "Future search tools will copy fallback behavior.",
+            "--resolution-criteria",
+            "Shared helper is extracted and used by both call sites.",
+            "--resolution-direction",
+            "Extract shared helper functions.",
+            "--non-goal",
+            "Changing public behavior.",
+            "--write",
+            "--json",
+        )
+        self.assertEqual(created["status"], "created")
+        closed = self.run_json(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "close",
+            "--slug",
+            "demo-debt",
+            "--archive",
+            str(archive.relative_to(repo).as_posix()),
+            "--closure",
+            "Shared helper extraction is archived by the demo feature archive.",
+            "--write",
+            "--json",
+        )
+        self.assertEqual(closed["status"], "closed")
+        checked = self.run_json(TECHNICAL_DEBT_ASSETS, repo, "check", "--slug", "demo-debt", "--json")
+        self.assertEqual(checked["issues"], [])
+
+    def test_technical_debt_check_rejects_closed_debt_without_archive(self) -> None:
+        repo = self.create_repo()
+        self.run_json(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "create",
+            "--date",
+            "2026-06-13",
+            "--slug",
+            "unlinked-debt",
+            "--title",
+            "Unlinked Debt",
+            "--milestone",
+            "Demo Alpha",
+            "--debt-type",
+            "Architecture",
+            "--priority",
+            "High",
+            "--revisit-trigger",
+            "Before release.",
+            "--scope",
+            "Demo",
+            "--related-slice",
+            "Demo Slice",
+            "--summary",
+            "Debt.",
+            "--why",
+            "It blocks future work.",
+            "--impact",
+            "It causes drift.",
+            "--resolution-criteria",
+            "Archive exists.",
+            "--resolution-direction",
+            "Refactor.",
+            "--non-goal",
+            "Feature work.",
+            "--write",
+            "--json",
+        )
+        debt = repo / "docs/technical-debt/2026-06/2026-06-13-unlinked-debt-debt.md"
+        text = debt.read_text(encoding="utf-8").replace("- Status: `Open`", "- Status: `Closed`")
+        debt.write_text(text + "\n## Closure\n\nClosed without archive.\n", encoding="utf-8")
+        result = self.run_json_fail(TECHNICAL_DEBT_ASSETS, repo, "check", "--slug", "unlinked-debt", "--json")
+        self.assertEqual(result["issues"][0]["code"], "closed_debt_missing_archive")
 
     def test_milestone_assets_create_recompute_and_check(self) -> None:
         repo = self.create_repo()
