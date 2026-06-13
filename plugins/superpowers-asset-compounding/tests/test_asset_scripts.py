@@ -820,6 +820,29 @@ Extract helper.
         self.assertEqual(result["status"], "needs_attention")
         self.assertEqual(result["issues"][0]["code"], "possible_missing_requirement_archive")
 
+    def test_completion_gate_domain_checks_are_importable(self) -> None:
+        scripts_root = SKILLS / "compound-development-asset" / "scripts"
+        script_path = str(scripts_root)
+        relatives = (
+            "checks/archive_checks.py",
+            "checks/handoff_checks.py",
+            "checks/repo_structure_checks.py",
+        )
+        sys.path.insert(0, script_path)
+        try:
+            for relative in relatives:
+                spec = importlib.util.spec_from_file_location(relative.replace("/", "_"), scripts_root / relative)
+                self.assertIsNotNone(spec)
+                module = importlib.util.module_from_spec(spec)
+                assert spec and spec.loader
+                spec.loader.exec_module(module)
+        finally:
+            sys.path.remove(script_path)
+
+        repo = self.create_repo()
+        result = self.run_json_fail(COMPLETION_GATE, repo, "--completed-topic", "demo-feature", "--json")
+        self.assertEqual(result["issues"][0]["code"], "missing_requirement_archive")
+
     def test_completion_gate_blocks_completed_topic_without_archive(self) -> None:
         repo = self.create_repo()
 
