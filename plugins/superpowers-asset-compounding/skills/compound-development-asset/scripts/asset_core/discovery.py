@@ -88,7 +88,11 @@ def iter_assets(root: Path, areas: list[str] | None = None) -> list[AssetFile]:
             if path.name == "INDEX.md":
                 continue
             text = read_text(path)
-            date, slug = split_date_slug(path, suffix)
+            if area == "milestones" and path.parent != area_root:
+                date = path.parent.parent.name if path.parent.parent != area_root else None
+                slug = path.parent.name
+            else:
+                date, slug = split_date_slug(path, suffix)
             assets.append(
                 AssetFile(
                     area=area,

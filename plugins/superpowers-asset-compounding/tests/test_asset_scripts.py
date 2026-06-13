@@ -191,7 +191,10 @@ class AssetScriptTests(unittest.TestCase):
         self.assertEqual(default_areas, {"specs", "plans"})
 
         milestone_assets = module.iter_assets(superpowers_root, ["milestones"])
-        self.assertEqual([(asset.area, asset.title) for asset in milestone_assets], [("milestones", "Demo Milestone")])
+        self.assertEqual(
+            [(asset.area, asset.date, asset.slug, asset.title) for asset in milestone_assets],
+            [("milestones", "2026-06", "demo-milestone", "Demo Milestone")],
+        )
         debt_assets = module.iter_assets(superpowers_root, ["technical-debt"])
         self.assertEqual([(asset.area, asset.title) for asset in debt_assets], [("technical-debt", "Demo Debt")])
 
@@ -1490,6 +1493,79 @@ Extract helper.
         self.assertEqual(closeout["route"], "update-existing")
         self.assertIn("update milestone progress", closeout["required_actions"])
         self.assertIn("resolve or update technical debt records", closeout["required_actions"])
+
+    def test_asset_closeout_ignores_unrelated_milestone_progress_mismatch(self) -> None:
+        repo = self.create_repo()
+        archive = self.add_archive(repo)
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "Demo Feature",
+            "--strategic-significance",
+            "Demo Alpha proves a strategically important project path.",
+            "--acceptance",
+            "Demo Alpha can complete tracked stages.",
+            "--write",
+            "--json",
+        )
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "update-slice",
+            "--slug",
+            "demo-alpha",
+            "--slice",
+            "Demo Feature",
+            "--status",
+            "Done",
+            "--spec",
+            "../../../superpowers/specs/2026-05-01-demo-feature-design.md",
+            "--plan",
+            "../../../superpowers/plans/2026-05-01-demo-feature.md",
+            "--archive",
+            str(archive.relative_to(repo).as_posix()),
+            "--completion-signal",
+            "Demo feature archive exists.",
+            "--write",
+            "--json",
+        )
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "unrelated-beta",
+            "--title",
+            "Unrelated Beta",
+            "--slice",
+            "Unrelated Slice",
+            "--strategic-significance",
+            "Unrelated Beta tracks a separate project path.",
+            "--acceptance",
+            "Unrelated Beta can complete tracked stages.",
+            "--write",
+            "--json",
+        )
+        unrelated_checklist = repo / "docs/milestones/2026-06/unrelated-beta/CHECKLIST.md"
+        unrelated_text = unrelated_checklist.read_text(encoding="utf-8")
+        unrelated_checklist.write_text(unrelated_text.replace("- Progress: 0/1", "- Progress: 1/1"), encoding="utf-8")
+
+        closeout = self.run_json(ASSET_CLOSEOUT, repo, "--topic", "demo-feature", "--json")
+
+        self.assertEqual(closeout["route"], "none")
+        self.assertNotIn("update milestone progress", closeout["required_actions"])
+        self.assertEqual(len(closeout["related_assets"]["milestones"]), 1)
+        self.assertEqual(closeout["related_assets"]["milestones"][0], "docs/milestones/2026-06/demo-alpha/README.md")
 
     def test_asset_status_treats_inbox_only_topic_as_not_requiring_archive(self) -> None:
         repo = self.create_repo()
