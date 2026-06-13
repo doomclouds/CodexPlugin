@@ -669,6 +669,24 @@ Extract helper.
 
         self.assertEqual(result["issues"], [])
 
+    def test_check_indexes_accepts_docs_root_without_superpowers_for_milestones(self) -> None:
+        repo = self.temp_root / "project_only_repo"
+        milestones_root = repo / "docs/milestones"
+        milestones_root.mkdir(parents=True, exist_ok=True)
+        (milestones_root / "INDEX.md").write_text(
+            """# Milestones
+
+| Month | Milestone | Checklist | Status | Progress | Notes |
+| --- | --- | --- | --- | --- | --- |
+| 2026-06 | [Missing Milestone](2026-06/missing-milestone/README.md) | [Checklist](2026-06/missing-milestone/CHECKLIST.md) | In Progress | 0/1 | Missing |
+""",
+            encoding="utf-8",
+        )
+
+        result = self.run_json_fail(CHECKER, repo / "docs", "--area", "milestones", "--json")
+
+        self.assertIn("dead_link", {issue["code"] for issue in result["issues"]})
+
     def test_check_indexes_reports_duplicate_table_local_links(self) -> None:
         repo = self.create_repo()
         self.add_project_index_assets(repo, duplicate_checklist_link=True)

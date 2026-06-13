@@ -57,7 +57,7 @@ def _normalize_roots(root: Path) -> tuple[Path, Path]:
     root = root.resolve()
     if root.name == "superpowers" and root.parent.name == "docs":
         return root.parent.parent, root
-    if root.name == "docs" and (root / "superpowers").is_dir():
+    if root.name == "docs":
         return root.parent, root / "superpowers"
     if (root / "docs" / "superpowers").is_dir():
         return root, root / "docs" / "superpowers"
