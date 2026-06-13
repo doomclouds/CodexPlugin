@@ -271,6 +271,17 @@ def _check_one(root: Path, milestone: Path) -> list[dict[str, str]]:
 
 def check_milestone(root: Path, slug: str | None = None) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
-    for milestone in _milestone_dirs(root, slug):
+    milestones = _milestone_dirs(root, slug)
+    if slug and not milestones:
+        milestone = _milestones_root(root) / "*" / slug
+        return [
+            issue(
+                "error",
+                "milestone_not_found",
+                f"Milestone not found: {slug}",
+                path=_relative(_repo_root(root), milestone),
+            )
+        ]
+    for milestone in milestones:
         issues.extend(_check_one(root, milestone))
     return issues

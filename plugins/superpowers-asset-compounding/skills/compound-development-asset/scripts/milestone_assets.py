@@ -186,6 +186,19 @@ def notes_from_readme(readme: Path, fallback: str) -> str:
 def create_milestone(args: argparse.Namespace) -> dict[str, object]:
     root = repo_root(Path(args.root))
     milestone = milestones_root(root) / args.month / args.slug
+    existing_files = [path for path in (milestone / "README.md", milestone / "CHECKLIST.md") if path.exists()]
+    if existing_files:
+        return {
+            "status": "needs_attention",
+            "issues": [
+                {
+                    "severity": "error",
+                    "code": "milestone_already_exists",
+                    "message": f"Milestone already exists: {args.slug}",
+                    "path": relative(root, existing_files[0]),
+                }
+            ],
+        }
     slices = [
         {
             "title": title,
@@ -261,6 +274,15 @@ def update_slice(args: argparse.Namespace) -> dict[str, object]:
             render_checklist(milestone_title(milestone), milestone.parent.name, slices),
             encoding="utf-8",
             newline="\n",
+        )
+        summary = recompute_values(slices)
+        write_index(
+            root,
+            milestone,
+            str(summary["status"]),
+            str(summary["progress"]),
+            milestone_title(milestone),
+            notes_from_readme(milestone / "README.md", ""),
         )
 
     return {"status": "updated", "milestone": relative(root, checklist)}
@@ -354,10 +376,10 @@ def main() -> int:
         raise SystemExit(f"{args.command} requires --write to modify files.")
     result = args.func(args)
     print_result(result, args.json)
-    if args.command == "check":
-        issues = result["issues"]
-        assert isinstance(issues, list)
-        return 1 if any(issue["severity"] == "error" for issue in issues if isinstance(issue, dict)) else 0
+    if args.command in {"check", "create"}:
+        issues = result.get("issues", [])
+        if isinstance(issues, list):
+            return 1 if any(issue["severity"] == "error" for issue in issues if isinstance(issue, dict)) else 0
     return 0
 
 

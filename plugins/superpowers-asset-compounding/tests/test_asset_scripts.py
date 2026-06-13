@@ -772,6 +772,100 @@ Extract helper.
         checked = self.run_json(MILESTONE_ASSETS, repo, "check", "--slug", "demo-alpha", "--json")
         self.assertEqual(checked["issues"], [])
 
+    def test_milestone_update_slice_keeps_index_current_without_recompute(self) -> None:
+        repo = self.create_repo()
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "First Slice",
+            "--slice",
+            "Second Slice",
+            "--strategic-significance",
+            "Demo Alpha proves a strategically important two-stage project path.",
+            "--acceptance",
+            "Demo Alpha can complete both tracked stages.",
+            "--write",
+            "--json",
+        )
+
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "update-slice",
+            "--slug",
+            "demo-alpha",
+            "--slice",
+            "First Slice",
+            "--status",
+            "Done",
+            "--archive",
+            "../../../superpowers/archives/2026-05/2026-05-01-demo-feature-archives.md",
+            "--write",
+            "--json",
+        )
+
+        checked = self.run_json(MILESTONE_ASSETS, repo, "check", "--slug", "demo-alpha", "--json")
+        self.assertEqual(checked["issues"], [])
+
+    def test_milestone_check_missing_slug_returns_error(self) -> None:
+        repo = self.create_repo()
+
+        result = self.run_json_fail(MILESTONE_ASSETS, repo, "check", "--slug", "missing-alpha", "--json")
+
+        self.assertEqual(result["issues"][0]["code"], "milestone_not_found")
+        self.assertEqual(result["issues"][0]["severity"], "error")
+
+    def test_milestone_create_rejects_duplicate_without_clobbering(self) -> None:
+        repo = self.create_repo()
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "First Slice",
+            "--acceptance",
+            "Demo Alpha can complete the tracked stage.",
+            "--write",
+            "--json",
+        )
+        readme = repo / "docs/milestones/2026-06/demo-alpha/README.md"
+        readme.write_text("original milestone sentinel\n", encoding="utf-8")
+
+        result = self.run_json_fail(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Clobber Alpha",
+            "--slice",
+            "Replacement Slice",
+            "--acceptance",
+            "This duplicate must not overwrite existing files.",
+            "--write",
+            "--json",
+        )
+
+        self.assertEqual(result["issues"][0]["code"], "milestone_already_exists")
+        self.assertEqual(readme.read_text(encoding="utf-8"), "original milestone sentinel\n")
+
     def test_milestone_check_warns_for_small_milestone_without_strategic_significance(self) -> None:
         repo = self.create_repo()
         self.run_json(
