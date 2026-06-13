@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import importlib.util
@@ -142,6 +143,40 @@ class AssetScriptTests(unittest.TestCase):
             module.date_slug_from_name("2026-05-01-demo-feature-archives.md", "-archives.md"),
             ("2026-05-01", "demo-feature"),
         )
+
+    def test_asset_core_iter_assets_keeps_default_scope_and_allows_explicit_project_areas(self) -> None:
+        repo = self.create_repo()
+        milestone_root = repo / "docs/milestones/2026-06/demo-milestone"
+        milestone_root.mkdir(parents=True)
+        (milestone_root / "README.md").write_text("# Demo Milestone\n", encoding="utf-8")
+        debt_root = repo / "docs/technical-debt/2026-06"
+        debt_root.mkdir(parents=True)
+        (debt_root / "2026-06-13-demo-debt-debt.md").write_text("# Demo Debt\n", encoding="utf-8")
+
+        scripts_root = SKILLS / "compound-development-asset" / "scripts"
+        sys.path.insert(0, str(scripts_root))
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "asset_core_discovery",
+                scripts_root / "asset_core" / "discovery.py",
+            )
+            self.assertIsNotNone(spec)
+            module = importlib.util.module_from_spec(spec)
+            assert spec and spec.loader
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop("asset_core_discovery", None)
+            sys.path.remove(str(scripts_root))
+
+        superpowers_root = repo / "docs/superpowers"
+        default_areas = {asset.area for asset in module.iter_assets(superpowers_root)}
+        self.assertEqual(default_areas, {"specs", "plans"})
+
+        milestone_assets = module.iter_assets(superpowers_root, ["milestones"])
+        self.assertEqual([(asset.area, asset.title) for asset in milestone_assets], [("milestones", "Demo Milestone")])
+        debt_assets = module.iter_assets(superpowers_root, ["technical-debt"])
+        self.assertEqual([(asset.area, asset.title) for asset in debt_assets], [("technical-debt", "Demo Debt")])
 
     def add_archive(self, repo: Path) -> Path:
         archive = repo / "docs/superpowers/archives/2026-05/2026-05-01-demo-feature-archives.md"

@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from asset_core.areas import ASSET_AREAS
+from asset_core.areas import ASSET_AREAS, SUPERPOWERS_AREAS
 
 
 DATE_SLUG_RE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>.+)$")
@@ -71,7 +71,7 @@ def _area_root(root: Path, area: str) -> Path:
 
 
 def iter_assets(root: Path, areas: list[str] | None = None) -> list[AssetFile]:
-    selected = areas or list(ASSET_AREAS)
+    selected = areas or list(SUPERPOWERS_AREAS)
     assets: list[AssetFile] = []
     for area in selected:
         config = ASSET_AREAS[area]
