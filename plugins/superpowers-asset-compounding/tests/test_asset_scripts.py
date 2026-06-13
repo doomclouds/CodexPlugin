@@ -113,6 +113,36 @@ class AssetScriptTests(unittest.TestCase):
     def audit_dir(self, plugin_data: Path, repo: Path, session_id: str = "session-1") -> Path:
         return plugin_data / f"{repo.name}--{session_id}"
 
+    def test_asset_core_registry_includes_project_level_assets(self) -> None:
+        scripts_root = SKILLS / "compound-development-asset" / "scripts"
+        spec = importlib.util.spec_from_file_location("asset_core_areas", scripts_root / "asset_core" / "areas.py")
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(module)
+
+        self.assertEqual(module.ASSET_AREAS["archives"]["suffix"], "-archives.md")
+        self.assertEqual(module.ASSET_AREAS["milestones"]["kind"], "milestone")
+        self.assertEqual(module.ASSET_AREAS["technical-debt"]["kind"], "technical-debt")
+        self.assertEqual(module.ASSET_AREAS["milestones"]["root"], "docs/milestones")
+        self.assertEqual(module.ASSET_AREAS["technical-debt"]["root"], "docs/technical-debt")
+
+    def test_asset_core_canonical_slug_matches_existing_suffixes(self) -> None:
+        scripts_root = SKILLS / "compound-development-asset" / "scripts"
+        spec = importlib.util.spec_from_file_location("asset_core_topics", scripts_root / "asset_core" / "topics.py")
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(module)
+
+        self.assertEqual(module.canonical_slug("2026-05-01-demo-feature-archives.md"), "demo-feature")
+        self.assertEqual(module.canonical_slug("Demo Feature"), "demo-feature")
+        self.assertEqual(module.canonical_slug("2026-05-01-demo-feature-debt.md"), "demo-feature")
+        self.assertEqual(
+            module.date_slug_from_name("2026-05-01-demo-feature-archives.md", "-archives.md"),
+            ("2026-05-01", "demo-feature"),
+        )
+
     def add_archive(self, repo: Path) -> Path:
         archive = repo / "docs/superpowers/archives/2026-05/2026-05-01-demo-feature-archives.md"
         archive.write_text(
