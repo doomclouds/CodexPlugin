@@ -216,11 +216,13 @@ def create_debt(args: argparse.Namespace) -> dict[str, object]:
             "related_slice": args.related_slice,
             "summary": args.summary,
             "why_this_is_debt": args.why,
+            "how_discovered": "None yet.",
             "current_impact": args.impact,
             "resolution_criteria": args.resolution_criteria,
             "initial_resolution_direction": args.resolution_direction,
             "non_goals": args.non_goal,
             "related_assets": "- None yet.",
+            "reference_signals": "- None yet.",
         }
     )
 

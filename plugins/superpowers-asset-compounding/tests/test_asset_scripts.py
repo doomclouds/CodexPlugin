@@ -60,9 +60,11 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("target stage", milestone_text.lower())
         self.assertIn("acceptance criteria", milestone_text.lower())
         self.assertIn("slice boundary", milestone_text.lower())
-        self.assertIn("Milestone Navigation", milestone_text)
+        self.assertIn("ensure_agent_asset_guidance.py", milestone_text)
         self.assertIn("AGENTS.md", milestone_text)
         self.assertIn("docs/milestones/INDEX.md", milestone_text)
+        self.assertNotIn("English `Milestone Navigation`", milestone_text)
+        self.assertIn("After a slice is delivered, deferred, split", milestone_text)
         self.assertIn("name: manage-technical-debt", debt_text)
         self.assertIn("description:", debt_text)
         self.assertIn("technical_debt_assets.py", debt_text)
@@ -70,9 +72,11 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("why the debt exists", debt_text.lower())
         self.assertIn("how the debt was discovered", debt_text.lower())
         self.assertIn("initial resolution direction", debt_text.lower())
-        self.assertIn("Technical Debt Navigation", debt_text)
+        self.assertIn("ensure_agent_asset_guidance.py", debt_text)
         self.assertIn("AGENTS.md", debt_text)
         self.assertIn("docs/technical-debt/INDEX.md", debt_text)
+        self.assertNotIn("English `Technical Debt Navigation`", debt_text)
+        self.assertIn("After debt is resolved, superseded, closed", debt_text)
         self.assertIn('interface:\n  display_name: "Manage Superpowers Milestone"', milestone_agent_text)
         self.assertIn('  short_description: "Create and maintain milestone ledgers."', milestone_agent_text)
         self.assertIn(
@@ -88,17 +92,23 @@ class AssetScriptTests(unittest.TestCase):
 
     def test_v030_manifest_and_docs_mention_new_asset_types(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["version"], "0.3.0")
+        self.assertEqual(manifest["version"], "0.3.1")
         self.assertIn("milestones", manifest["interface"]["longDescription"])
         self.assertIn("technical debt", manifest["interface"]["longDescription"].lower())
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("Version `0.3.0`", readme)
+        self.assertIn("Version `0.3.1`", readme)
         self.assertIn("manage-superpowers-milestone", readme)
         self.assertIn("manage-technical-debt", readme)
 
         guidance = (
             SKILLS / "compound-development-asset" / "references" / "agents-asset-guidance-template.md"
+        ).read_text(encoding="utf-8")
+        milestone_template = (
+            SKILLS / "manage-superpowers-milestone" / "references" / "milestone-readme-template.md"
+        ).read_text(encoding="utf-8")
+        debt_template = (
+            SKILLS / "manage-technical-debt" / "references" / "technical-debt-template.md"
         ).read_text(encoding="utf-8")
         self.assertIn("docs/milestones/", guidance)
         self.assertIn("docs/technical-debt/", guidance)
@@ -106,6 +116,17 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("docs/milestones/INDEX.md", guidance)
         self.assertIn("Technical Debt Navigation", guidance)
         self.assertIn("docs/technical-debt/INDEX.md", guidance)
+        self.assertIn("asset-compounding-guidance:version=0.3.1", guidance)
+        self.assertIn("Repository Context Guidance", guidance)
+        self.assertIn("runtime commands", guidance)
+        self.assertIn("current active milestone", guidance)
+        self.assertIn("After completing, deferring, or splitting a milestone slice", guidance)
+        self.assertIn("After resolving, closing, superseding, or intentionally keeping a debt item", guidance)
+        self.assertIn("## Technical Context", milestone_template)
+        self.assertIn("## Architecture Constraints", milestone_template)
+        self.assertIn("## How Discovered", debt_template)
+        self.assertIn("## Reference Signals", debt_template)
+        self.assertIn("## Closure", debt_template)
 
     def run_json(self, *args: object) -> dict[str, object]:
         completed = subprocess.run(
@@ -1405,6 +1426,8 @@ Extract helper.
         self.assertIn("docs/superpowers/inbox/", agents_text)
         self.assertIn("docs/milestones/", agents_text)
         self.assertIn("docs/technical-debt/", agents_text)
+        self.assertIn("asset-compounding-guidance:version=0.3.1", agents_text)
+        self.assertIn("Repository Context Guidance", agents_text)
         self.assertIn("Milestone Navigation", agents_text)
         self.assertIn("docs/milestones/INDEX.md", agents_text)
         self.assertIn("Technical Debt Navigation", agents_text)
@@ -1432,11 +1455,24 @@ Extract helper.
         self.assertEqual(agents_text.count("<!-- asset-compounding-guidance:start -->"), 1)
         self.assertEqual(second["created_dirs"], [])
 
-    def test_agent_guidance_refreshes_old_milestone_and_debt_directory_only_block(self) -> None:
+    def test_agent_guidance_refreshes_unversioned_block_and_preserves_project_guidance(self) -> None:
         repo = self.temp_root / "old_guidance_repo"
         repo.mkdir()
         (repo / "AGENTS.md").write_text(
             """# Repository Guidelines
+
+## TypeScript 工程规则
+
+- 使用 ESM。
+- Node.js 目标版本为 20+。
+
+## Milestone 导航
+
+长期复刻路线和月度进度台账放在 `docs/milestones/`。
+
+## 技术债导航
+
+未解决技术债放在 `docs/technical-debt/`。
 
 <!-- asset-compounding-guidance:start -->
 ## Asset Compounding Retrieval Guide
@@ -1457,20 +1493,32 @@ Extract helper.
 
         dry_run = self.run_json_fail(AGENT_GUIDANCE, repo, "--json")
         self.assertTrue(dry_run["needs_update"])
-        self.assertIn("Milestone Navigation", dry_run["missing_terms"])
-        self.assertIn("docs/milestones/INDEX.md", dry_run["missing_terms"])
-        self.assertIn("Technical Debt Navigation", dry_run["missing_terms"])
-        self.assertIn("docs/technical-debt/INDEX.md", dry_run["missing_terms"])
+        self.assertTrue(dry_run["managed_block_stale"])
+        self.assertIsNone(dry_run["managed_block_version"])
+        self.assertIsNotNone(dry_run["expected_version"])
+        self.assertTrue(dry_run["project_guidance_present"])
+        self.assertTrue(dry_run["localized_guidance_present"])
 
         updated = self.run_json(AGENT_GUIDANCE, repo, "--write", "--json")
 
         self.assertTrue(updated["changed"])
+        self.assertTrue(updated["managed_block_stale"])
         agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
         self.assertEqual(agents_text.count("<!-- asset-compounding-guidance:start -->"), 1)
+        self.assertIn("## TypeScript 工程规则", agents_text)
+        self.assertIn("## Milestone 导航", agents_text)
+        self.assertIn("## 技术债导航", agents_text)
+        self.assertIn("asset-compounding-guidance:version=0.3.1", agents_text)
+        self.assertIn("Repository Context Guidance", agents_text)
         self.assertIn("Milestone Navigation", agents_text)
         self.assertIn("docs/milestones/INDEX.md", agents_text)
         self.assertIn("Technical Debt Navigation", agents_text)
         self.assertIn("docs/technical-debt/INDEX.md", agents_text)
+
+        second = self.run_json(AGENT_GUIDANCE, repo, "--json")
+        self.assertFalse(second["needs_update"])
+        self.assertFalse(second["managed_block_stale"])
+        self.assertEqual(second["managed_block_version"], second["expected_version"])
 
     def test_completion_gate_detects_solution_folder_and_relayout_drift(self) -> None:
         repo = self.temp_root / "relayout_repo"
@@ -2574,6 +2622,50 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertTrue(state["assetFilesChanged"])
         self.assertEqual(state["assetBootstrap"]["action"], "written")
         self.assertIn("docs/superpowers/problems", state["assetBootstrap"]["createdDirs"])
+
+    def test_post_tool_use_refreshes_guidance_when_project_asset_is_written(self) -> None:
+        repo = self.temp_root / "project_asset_repo"
+        (repo / "docs/milestones/2026-06/demo").mkdir(parents=True)
+        (repo / "AGENTS.md").write_text(
+            """# Repository Guidelines
+
+Existing project context.
+
+<!-- asset-compounding-guidance:start -->
+## Asset Compounding Retrieval Guide
+
+Old managed block.
+<!-- asset-compounding-guidance:end -->
+""",
+            encoding="utf-8",
+        )
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "apply_patch",
+                "tool_input": {
+                    "patch": "*** Begin Patch\n*** Add File: docs/milestones/2026-06/demo/CHECKLIST.md\n+# Demo Checklist\n*** End Patch"
+                },
+                "tool_response": {},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("Existing project context.", agents_text)
+        self.assertIn("asset-compounding-guidance:version=0.3.1", agents_text)
+        self.assertTrue((repo / "docs/superpowers").is_dir())
+
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
+        self.assertTrue(state["assetFilesChanged"])
+        self.assertEqual(state["assetBootstrap"]["action"], "written")
 
     def test_stop_allows_messages_that_already_include_asset_gate(self) -> None:
         repo = self.create_repo()

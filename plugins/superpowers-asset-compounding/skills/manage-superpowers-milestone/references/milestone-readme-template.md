@@ -20,6 +20,14 @@
 
 {{scope}}
 
+## Technical Context
+
+{{technical_context}}
+
+## Architecture Constraints
+
+{{architecture_constraints}}
+
 ## Non-Goals
 
 {{non_goals}}

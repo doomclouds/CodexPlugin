@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from _asset_utils import discover_superpowers_root
 
 START_MARKER = "<!-- asset-compounding-guidance:start -->"
 END_MARKER = "<!-- asset-compounding-guidance:end -->"
+VERSION_RE = re.compile(r"<!--\s*asset-compounding-guidance:version=(?P<version>[^>\s]+)\s*-->")
 
 
 def skill_root() -> Path:
@@ -21,6 +23,11 @@ def skill_root() -> Path:
 def template_text() -> str:
     template = skill_root() / "references" / "agents-asset-guidance-template.md"
     return template.read_text(encoding="utf-8").strip() + "\n"
+
+
+def template_version(block: str | None = None) -> str | None:
+    match = VERSION_RE.search(block if block is not None else template_text())
+    return match.group("version") if match else None
 
 
 def default_agents_file(root: Path) -> Path:
@@ -39,7 +46,11 @@ def replace_managed_block(text: str, block: str) -> tuple[str, str]:
         current_block = text[start:end].strip()
         if current_block == block.strip():
             return text, "unchanged"
-        new_text = text[:start].rstrip() + "\n\n" + block.rstrip() + "\n\n" + text[end:].lstrip()
+        suffix = text[end:].lstrip()
+        if suffix:
+            new_text = text[:start].rstrip() + "\n\n" + block.rstrip() + "\n\n" + suffix
+        else:
+            new_text = text[:start].rstrip() + "\n\n" + block.rstrip() + "\n"
         return new_text, "updated"
     return insert_block(text, block), "inserted"
 
@@ -61,24 +72,58 @@ def insert_block(text: str, block: str) -> str:
     return text.rstrip() + "\n\n" + block
 
 
-def check_existing(text: str) -> dict[str, object]:
-    has_block = START_MARKER in text and END_MARKER in text
-    required_terms = [
-        "docs/superpowers/specs",
-        "docs/superpowers/plans",
-        "docs/superpowers/archives",
-        "docs/superpowers/problems",
-        "docs/superpowers/inbox",
-        "Milestone Navigation",
-        "docs/milestones/INDEX.md",
-        "Technical Debt Navigation",
-        "docs/technical-debt/INDEX.md",
+def managed_block(text: str) -> str | None:
+    start = text.find(START_MARKER)
+    end = text.find(END_MARKER)
+    if start >= 0 and end >= 0 and end > start:
+        end += len(END_MARKER)
+        return text[start:end].strip()
+    return None
+
+
+def has_project_guidance(text: str) -> bool:
+    signals = [
+        "Repository Guide",
+        "Repository Guidelines",
+        "仓库边界",
+        "常用命令",
+        "验证要求",
+        "技术栈",
+        "工程规则",
+        "current active milestone",
+        "runtime commands",
+        "validation commands",
     ]
-    missing_terms = [term for term in required_terms if term not in text]
+    return any(signal in text for signal in signals)
+
+
+def has_localized_guidance(text: str) -> bool:
+    signals = [
+        "Milestone 导航",
+        "里程碑导航",
+        "技术债导航",
+        "技术债 导航",
+    ]
+    return any(signal in text for signal in signals)
+
+
+def check_existing(text: str) -> dict[str, object]:
+    current_block = managed_block(text)
+    expected_block = template_text().strip()
+    current_version = template_version(current_block)
+    expected_version = template_version(expected_block)
+    has_block = current_block is not None
+    managed_block_stale = (not has_block) or current_version != expected_version or current_block != expected_block
     return {
         "has_managed_block": has_block,
-        "missing_terms": missing_terms,
-        "needs_update": (not has_block) or bool(missing_terms),
+        "managed_block_version": current_version,
+        "expected_version": expected_version,
+        "managed_block_stale": managed_block_stale,
+        "project_guidance_present": has_project_guidance(text),
+        "localized_guidance_present": has_localized_guidance(text),
+        "missing_terms": [],
+        "missing_groups": [] if not managed_block_stale else ["managed_block_current"],
+        "needs_update": managed_block_stale,
     }
 
 
@@ -121,7 +166,13 @@ def main() -> int:
         "action": action if changed else "unchanged",
         "changed": changed,
         "has_managed_block": existing["has_managed_block"],
+        "managed_block_version": existing["managed_block_version"],
+        "expected_version": existing["expected_version"],
+        "managed_block_stale": existing["managed_block_stale"],
+        "project_guidance_present": existing["project_guidance_present"],
+        "localized_guidance_present": existing["localized_guidance_present"],
         "missing_terms": existing["missing_terms"],
+        "missing_groups": existing["missing_groups"],
         "needs_update": changed,
     }
 
@@ -142,6 +193,10 @@ def main() -> int:
             print("missing_terms:")
             for term in existing["missing_terms"]:
                 print(f"- {term}")
+        if existing["missing_groups"]:
+            print("missing_groups:")
+            for group in existing["missing_groups"]:
+                print(f"- {group}")
         if args.diff and changed:
             print(unified_diff(old_text, new_text, agents_file))
 

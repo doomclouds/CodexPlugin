@@ -18,6 +18,10 @@
 
 {{why_this_is_debt}}
 
+## How Discovered
+
+{{how_discovered}}
+
 ## Current Impact
 
 {{current_impact}}
@@ -37,3 +41,11 @@
 ## Related Assets
 
 {{related_assets}}
+
+## Reference Signals
+
+{{reference_signals}}
+
+## Closure
+
+Open debt. Replace this section with closure evidence and a resolving archive link when the debt is closed.

@@ -30,17 +30,18 @@ Every slice must describe a slice boundary, not a loose task:
 
 - Use `compound-development-asset/scripts/milestone_assets.py` for creation, updates, status checks, closure, progress recomputation, and `docs/milestones/INDEX.md` synchronization.
 - Do not hand-edit script-owned status, progress counts, closeout state, or index entries when `milestone_assets.py` can perform the state update.
-- Before finishing milestone creation or major milestone updates, inspect root `AGENTS.md` or `AGENT.md`. Ensure it has an English `Milestone Navigation` section or the managed asset-compounding block from `compound-development-asset/references/agents-asset-guidance-template.md`.
-- The milestone navigation must point to `docs/milestones/INDEX.md` and explain that milestone records track target stages, strategic significance, slice boundaries, acceptance signals, progress, and links to evidence.
-- If milestone navigation is missing or stale, run `compound-development-asset/scripts/ensure_agent_asset_guidance.py . --write` from the repository root, or patch the same English guidance manually when the script is unavailable.
-- Preserve existing repository rules and the managed `asset-compounding-guidance` markers when updating `AGENTS.md`; do not duplicate generic hook routing or closeout policy there.
+- If root `AGENTS.md` or `AGENT.md` needs missing or stale asset entry guidance, delegate to `compound-development-asset/scripts/ensure_agent_asset_guidance.py . --write`; do not define a separate AGENTS refresh strategy in this writer skill.
 - Keep `CHECKLIST.md` at progress-ledger level: slice names, status, progress summary, and links.
 - Keep implementation details, task breakdowns, and acceptance reasoning in specs, plans, and archives instead of the milestone checklist.
+- After a slice is delivered, deferred, split, or otherwise changes state, update its checklist status, recompute milestone progress, and synchronize `docs/milestones/INDEX.md` before closeout.
 - After edits, run `milestone_assets.py check --json` and fix reported issues before closeout.
 
 ## Boundaries
 
 - Use a milestone when a continuous phase deserves durable progress tracking and coordination.
+- Use the active milestone to choose the next slice only when the task belongs to that tracked phase.
+- Use completed milestones to reconstruct historical phase evidence and delivery sequence.
+- If a task is outside the active milestone, classify it before editing the checklist: future milestone slice, standalone Superpowers spec/plan/archive work, or technical-debt record.
 - Use specs or plans for implementation design and task sequencing.
 - Use archives for completed delivery evidence linked from milestone slices.
 - Use `Deferred` when a slice is intentionally paused but remains part of the milestone.

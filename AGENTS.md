@@ -9,11 +9,18 @@
 - After changing plugin hooks or manifests, restart Codex and review `/hooks` before judging runtime behavior.
 
 <!-- asset-compounding-guidance:start -->
+<!-- asset-compounding-guidance:version=0.3.1 -->
 ## Asset Compounding Retrieval Guide
 
 This repository uses hook-assisted asset compounding from the `superpowers-asset-compounding` plugin. Keep this `AGENTS.md` block as repository-specific retrieval anchors only; generic routing, plan-boundary checkpoints, closeout reminders, and `asset_gate` nudges belong to the plugin hooks and skills.
 
 If the plugin was just installed or upgraded, review and trust the bundled hooks with `/hooks` before relying on lifecycle automation.
+
+### Repository Context Guidance
+
+Keep repository-owned context outside this managed block. Project goals, tech stack, repository boundaries, language rules, runtime commands, validation commands, and the current active milestone belong in the hand-maintained project guidance above or below this block.
+
+This managed block only provides asset retrieval anchors. Guidance scripts may replace the content between the managed markers when the block version is stale, but they must not overwrite project-owned context outside the markers.
 
 ### Asset Directories
 
@@ -31,13 +38,21 @@ If one of these directories does not exist, do not assume there is no asset. Sea
 
 Use `docs/milestones/INDEX.md` as the project-level milestone ledger. Milestone documents track target stages, strategic significance, slice boundaries, acceptance signals, progress, and links to completed evidence.
 
+Read the current active milestone before choosing the next slice in a tracked phase. Read completed milestones when reconstructing historical phase evidence. If a task does not belong to the current milestone, decide whether it should become a future milestone slice, a technical-debt record, or ordinary Superpowers spec/plan/archive work before editing the checklist.
+
+After completing, deferring, or splitting a milestone slice, update the milestone `CHECKLIST.md` status/progress and `docs/milestones/INDEX.md` before closeout. Prefer `compound-development-asset/scripts/milestone_assets.py` for script-owned status and progress updates.
+
 `docs/milestones/` does not replace Superpowers specs, plans, archives, problems, or inbox notes. Use milestones to understand roadmap and progress; use `docs/superpowers/` assets for slice design, implementation plans, delivery evidence, and reusable lessons.
 
 ### Technical Debt Navigation
 
 Use `docs/technical-debt/INDEX.md` as the project-level technical-debt ledger. Technical-debt records explain why debt exists, how it was discovered, current impact, revisit triggers, resolution criteria, and closure evidence.
 
-Technical debt should inform milestone and slice planning when it affects acceptance, maintainability, or architecture clarity. Do not mix technical-debt records into milestone checklists, and do not duplicate reusable failure-mode narratives that belong in `docs/superpowers/problems/`.
+Technical debt should inform milestone and slice planning when it affects acceptance, maintainability, or architecture clarity. If debt affects the active milestone's acceptance boundary, use it as slice-selection or spec input instead of mixing the debt record into the milestone checklist.
+
+After resolving, closing, superseding, or intentionally keeping a debt item, update the debt record status, closure/replacement rationale, and `docs/technical-debt/INDEX.md` before closeout. Prefer `compound-development-asset/scripts/technical_debt_assets.py` for script-owned status and index updates.
+
+Do not duplicate reusable failure-mode narratives that belong in `docs/superpowers/problems/`. Link problem assets when debt emerged from a failure, but keep technical-debt records focused on the engineering liability, revisit trigger, and repayment criteria.
 
 ### Retrieval Order
 

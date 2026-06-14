@@ -24,16 +24,16 @@ Every technical-debt record must explain enough history for a later agent to und
 
 - Use `compound-development-asset/scripts/technical_debt_assets.py` for creation, status transitions, closure, checks, and `docs/technical-debt/INDEX.md` synchronization.
 - Do not hand-edit script-owned status, closure, or index state when `technical_debt_assets.py` can perform the update.
-- Before finishing technical-debt creation, closure, or major updates, inspect root `AGENTS.md` or `AGENT.md`. Ensure it has an English `Technical Debt Navigation` section or the managed asset-compounding block from `compound-development-asset/references/agents-asset-guidance-template.md`.
-- The technical-debt navigation must point to `docs/technical-debt/INDEX.md` and explain that records capture why debt exists, how it was discovered, current impact, revisit triggers, resolution criteria, and closure evidence.
-- If technical-debt navigation is missing or stale, run `compound-development-asset/scripts/ensure_agent_asset_guidance.py . --write` from the repository root, or patch the same English guidance manually when the script is unavailable.
-- Preserve existing repository rules and the managed `asset-compounding-guidance` markers when updating `AGENTS.md`; do not mix technical-debt records into milestone checklists or duplicate problem-asset narratives there.
+- If root `AGENTS.md` or `AGENT.md` needs missing or stale asset entry guidance, delegate to `compound-development-asset/scripts/ensure_agent_asset_guidance.py . --write`; do not define a separate AGENTS refresh strategy in this writer skill.
 - Require `Closed` debt records to include a `Closure` section and a link to the archive that proves the debt was resolved.
+- After debt is resolved, superseded, closed, or intentionally kept open, update its status/rationale and synchronize `docs/technical-debt/INDEX.md` before closeout.
 - After edits, run `technical_debt_assets.py check --json` and fix reported issues before closeout.
 
 ## Boundaries
 
 - Use technical-debt records for known tradeoffs, deferred cleanup, migration gaps, and revisit-triggered engineering liabilities.
+- Use open technical-debt records as slice-selection or spec-design input when they affect acceptance, maintainability, correctness, user experience, or architecture clarity.
+- If debt affects the active milestone, link it from the relevant slice or spec context instead of mixing the debt record into the milestone checklist.
 - Use problem assets for reusable failure modes with symptoms, root cause, recovery rules, and recognition clues.
 - Link related problem assets when debt emerged from a failure, but do not duplicate the problem narrative inside the debt record.
 - Do not record vague preferences as debt; require a concrete cause, discovery signal, impact, trigger, and resolution path.

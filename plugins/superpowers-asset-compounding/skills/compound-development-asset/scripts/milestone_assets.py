@@ -230,6 +230,8 @@ def create_milestone(args: argparse.Namespace) -> dict[str, object]:
             "goal": args.goal or f"Complete the {args.title} milestone.",
             "acceptance": args.acceptance,
             "scope": args.scope or scope,
+            "technical_context": "None yet.",
+            "architecture_constraints": "None yet.",
             "non_goals": args.non_goals or "None yet.",
             "reference_signals": args.reference_signals or "None yet.",
             "slice_boundaries": scope,

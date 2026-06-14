@@ -17,6 +17,9 @@ from pathlib import Path
 from typing import Any, BinaryIO, Iterator
 
 
+ASSET_PATH_MARKERS = ("docs/superpowers", "docs/milestones", "docs/technical-debt")
+
+
 def main() -> int:
     started_at = time.perf_counter()
     raw_input = read_stdin_with_timeout(started_at)
@@ -400,12 +403,12 @@ def current_git_branch(cwd: Path) -> str:
 
 def repo_has_assets(event: dict[str, Any]) -> bool:
     cwd = Path(str(event.get("cwd") or "."))
-    return (cwd / "docs" / "superpowers").is_dir()
+    return any((cwd / marker).is_dir() for marker in ASSET_PATH_MARKERS)
 
 
 def bootstrap_asset_guidance(event: dict[str, Any]) -> dict[str, Any] | None:
     root = Path(str(event.get("cwd") or "."))
-    if not (root / "docs" / "superpowers").is_dir():
+    if not any((root / marker).is_dir() for marker in ASSET_PATH_MARKERS):
         return None
 
     try:
@@ -716,7 +719,7 @@ def classify_command_kind(command: str, tool_name: str = "") -> str:
     git_match = re.search(r"\bgit\s+(commit|push|merge|status|diff|show|log|add|branch|worktree)\b", command)
     if git_match:
         return f"git-{git_match.group(1)}"
-    if "docs/superpowers" in command.replace("\\", "/") and re.search(r"\b(?:rg|findstr|select-string)\b", command):
+    if has_asset_path(command.replace("\\", "/")) and re.search(r"\b(?:rg|findstr|select-string)\b", command):
         return "asset-search-readonly"
     if re.search(r"\brg\s+", command):
         return "rg-search-readonly"
@@ -734,8 +737,8 @@ def classify_command_kind(command: str, tool_name: str = "") -> str:
 def asset_files_changed(tool_name: str, tool_input: Any, command: str) -> bool:
     normalized_command = command.replace("\\", "/")
     if tool_name in {"apply_patch", "Edit", "Write"}:
-        return "docs/superpowers" in normalized_tool_input(tool_input)
-    if "docs/superpowers" not in normalized_command:
+        return has_asset_path(normalized_tool_input(tool_input))
+    if not has_asset_path(normalized_command):
         return False
     return bool(
         re.search(
@@ -744,6 +747,11 @@ def asset_files_changed(tool_name: str, tool_input: Any, command: str) -> bool:
             normalized_command,
         )
     )
+
+
+def has_asset_path(text: str) -> bool:
+    normalized = text.replace("\\", "/").lower()
+    return any(marker in normalized for marker in ASSET_PATH_MARKERS)
 
 
 def normalized_tool_input(tool_input: Any) -> str:

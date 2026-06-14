@@ -2,12 +2,12 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.3.0` combines six skills with plugin-bundled Codex lifecycle hooks.
-This release adds project milestone ledgers and technical-debt records alongside
-the existing archive, problem, inbox, status, closeout, and hook audit support.
-It keeps the v0.2.9 plugin-owned hook launcher reliability updates, v0.2.8 audit
-reliability updates, v0.2.7 audit report diagnostics, and v0.2.6 closeout UX
-improvements.
+Version `0.3.1` combines six skills with plugin-bundled Codex lifecycle hooks.
+This release adds versioned AGENTS managed guidance refreshes and richer
+milestone/technical-debt repository navigation on top of the v0.3.0 project
+milestone ledger and technical-debt record support. It keeps the v0.2.9
+plugin-owned hook launcher reliability updates, v0.2.8 audit reliability
+updates, v0.2.7 audit report diagnostics, and v0.2.6 closeout UX improvements.
 
 The plugin provides six skills:
 
@@ -43,7 +43,8 @@ python <plugin>\skills\compound-development-asset\scripts\bootstrap_asset_compou
 ```
 
 The bootstrap step is idempotent. It creates the standard asset directories and
-adds the managed `AGENTS.md` retrieval block before later archive/problem work.
+adds or refreshes the versioned managed `AGENTS.md` retrieval block before later
+archive/problem work.
 
 At meaningful development task boundaries, the hooks assist the main agent by
 recording plan-update checkpoints and enforcing an explicit closeout decision.
