@@ -11,6 +11,8 @@ Milestone standard: [README.md](README.md)
 - Done: {{done}}
 - In progress: {{in_progress}}
 - Not started: {{not_started}}
+- Deferred: {{deferred}}
+- Split: {{split}}
 
 ## Checklist
 
@@ -21,4 +23,5 @@ Milestone standard: [README.md](README.md)
 - Keep this file focused on milestone progress.
 - Do not add task-level implementation steps here.
 - Update the summary counts whenever any slice status changes.
+- Count every allowed slice status: `Done`, `In Progress`, `Not Started`, `Deferred`, and `Split`.
 - Update `docs/milestones/INDEX.md` whenever this milestone status or progress changes.

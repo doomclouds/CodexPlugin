@@ -114,11 +114,17 @@ def recompute_summary(checklist: Path) -> dict[str, object]:
     done = sum(1 for item in slices if isinstance(item, dict) and item.get("status") == "Done")
     in_progress = sum(1 for item in slices if isinstance(item, dict) and item.get("status") == "In Progress")
     not_started = sum(1 for item in slices if isinstance(item, dict) and item.get("status") == "Not Started")
+    deferred = sum(1 for item in slices if isinstance(item, dict) and item.get("status") == "Deferred")
+    split = sum(1 for item in slices if isinstance(item, dict) and item.get("status") == "Split")
     total = len(slices)
     if total > 0 and done == total:
         status = "Done"
     elif done > 0 or in_progress > 0:
         status = "In Progress"
+    elif split > 0:
+        status = "Split"
+    elif deferred > 0:
+        status = "Deferred"
     else:
         status = "Not Started"
     return {
@@ -127,6 +133,8 @@ def recompute_summary(checklist: Path) -> dict[str, object]:
         "done": done,
         "in_progress": in_progress,
         "not_started": not_started,
+        "deferred": deferred,
+        "split": split,
     }
 
 

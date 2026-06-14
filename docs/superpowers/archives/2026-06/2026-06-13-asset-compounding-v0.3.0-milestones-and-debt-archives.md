@@ -27,7 +27,7 @@
 
 ## Verification Snapshot
 
-- Source tests: `$env:PYTHONIOENCODING='utf-8'; python -m unittest plugins.superpowers-asset-compounding.tests.test_asset_scripts` -> `Ran 88 tests ... OK`.
+- Source tests: `$env:PYTHONIOENCODING='utf-8'; python -m unittest plugins.superpowers-asset-compounding.tests.test_asset_scripts` -> `Ran 90 tests ... OK`.
 - Manifest JSON: `python -m json.tool plugins\superpowers-asset-compounding\.codex-plugin\plugin.json` -> valid JSON with `"version": "0.3.0"`.
 - Skill validation: both `manage-superpowers-milestone` and `manage-technical-debt` passed `quick_validate.py`.
 - Diff hygiene: `git diff --check` passed; only Windows LF/CRLF working-copy warnings appeared during some checks.
@@ -49,3 +49,5 @@
 - Milestone 划分规则保持弹性：战略意义优先于硬性 slice 数量，小 milestone 可以成立，但必须说明战略意义。
 - Technical debt 不分大小类，统一通过状态、优先级、revisit trigger、resolution criteria 和 closure archive 管理。
 - Task 6 复核中发现 `README.md` milestone slug 为空会导致 closeout scope 泄漏，本轮已修复为从 milestone 目录名派生 slug。
+- Final review 发现 milestone `Deferred` / `Split` slice 会掉出 summary counts，本轮已补齐模板、重算、校验和索引同步语义。
+- 用户反馈两个新 skill 需要更强 SOP 约束；本轮已要求 milestone 文档写清 target stage、acceptance criteria 与 slice boundary，并要求 technical-debt 文档写清 debt 原因、发现方式、当前影响和 initial resolution direction。

@@ -56,10 +56,16 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("description:", milestone_text)
         self.assertIn("milestone_assets.py", milestone_text)
         self.assertIn("strategic significance", milestone_text.lower())
+        self.assertIn("target stage", milestone_text.lower())
+        self.assertIn("acceptance criteria", milestone_text.lower())
+        self.assertIn("slice boundary", milestone_text.lower())
         self.assertIn("name: manage-technical-debt", debt_text)
         self.assertIn("description:", debt_text)
         self.assertIn("technical_debt_assets.py", debt_text)
         self.assertIn("technical debt is not split into large and small", debt_text.lower())
+        self.assertIn("why the debt exists", debt_text.lower())
+        self.assertIn("how the debt was discovered", debt_text.lower())
+        self.assertIn("initial resolution direction", debt_text.lower())
         self.assertIn('interface:\n  display_name: "Manage Superpowers Milestone"', milestone_agent_text)
         self.assertIn('  short_description: "Create and maintain milestone ledgers."', milestone_agent_text)
         self.assertIn(
@@ -1186,6 +1192,98 @@ Extract helper.
 
         checked = self.run_json(MILESTONE_ASSETS, repo, "check", "--slug", "demo-alpha", "--json")
         self.assertEqual(checked["issues"], [])
+
+    def test_milestone_deferred_slice_is_counted_and_indexed(self) -> None:
+        repo = self.create_repo()
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "First Slice",
+            "--strategic-significance",
+            "Demo Alpha proves a strategically important project path.",
+            "--acceptance",
+            "Demo Alpha can complete its tracked stage.",
+            "--write",
+            "--json",
+        )
+
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "update-slice",
+            "--slug",
+            "demo-alpha",
+            "--slice",
+            "First Slice",
+            "--status",
+            "Deferred",
+            "--write",
+            "--json",
+        )
+
+        checklist = repo / "docs/milestones/2026-06/demo-alpha/CHECKLIST.md"
+        text = checklist.read_text(encoding="utf-8")
+        self.assertIn("- Status: Deferred", text)
+        self.assertIn("- Deferred: 1", text)
+        self.assertIn("- Split: 0", text)
+        checked = self.run_json(MILESTONE_ASSETS, repo, "check", "--slug", "demo-alpha", "--json")
+        self.assertEqual(checked["issues"], [])
+        index = (repo / "docs/milestones/INDEX.md").read_text(encoding="utf-8")
+        self.assertIn("| 2026-06 | [Demo Alpha](2026-06/demo-alpha/README.md) | [Checklist](2026-06/demo-alpha/CHECKLIST.md) | Deferred | 0/1 |", index)
+
+    def test_milestone_split_slice_is_counted_and_indexed(self) -> None:
+        repo = self.create_repo()
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "First Slice",
+            "--strategic-significance",
+            "Demo Alpha proves a strategically important project path.",
+            "--acceptance",
+            "Demo Alpha can complete its tracked stage.",
+            "--write",
+            "--json",
+        )
+
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "update-slice",
+            "--slug",
+            "demo-alpha",
+            "--slice",
+            "First Slice",
+            "--status",
+            "Split",
+            "--write",
+            "--json",
+        )
+
+        checklist = repo / "docs/milestones/2026-06/demo-alpha/CHECKLIST.md"
+        text = checklist.read_text(encoding="utf-8")
+        self.assertIn("- Status: Split", text)
+        self.assertIn("- Deferred: 0", text)
+        self.assertIn("- Split: 1", text)
+        checked = self.run_json(MILESTONE_ASSETS, repo, "check", "--slug", "demo-alpha", "--json")
+        self.assertEqual(checked["issues"], [])
+        index = (repo / "docs/milestones/INDEX.md").read_text(encoding="utf-8")
+        self.assertIn("| 2026-06 | [Demo Alpha](2026-06/demo-alpha/README.md) | [Checklist](2026-06/demo-alpha/CHECKLIST.md) | Split | 0/1 |", index)
 
     def test_milestone_check_missing_slug_returns_error(self) -> None:
         repo = self.create_repo()
