@@ -42,10 +42,16 @@ class AssetScriptTests(unittest.TestCase):
     def test_v030_skills_exist_with_required_metadata(self) -> None:
         milestone_skill = SKILLS / "manage-superpowers-milestone" / "SKILL.md"
         debt_skill = SKILLS / "manage-technical-debt" / "SKILL.md"
+        milestone_agent = SKILLS / "manage-superpowers-milestone" / "agents" / "openai.yaml"
+        debt_agent = SKILLS / "manage-technical-debt" / "agents" / "openai.yaml"
         self.assertTrue(milestone_skill.is_file())
         self.assertTrue(debt_skill.is_file())
+        self.assertTrue(milestone_agent.is_file())
+        self.assertTrue(debt_agent.is_file())
         milestone_text = milestone_skill.read_text(encoding="utf-8")
         debt_text = debt_skill.read_text(encoding="utf-8")
+        milestone_agent_text = milestone_agent.read_text(encoding="utf-8")
+        debt_agent_text = debt_agent.read_text(encoding="utf-8")
         self.assertIn("name: manage-superpowers-milestone", milestone_text)
         self.assertIn("description:", milestone_text)
         self.assertIn("milestone_assets.py", milestone_text)
@@ -54,6 +60,18 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("description:", debt_text)
         self.assertIn("technical_debt_assets.py", debt_text)
         self.assertIn("technical debt is not split into large and small", debt_text.lower())
+        self.assertIn('interface:\n  display_name: "Manage Superpowers Milestone"', milestone_agent_text)
+        self.assertIn('  short_description: "Create and maintain milestone ledgers."', milestone_agent_text)
+        self.assertIn(
+            '  default_prompt: "Use $manage-superpowers-milestone to create, update, recompute, or check a docs/milestones progress ledger."',
+            milestone_agent_text,
+        )
+        self.assertIn('interface:\n  display_name: "Manage Technical Debt"', debt_agent_text)
+        self.assertIn('  short_description: "Create and maintain technical-debt records."', debt_agent_text)
+        self.assertIn(
+            '  default_prompt: "Use $manage-technical-debt to create, update, close, or check a docs/technical-debt record."',
+            debt_agent_text,
+        )
 
     def run_json(self, *args: object) -> dict[str, object]:
         completed = subprocess.run(

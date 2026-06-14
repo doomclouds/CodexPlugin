@@ -1,4 +1,4 @@
-name: manage-superpowers-milestone
-display_name: Manage Superpowers Milestone
-short_description: Create and maintain milestone ledgers.
-default_prompt: Use $manage-superpowers-milestone to create, update, recompute, or check a docs/milestones progress ledger.
+interface:
+  display_name: "Manage Superpowers Milestone"
+  short_description: "Create and maintain milestone ledgers."
+  default_prompt: "Use $manage-superpowers-milestone to create, update, recompute, or check a docs/milestones progress ledger."
