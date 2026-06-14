@@ -16,7 +16,7 @@
 - 新增 `manage-technical-debt` 技能、technical-debt 模板、`technical_debt_assets.py` facade 和 `checks/technical_debt_checks.py`，支持 debt 创建、状态更新、关闭、闭环 archive 校验、重复 slug 和必填元数据检查。
 - 拆分脚本职责到 `asset_core/*` 与 `checks/*`，让 `check_indexes.py`、`check_completion_gate.py`、`asset_status.py`、`asset_closeout.py` 继续作为稳定 CLI facade。
 - 扩展 `asset_status.py`、`asset_closeout.py`、`find_related_assets.py` 和 `suggest_asset_route.py`，让 milestone 与 technical-debt 作为 related assets、required actions 和 `update-existing` 信号出现，但不扩展 `asset_gate.route` 枚举。
-- 更新 manifest、README、技能说明、bootstrap 和仓库检索锚点到 `0.3.0`；本仓库发布流程改为远端 marketplace 同步，旧 `local-home` cache sync 流程标记为 deprecated。
+- 更新 manifest、README、技能说明、bootstrap 和仓库检索锚点到 `0.3.0`；AGENTS managed block 现在包含英文 `Milestone Navigation` 与 `Technical Debt Navigation` 语义说明；本仓库发布流程改为远端 marketplace 同步，旧 `local-home` cache sync 流程标记为 deprecated。
 
 ## Out of Scope
 
@@ -27,7 +27,7 @@
 
 ## Verification Snapshot
 
-- Source tests: `$env:PYTHONIOENCODING='utf-8'; python -m unittest plugins.superpowers-asset-compounding.tests.test_asset_scripts` -> `Ran 90 tests ... OK`.
+- Source tests: `$env:PYTHONIOENCODING='utf-8'; python -m unittest plugins.superpowers-asset-compounding.tests.test_asset_scripts` -> `Ran 91 tests ... OK`.
 - Manifest JSON: `python -m json.tool plugins\superpowers-asset-compounding\.codex-plugin\plugin.json` -> valid JSON with `"version": "0.3.0"`.
 - Skill validation: both `manage-superpowers-milestone` and `manage-technical-debt` passed `quick_validate.py`.
 - Diff hygiene: `git diff --check` passed; only Windows LF/CRLF working-copy warnings appeared during some checks.
@@ -51,3 +51,4 @@
 - Task 6 复核中发现 `README.md` milestone slug 为空会导致 closeout scope 泄漏，本轮已修复为从 milestone 目录名派生 slug。
 - Final review 发现 milestone `Deferred` / `Split` slice 会掉出 summary counts，本轮已补齐模板、重算、校验和索引同步语义。
 - 用户反馈两个新 skill 需要更强 SOP 约束；本轮已要求 milestone 文档写清 target stage、acceptance criteria 与 slice boundary，并要求 technical-debt 文档写清 debt 原因、发现方式、当前影响和 initial resolution direction。
+- 用户补充 OpenHarnessTS 的 `AGENTS.md` 有 milestone 与 technical-debt 导航样例；本轮已将对应英文导航写入 managed guidance 模板、当前仓库 AGENTS、两个新 skill 的完成前检查要求，并加入旧目录-only managed block 的刷新回归测试。

@@ -24,6 +24,10 @@ Every technical-debt record must explain enough history for a later agent to und
 
 - Use `compound-development-asset/scripts/technical_debt_assets.py` for creation, status transitions, closure, checks, and `docs/technical-debt/INDEX.md` synchronization.
 - Do not hand-edit script-owned status, closure, or index state when `technical_debt_assets.py` can perform the update.
+- Before finishing technical-debt creation, closure, or major updates, inspect root `AGENTS.md` or `AGENT.md`. Ensure it has an English `Technical Debt Navigation` section or the managed asset-compounding block from `compound-development-asset/references/agents-asset-guidance-template.md`.
+- The technical-debt navigation must point to `docs/technical-debt/INDEX.md` and explain that records capture why debt exists, how it was discovered, current impact, revisit triggers, resolution criteria, and closure evidence.
+- If technical-debt navigation is missing or stale, run `compound-development-asset/scripts/ensure_agent_asset_guidance.py . --write` from the repository root, or patch the same English guidance manually when the script is unavailable.
+- Preserve existing repository rules and the managed `asset-compounding-guidance` markers when updating `AGENTS.md`; do not mix technical-debt records into milestone checklists or duplicate problem-asset narratives there.
 - Require `Closed` debt records to include a `Closure` section and a link to the archive that proves the debt was resolved.
 - After edits, run `technical_debt_assets.py check --json` and fix reported issues before closeout.
 

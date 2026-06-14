@@ -30,6 +30,10 @@ Every slice must describe a slice boundary, not a loose task:
 
 - Use `compound-development-asset/scripts/milestone_assets.py` for creation, updates, status checks, closure, progress recomputation, and `docs/milestones/INDEX.md` synchronization.
 - Do not hand-edit script-owned status, progress counts, closeout state, or index entries when `milestone_assets.py` can perform the state update.
+- Before finishing milestone creation or major milestone updates, inspect root `AGENTS.md` or `AGENT.md`. Ensure it has an English `Milestone Navigation` section or the managed asset-compounding block from `compound-development-asset/references/agents-asset-guidance-template.md`.
+- The milestone navigation must point to `docs/milestones/INDEX.md` and explain that milestone records track target stages, strategic significance, slice boundaries, acceptance signals, progress, and links to evidence.
+- If milestone navigation is missing or stale, run `compound-development-asset/scripts/ensure_agent_asset_guidance.py . --write` from the repository root, or patch the same English guidance manually when the script is unavailable.
+- Preserve existing repository rules and the managed `asset-compounding-guidance` markers when updating `AGENTS.md`; do not duplicate generic hook routing or closeout policy there.
 - Keep `CHECKLIST.md` at progress-ledger level: slice names, status, progress summary, and links.
 - Keep implementation details, task breakdowns, and acceptance reasoning in specs, plans, and archives instead of the milestone checklist.
 - After edits, run `milestone_assets.py check --json` and fix reported issues before closeout.

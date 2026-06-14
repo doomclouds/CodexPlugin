@@ -17,6 +17,18 @@ If the plugin was just installed or upgraded, review and trust the bundled hooks
 
 If one of these directories does not exist, do not assume there is no asset. Search the existing directories first, then inspect current code and tests before guessing.
 
+### Milestone Navigation
+
+Use `docs/milestones/INDEX.md` as the project-level milestone ledger. Milestone documents track target stages, strategic significance, slice boundaries, acceptance signals, progress, and links to completed evidence.
+
+`docs/milestones/` does not replace Superpowers specs, plans, archives, problems, or inbox notes. Use milestones to understand roadmap and progress; use `docs/superpowers/` assets for slice design, implementation plans, delivery evidence, and reusable lessons.
+
+### Technical Debt Navigation
+
+Use `docs/technical-debt/INDEX.md` as the project-level technical-debt ledger. Technical-debt records explain why debt exists, how it was discovered, current impact, revisit triggers, resolution criteria, and closure evidence.
+
+Technical debt should inform milestone and slice planning when it affects acceptance, maintainability, or architecture clarity. Do not mix technical-debt records into milestone checklists, and do not duplicate reusable failure-mode narratives that belong in `docs/superpowers/problems/`.
+
 ### Retrieval Order
 
 When continuing feature work, explaining prior decisions, or checking whether a requirement is already delivered:
@@ -25,8 +37,9 @@ When continuing feature work, explaining prior decisions, or checking whether a 
 2. Search `docs/superpowers/archives/` for completed delivery history.
 3. Search `docs/superpowers/problems/` for stable reusable failure modes, root causes, and recovery rules.
 4. Search `docs/superpowers/inbox/` for uncertain but possibly reusable signals.
-5. Search `docs/milestones/` and `docs/technical-debt/` for project-level progress ledgers and engineering debt records.
-6. If no asset answers the question, inspect current code and tests before guessing.
+5. Search `docs/milestones/` for current target stages, slice boundaries, acceptance signals, and progress evidence.
+6. Search `docs/technical-debt/` for unresolved engineering liabilities that may affect the next slice or refactor.
+7. If no asset answers the question, inspect current code and tests before guessing.
 
 Preferred keyword search:
 

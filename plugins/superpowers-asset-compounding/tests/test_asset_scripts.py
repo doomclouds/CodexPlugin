@@ -22,6 +22,7 @@ ASSET_CLOSEOUT = SKILLS / "compound-development-asset" / "scripts" / "asset_clos
 MILESTONE_ASSETS = SKILLS / "compound-development-asset" / "scripts" / "milestone_assets.py"
 TECHNICAL_DEBT_ASSETS = SKILLS / "compound-development-asset" / "scripts" / "technical_debt_assets.py"
 BOOTSTRAP = SKILLS / "compound-development-asset" / "scripts" / "bootstrap_asset_compounding.py"
+AGENT_GUIDANCE = SKILLS / "compound-development-asset" / "scripts" / "ensure_agent_asset_guidance.py"
 ARCHIVE_VALIDATOR = SKILLS / "archive-superpowers-feature" / "scripts" / "validate_archive_asset.py"
 PROBLEM_VALIDATOR = SKILLS / "write-superpowers-problem" / "scripts" / "validate_problem_asset.py"
 INBOX_INSPECTOR = SKILLS / "write-superpowers-problem" / "scripts" / "inspect_inbox_lifecycle.py"
@@ -59,6 +60,9 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("target stage", milestone_text.lower())
         self.assertIn("acceptance criteria", milestone_text.lower())
         self.assertIn("slice boundary", milestone_text.lower())
+        self.assertIn("Milestone Navigation", milestone_text)
+        self.assertIn("AGENTS.md", milestone_text)
+        self.assertIn("docs/milestones/INDEX.md", milestone_text)
         self.assertIn("name: manage-technical-debt", debt_text)
         self.assertIn("description:", debt_text)
         self.assertIn("technical_debt_assets.py", debt_text)
@@ -66,6 +70,9 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("why the debt exists", debt_text.lower())
         self.assertIn("how the debt was discovered", debt_text.lower())
         self.assertIn("initial resolution direction", debt_text.lower())
+        self.assertIn("Technical Debt Navigation", debt_text)
+        self.assertIn("AGENTS.md", debt_text)
+        self.assertIn("docs/technical-debt/INDEX.md", debt_text)
         self.assertIn('interface:\n  display_name: "Manage Superpowers Milestone"', milestone_agent_text)
         self.assertIn('  short_description: "Create and maintain milestone ledgers."', milestone_agent_text)
         self.assertIn(
@@ -95,6 +102,10 @@ class AssetScriptTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("docs/milestones/", guidance)
         self.assertIn("docs/technical-debt/", guidance)
+        self.assertIn("Milestone Navigation", guidance)
+        self.assertIn("docs/milestones/INDEX.md", guidance)
+        self.assertIn("Technical Debt Navigation", guidance)
+        self.assertIn("docs/technical-debt/INDEX.md", guidance)
 
     def run_json(self, *args: object) -> dict[str, object]:
         completed = subprocess.run(
@@ -1394,6 +1405,10 @@ Extract helper.
         self.assertIn("docs/superpowers/inbox/", agents_text)
         self.assertIn("docs/milestones/", agents_text)
         self.assertIn("docs/technical-debt/", agents_text)
+        self.assertIn("Milestone Navigation", agents_text)
+        self.assertIn("docs/milestones/INDEX.md", agents_text)
+        self.assertIn("Technical Debt Navigation", agents_text)
+        self.assertIn("docs/technical-debt/INDEX.md", agents_text)
         self.assertFalse((repo / "docs/milestones/INDEX.md").exists())
         self.assertFalse((repo / "docs/technical-debt/INDEX.md").exists())
         self.assertIn("hook-assisted asset compounding", agents_text)
@@ -1416,6 +1431,46 @@ Extract helper.
         agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
         self.assertEqual(agents_text.count("<!-- asset-compounding-guidance:start -->"), 1)
         self.assertEqual(second["created_dirs"], [])
+
+    def test_agent_guidance_refreshes_old_milestone_and_debt_directory_only_block(self) -> None:
+        repo = self.temp_root / "old_guidance_repo"
+        repo.mkdir()
+        (repo / "AGENTS.md").write_text(
+            """# Repository Guidelines
+
+<!-- asset-compounding-guidance:start -->
+## Asset Compounding Retrieval Guide
+
+### Asset Directories
+
+- Specs: `docs/superpowers/specs/`
+- Plans: `docs/superpowers/plans/`
+- Archives: `docs/superpowers/archives/`
+- Problems: `docs/superpowers/problems/`
+- Inbox: `docs/superpowers/inbox/`
+- Milestones: `docs/milestones/`
+- Technical debt: `docs/technical-debt/`
+<!-- asset-compounding-guidance:end -->
+""",
+            encoding="utf-8",
+        )
+
+        dry_run = self.run_json_fail(AGENT_GUIDANCE, repo, "--json")
+        self.assertTrue(dry_run["needs_update"])
+        self.assertIn("Milestone Navigation", dry_run["missing_terms"])
+        self.assertIn("docs/milestones/INDEX.md", dry_run["missing_terms"])
+        self.assertIn("Technical Debt Navigation", dry_run["missing_terms"])
+        self.assertIn("docs/technical-debt/INDEX.md", dry_run["missing_terms"])
+
+        updated = self.run_json(AGENT_GUIDANCE, repo, "--write", "--json")
+
+        self.assertTrue(updated["changed"])
+        agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertEqual(agents_text.count("<!-- asset-compounding-guidance:start -->"), 1)
+        self.assertIn("Milestone Navigation", agents_text)
+        self.assertIn("docs/milestones/INDEX.md", agents_text)
+        self.assertIn("Technical Debt Navigation", agents_text)
+        self.assertIn("docs/technical-debt/INDEX.md", agents_text)
 
     def test_completion_gate_detects_solution_folder_and_relayout_drift(self) -> None:
         repo = self.temp_root / "relayout_repo"

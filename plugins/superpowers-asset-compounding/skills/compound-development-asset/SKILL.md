@@ -184,8 +184,8 @@ In v0.2.0 and later, the managed block is intentionally small. It should cover:
 - `docs/superpowers/archives/` for completed delivery history
 - `docs/superpowers/problems/` for stable reusable failure modes
 - `docs/superpowers/inbox/` for uncertain but potentially reusable signals
-- `docs/milestones/` for project milestone ledgers
-- `docs/technical-debt/` for technical-debt records
+- `Milestone Navigation` with `docs/milestones/INDEX.md` for target stages, slice boundaries, acceptance signals, progress, and evidence links
+- `Technical Debt Navigation` with `docs/technical-debt/INDEX.md` for debt cause, discovery signal, impact, revisit triggers, resolution criteria, and closure evidence
 - the preferred `rg` keyword search command
 - a short note that lifecycle enforcement, plan-boundary checkpoints, and closeout nudges are hook-owned
 
