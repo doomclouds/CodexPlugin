@@ -2,20 +2,21 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.2.9` combines four skills with plugin-bundled Codex lifecycle hooks.
-This patch routes hook execution through plugin-owned launchers instead of naked
-`python` commands, so Windows sessions use Git Bash and the shared shell launcher
-skips WindowsApps Python aliases before running `asset_hook.py`. It also names
-per-session audit directories as `<project>--<session-id>` for easier local
-inspection. It keeps the v0.2.8 audit reliability updates, v0.2.7 audit report
-diagnostics, and v0.2.6 closeout UX improvements.
+Version `0.3.0` combines six skills with plugin-bundled Codex lifecycle hooks.
+This release adds project milestone ledgers and technical-debt records alongside
+the existing archive, problem, inbox, status, closeout, and hook audit support.
+It keeps the v0.2.9 plugin-owned hook launcher reliability updates, v0.2.8 audit
+reliability updates, v0.2.7 audit report diagnostics, and v0.2.6 closeout UX
+improvements.
 
-The plugin provides four skills:
+The plugin provides six skills:
 
 - `using-asset-compounding`: entry gate for deciding when preservation is needed.
 - `compound-development-asset`: router for `none`, `inbox`, `update-existing`, `new-problem`, `archive`, and `both`.
 - `archive-superpowers-feature`: writer for completed requirement archives.
 - `write-superpowers-problem`: writer for problem and inbox assets.
+- `manage-superpowers-milestone`: writer and checker for project milestone ledgers.
+- `manage-technical-debt`: writer and checker for technical-debt records.
 
 The plugin also bundles hooks under `hooks/hooks.json`:
 
@@ -72,6 +73,8 @@ For quick topic status questions, run:
 
 ```powershell
 python <plugin>\skills\compound-development-asset\scripts\asset_status.py . --topic "document lifecycle alignment" --json
+python <plugin>\skills\compound-development-asset\scripts\milestone_assets.py . check --json
+python <plugin>\skills\compound-development-asset\scripts\technical_debt_assets.py . check --json
 ```
 
 For merge/PR closeout, prefer the aggregate closeout check:
@@ -80,8 +83,9 @@ For merge/PR closeout, prefer the aggregate closeout check:
 python <plugin>\skills\compound-development-asset\scripts\asset_closeout.py . --topic "document lifecycle alignment" --json
 ```
 
-`asset_closeout.py` summarizes requirement archive coverage, related problem and
-inbox assets, index health, and the completion gate into a small handoff block.
+`asset_status.py` and `asset_closeout.py` summarize requirement archive
+coverage, related problem and inbox assets, milestone and technical-debt gaps,
+index health, and the completion gate into a small handoff block.
 
 Subagent lifecycle hooks are intentionally not registered. Subagents should
 return the status format required by their own workflow, such as Superpowers

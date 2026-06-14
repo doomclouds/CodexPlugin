@@ -22,6 +22,8 @@ If the plugin was just installed or upgraded, review and trust the bundled hooks
 - Archives: `docs/superpowers/archives/`
 - Problems: `docs/superpowers/problems/`
 - Inbox: `docs/superpowers/inbox/`
+- Milestones: `docs/milestones/`
+- Technical debt: `docs/technical-debt/`
 
 If one of these directories does not exist, do not assume there is no asset. Search the existing directories first, then inspect current code and tests before guessing.
 
@@ -33,12 +35,13 @@ When continuing feature work, explaining prior decisions, or checking whether a 
 2. Search `docs/superpowers/archives/` for completed delivery history.
 3. Search `docs/superpowers/problems/` for stable reusable failure modes, root causes, and recovery rules.
 4. Search `docs/superpowers/inbox/` for uncertain but possibly reusable signals.
-5. If no asset answers the question, inspect current code and tests before guessing.
+5. Search `docs/milestones/` and `docs/technical-debt/` for project-level progress ledgers and engineering debt records.
+6. If no asset answers the question, inspect current code and tests before guessing.
 
 Preferred keyword search:
 
 ```powershell
-rg -n "<topic-keyword>" docs/superpowers/specs docs/superpowers/plans docs/superpowers/archives docs/superpowers/problems docs/superpowers/inbox
+rg -n "<topic-keyword>" docs/superpowers/specs docs/superpowers/plans docs/superpowers/archives docs/superpowers/problems docs/superpowers/inbox docs/milestones docs/technical-debt
 ```
 
 ### Hook-Owned Workflow

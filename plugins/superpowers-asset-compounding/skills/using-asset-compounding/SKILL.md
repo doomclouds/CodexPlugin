@@ -19,10 +19,11 @@ Use it to decide whether a session should preserve durable knowledge into the
 project's Superpowers assets, then dispatch to `compound-development-asset`
 when writing, search, or index maintenance may be needed.
 
-If a repository starts using `docs/superpowers/` or creates its first spec,
-plan, archive, problem, or inbox asset, dispatch to `compound-development-asset`
-so it can run the asset bootstrap before routing. Do not leave repository
-initialization to a later writer skill.
+If a repository starts using `docs/superpowers/`, `docs/milestones/`, or
+`docs/technical-debt/`, or creates its first spec, plan, archive, problem,
+inbox, milestone, or technical-debt asset, dispatch to
+`compound-development-asset` so it can run the asset bootstrap before routing.
+Do not leave repository initialization to a later writer skill.
 
 Routes:
 
@@ -115,8 +116,9 @@ Hard completion gate: before merge/PR/cleanup/final handoff on meaningful work,
 the main agent must produce an auditable `asset_gate:` block. Route or
 explicitly defer reusable lessons from implementation notes, reviewer output,
 subagent output, verification results, user feedback, and plan-boundary
-checkpoints. If there are no candidates, write `asset_candidates: none`; do not
-leave the gate implicit.
+checkpoints, milestone ledger gaps, and technical-debt record gaps. If there
+are no candidates, write `asset_candidates: none`; do not leave the gate
+implicit.
 
 Completion archive invariant: `check_completion_gate.py` passing with no extra
 arguments is only a preflight. It never proves that a completed requirement has
@@ -129,8 +131,8 @@ with `--completed-topic <topic-slug-or-words>` and treat
 When `compound-development-asset/scripts/check_completion_gate.py` is available,
 use it as deterministic evidence before close-out. Prefer the aggregate
 `asset_closeout.py` when the completed topic is known, because it reports
-archive coverage, related problem/inbox assets, index health, and a compact
-handoff block in one place:
+archive coverage, related problem/inbox assets, milestone and technical-debt
+signals, index health, and a compact handoff block in one place:
 
 ```bash
 python <compound-development-asset>/scripts/asset_status.py . --topic "<topic>" --json
@@ -151,8 +153,9 @@ Use `compound-development-asset` when the route is anything except obvious
 `none`, or when related assets should be searched before deciding.
 
 Also use `compound-development-asset` when the repository needs asset
-bootstrap: standard `docs/superpowers/` directories, managed `AGENTS.md`
-retrieval guidance, or stale asset guidance refresh.
+bootstrap: standard `docs/superpowers/`, `docs/milestones/`, or
+`docs/technical-debt/` directories, managed `AGENTS.md` retrieval guidance, or
+stale asset guidance refresh.
 
 Use writer skills only after the route is clear:
 
@@ -171,8 +174,8 @@ asset_gate:
   route: none | inbox | update-existing | archive | new-problem | both
 reason: <one concrete sentence>
 evidence: <tests, manual validation, CI/release result, or user feedback used>
-related_assets: <none | matched archive/problem/inbox/spec/plan paths>
-asset_candidates: <none | extracted reviewer/subagent/tool/check script candidates>
+related_assets: <none | matched archive/problem/inbox/spec/plan/milestone/technical-debt paths>
+asset_candidates: <none | extracted reviewer/subagent/tool/check script candidates, including milestone/debt closeout gaps>
 deferred_signals: <none | weak signals to revisit later>
 next_step: <none | compound-development-asset | writer skill>
 ```

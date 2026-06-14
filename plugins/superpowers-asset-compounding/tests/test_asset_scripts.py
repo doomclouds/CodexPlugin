@@ -73,6 +73,23 @@ class AssetScriptTests(unittest.TestCase):
             debt_agent_text,
         )
 
+    def test_v030_manifest_and_docs_mention_new_asset_types(self) -> None:
+        manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["version"], "0.3.0")
+        self.assertIn("milestones", manifest["interface"]["longDescription"])
+        self.assertIn("technical debt", manifest["interface"]["longDescription"].lower())
+
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Version `0.3.0`", readme)
+        self.assertIn("manage-superpowers-milestone", readme)
+        self.assertIn("manage-technical-debt", readme)
+
+        guidance = (
+            SKILLS / "compound-development-asset" / "references" / "agents-asset-guidance-template.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("docs/milestones/", guidance)
+        self.assertIn("docs/technical-debt/", guidance)
+
     def run_json(self, *args: object) -> dict[str, object]:
         completed = subprocess.run(
             ["python", *map(str, args)],
@@ -1270,11 +1287,17 @@ Extract helper.
             "docs/superpowers/archives",
             "docs/superpowers/problems",
             "docs/superpowers/inbox",
+            "docs/milestones",
+            "docs/technical-debt",
         ])
         agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("Existing rules.", agents_text)
         self.assertEqual(agents_text.count("<!-- asset-compounding-guidance:start -->"), 1)
         self.assertIn("docs/superpowers/inbox/", agents_text)
+        self.assertIn("docs/milestones/", agents_text)
+        self.assertIn("docs/technical-debt/", agents_text)
+        self.assertFalse((repo / "docs/milestones/INDEX.md").exists())
+        self.assertFalse((repo / "docs/technical-debt/INDEX.md").exists())
         self.assertIn("hook-assisted asset compounding", agents_text)
         self.assertIn("rg -n", agents_text)
         self.assertIn("/hooks", agents_text)
