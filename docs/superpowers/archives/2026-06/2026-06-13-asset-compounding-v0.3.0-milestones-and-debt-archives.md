@@ -1,0 +1,51 @@
+# Asset Compounding v0.3.0 Milestones and Technical Debt
+
+- Date: `2026-06-13`
+- Topic slug: `asset-compounding-v0.3.0-milestones-and-debt`
+- Status: `Archived`
+- Scope: `Plugin feature release`
+- Tags: `asset-compounding`, `milestones`, `technical-debt`, `scripts`, `skills`
+
+## Summary
+
+本次归档完成 `superpowers-asset-compounding` v0.3.0：插件从只覆盖 archives/problems/inbox 的需求与问题资产，扩展到项目级 milestone 账本和 technical-debt 记录，并把状态检查、索引同步、topic status 与 closeout required actions 统一交给脚本处理。技能负责语义边界，脚本负责机械状态，这条边界在本轮落成。
+
+## Delivered Scope
+
+- 新增 `manage-superpowers-milestone` 技能、README/CHECKLIST 模板、`milestone_assets.py` facade 和 `checks/milestone_checks.py`，支持 milestone 创建、slice 更新、进度重算、索引同步和校验。
+- 新增 `manage-technical-debt` 技能、technical-debt 模板、`technical_debt_assets.py` facade 和 `checks/technical_debt_checks.py`，支持 debt 创建、状态更新、关闭、闭环 archive 校验、重复 slug 和必填元数据检查。
+- 拆分脚本职责到 `asset_core/*` 与 `checks/*`，让 `check_indexes.py`、`check_completion_gate.py`、`asset_status.py`、`asset_closeout.py` 继续作为稳定 CLI facade。
+- 扩展 `asset_status.py`、`asset_closeout.py`、`find_related_assets.py` 和 `suggest_asset_route.py`，让 milestone 与 technical-debt 作为 related assets、required actions 和 `update-existing` 信号出现，但不扩展 `asset_gate.route` 枚举。
+- 更新 manifest、README、技能说明、bootstrap 和仓库检索锚点到 `0.3.0`；本仓库发布流程改为远端 marketplace 同步，旧 `local-home` cache sync 流程标记为 deprecated。
+
+## Out of Scope
+
+- 未新增 `asset_gate.route` 值，milestone/debt 不成为新的 route 类型。
+- 未让 hooks 自动写 milestone 或 technical-debt 文档。
+- 未执行本地 `sync_local_plugin_cache.py` / cache smoke；该流程已按用户要求弃用，远端 marketplace 同步等待分支合并并推送后执行。
+- 未删除全局 `~/.codex` 里的 legacy local-plugin 同步脚本；它不属于本仓库源码。
+
+## Verification Snapshot
+
+- Source tests: `$env:PYTHONIOENCODING='utf-8'; python -m unittest plugins.superpowers-asset-compounding.tests.test_asset_scripts` -> `Ran 88 tests ... OK`.
+- Manifest JSON: `python -m json.tool plugins\superpowers-asset-compounding\.codex-plugin\plugin.json` -> valid JSON with `"version": "0.3.0"`.
+- Skill validation: both `manage-superpowers-milestone` and `manage-technical-debt` passed `quick_validate.py`.
+- Diff hygiene: `git diff --check` passed; only Windows LF/CRLF working-copy warnings appeared during some checks.
+- Remote marketplace sync: deferred until this branch is merged and pushed; post-merge command is `codex plugin marketplace upgrade codex-plugin` followed by `codex plugin add superpowers-asset-compounding@codex-plugin`.
+- Legacy local cache sync: skipped by release policy; `sync_local_plugin_cache.py` / `local-home` cache smoke is deprecated for this repository flow.
+
+## Source Documents
+
+- Spec: [Asset Compounding v0.3.0 Milestones and Technical Debt Design](../../specs/2026-06-13-asset-compounding-v0.3.0-milestones-and-debt-design.md)
+- Visual: None found for this topic.
+- Plan: [Asset Compounding v0.3.0 Milestones and Technical Debt Implementation Plan](../../plans/2026-06-13-asset-compounding-v0.3.0-milestones-and-debt.md)
+
+## Related Problems
+
+- None.
+
+## Notes
+
+- Milestone 划分规则保持弹性：战略意义优先于硬性 slice 数量，小 milestone 可以成立，但必须说明战略意义。
+- Technical debt 不分大小类，统一通过状态、优先级、revisit trigger、resolution criteria 和 closure archive 管理。
+- Task 6 复核中发现 `README.md` milestone slug 为空会导致 closeout scope 泄漏，本轮已修复为从 milestone 目录名派生 slug。
