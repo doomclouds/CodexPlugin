@@ -1722,7 +1722,7 @@ git commit -m "docs: update asset compounding v0.3.0 guidance"
 
 ---
 
-### Task 9: Full Verification, Local Plugin Sync, and Cache Validation
+### Task 9: Full Verification and Remote Marketplace Sync Note
 
 **Files:**
 - No source files expected after this task unless validation exposes a defect.
@@ -1748,48 +1748,38 @@ git diff --check HEAD
 
 Expected: no output.
 
-- [ ] **Step 3: Sync local plugin cache**
+- [ ] **Step 3: Skip deprecated local cache sync**
 
-Run:
+Do not run the legacy local cache sync for this release:
 
 ```powershell
-$env:PYTHONIOENCODING='utf-8'
 python C:\Users\10062\.codex\skills\develop-local-codex-plugin\scripts\sync_local_plugin_cache.py superpowers-asset-compounding
 ```
 
-Expected: sync succeeds and creates or updates `C:\Users\10062\.codex\plugins\cache\local-home\superpowers-asset-compounding\0.3.0`.
+Expected: skipped. The `sync_local_plugin_cache.py` / `local-home` workflow is deprecated for this repository because plugin updates now flow through the remote Git marketplace.
 
-- [ ] **Step 4: Validate local plugin**
+- [ ] **Step 4: Record remote marketplace sync instruction**
 
-Run:
-
-```powershell
-$env:PYTHONIOENCODING='utf-8'
-python C:\Users\10062\.codex\skills\develop-local-codex-plugin\scripts\validate_local_plugin.py superpowers-asset-compounding
-```
-
-Expected: validation reports that source, cache, marketplace, config, and skills are valid.
-
-- [ ] **Step 5: Run cache smoke checks**
-
-Run:
+After this branch is merged and pushed to the remote marketplace repository, refresh the marketplace snapshot from the installed Codex environment:
 
 ```powershell
-$cache = 'C:\Users\10062\.codex\plugins\cache\local-home\superpowers-asset-compounding\0.3.0'
-$env:PYTHONIOENCODING='utf-8'
-python "$cache\skills\compound-development-asset\scripts\milestone_assets.py" . check --json
-python "$cache\skills\compound-development-asset\scripts\technical_debt_assets.py" . check --json
+codex plugin marketplace upgrade codex-plugin
+codex plugin add superpowers-asset-compounding@codex-plugin
 ```
 
-Expected: both commands execute from cache and return JSON.
+Expected: deferred until the remote marketplace contains this commit.
 
-- [ ] **Step 6: Commit cache-relevant validation fixes**
+- [ ] **Step 5: Skip cache smoke checks**
+
+Do not run local cache smoke checks for this release. The smoke target is the installed plugin after remote marketplace upgrade.
+
+- [ ] **Step 6: Commit release-flow documentation fixes**
 
 If any source files changed because validation exposed defects, run the relevant focused tests again and commit:
 
 ```powershell
 git add <changed-source-files>
-git commit -m "fix: address v0.3.0 plugin validation"
+git commit -m "docs: deprecate local plugin cache sync"
 ```
 
 If no files changed, record the validation evidence in the final handoff and continue.
@@ -1831,9 +1821,8 @@ Verification snapshot must include:
 
 - full source test result
 - manifest JSON validation
-- local cache sync result
-- local plugin validation result
-- cache smoke result
+- remote marketplace sync status: deferred until this branch is merged and pushed
+- explicit note that legacy local cache sync/cache smoke was skipped by release policy
 
 - [ ] **Step 2: Update archive index**
 
@@ -1898,12 +1887,12 @@ git commit -m "docs: archive asset compounding v0.3.0"
 - [ ] README and manifest mention six skills and version `0.3.0`.
 - [ ] `asset_status.py` reports milestone and technical-debt matches.
 - [ ] `asset_closeout.py` reports milestone and technical-debt required actions.
-- [ ] Local plugin cache is synced to `0.3.0`.
-- [ ] Local plugin validation passes.
+- [ ] Remote marketplace sync instructions are documented for post-merge use.
+- [ ] Legacy local cache sync is not required for this release.
 - [ ] v0.3.0 archive and archive index are updated.
 
 ## Self-Review
 
-- Spec coverage: This plan covers both new skills, milestone definitions, technical-debt definitions, script-owned state updates, script responsibility split, status/closeout integration, unchanged route vocabulary, tests, docs, version bump, local cache sync, and final archive closeout.
+- Spec coverage: This plan covers both new skills, milestone definitions, technical-debt definitions, script-owned state updates, script responsibility split, status/closeout integration, unchanged route vocabulary, tests, docs, version bump, remote marketplace sync guidance, and final archive closeout.
 - Placeholder scan: Avoided unresolved markers, vague implementation steps, and unspecified test commands.
 - Type consistency: Script names, status values, issue codes, and JSON field names are consistent across tasks.

@@ -20,12 +20,14 @@ This skill is a router and coordinator. It decides whether the current work shou
 
 It does not write archive or problem documents itself.
 
-Within the four-skill asset compounding system:
+Within the asset compounding system:
 
 - `using-asset-compounding` is the entry skill and end-of-session gate
 - `compound-development-asset` is the classifier/router
 - `archive-superpowers-feature` writes completed requirement archives
 - `write-superpowers-problem` writes problem assets, inbox notes, and problem/inbox updates
+- `manage-superpowers-milestone` writes and updates project milestone ledgers
+- `manage-technical-debt` writes and updates technical-debt records
 
 ## Routing Choices
 
@@ -106,6 +108,12 @@ For Superpowers-style projects, use these locations:
 - inbox root: `docs/superpowers/inbox/`
 - inbox index: `docs/superpowers/inbox/INDEX.md`
 - inbox month folder: `docs/superpowers/inbox/YYYY-MM/`
+- milestone root: `docs/milestones/`
+- milestone index: `docs/milestones/INDEX.md`
+- milestone folder: `docs/milestones/YYYY-MM/<milestone-slug>/`
+- technical-debt root: `docs/technical-debt/`
+- technical-debt index: `docs/technical-debt/INDEX.md`
+- technical-debt month folder: `docs/technical-debt/YYYY-MM/`
 - repository entry guide: `AGENTS.md` or `AGENT.md`
 
 If a selected output area does not exist yet, let the writer skill create it when the route actually requires writing.
@@ -117,13 +125,15 @@ Use bundled scripts for deterministic checks. Do not make Codex manually redo wo
 Scripts live in `scripts/`:
 
 - `suggest_asset_route.py`: suggest `none`, `inbox`, `update-existing`, `new-problem`, `archive`, or `both` from changed files and keywords.
-- `find_related_assets.py`: find related `specs`, `plans`, `archives`, `problems`, and `inbox` notes by slug or keywords before deciding whether to update or create.
-- `check_indexes.py`: check `archives`, `problems`, and `inbox` index ordering, duplicate entries, dead links, and orphan asset files.
+- `find_related_assets.py`: find related `specs`, `plans`, `archives`, `problems`, `inbox`, `milestones`, and `technical-debt` notes by slug or keywords before deciding whether to update or create.
+- `check_indexes.py`: check `archives`, `problems`, `inbox`, `milestones`, and `technical-debt` index ordering, duplicate entries, dead links, and orphan asset files.
 - `bootstrap_asset_compounding.py`: initialize `docs/superpowers/` directories and the managed `AGENTS.md` retrieval block.
-- `ensure_agent_asset_guidance.py`: create or update a managed AGENTS.md section for specs/plans/archives/problems/inbox retrieval.
+- `ensure_agent_asset_guidance.py`: create or update a managed AGENTS.md section for specs/plans/archives/problems/inbox/milestones/technical-debt retrieval.
 - `check_completion_gate.py`: check close-out evidence, completed-topic archive coverage, reviewer/subagent asset candidates, src/tests relayout leftovers, and solution-folder drift before final handoff.
-- `asset_status.py`: answer topic-level status questions by summarizing requirement archive, related problem/inbox assets, index health, and completed-topic gate status.
-- `asset_closeout.py`: aggregate topic status into a closeout route, required actions, related assets, and a compact handoff block before merge, PR, cleanup, or final response.
+- `asset_status.py`: answer topic-level status questions by summarizing requirement archive, related problem/inbox assets, milestone and technical-debt signals, index health, and completed-topic gate status.
+- `asset_closeout.py`: aggregate topic status into a closeout route, required actions, related milestone/debt gaps, related assets, and a compact handoff block before merge, PR, cleanup, or final response.
+- `milestone_assets.py`: create, update, recompute, and check project milestone ledgers under `docs/milestones/`.
+- `technical_debt_assets.py`: create, update, close, and check technical-debt records under `docs/technical-debt/`.
 
 Use scripts as evidence, not as final authority:
 
@@ -139,6 +149,8 @@ python <skill>/scripts/find_related_assets.py . <slug-or-keywords>
 python <skill>/scripts/check_indexes.py .
 python <skill>/scripts/bootstrap_asset_compounding.py . --write
 python <skill>/scripts/ensure_agent_asset_guidance.py . --diff
+python <skill>/scripts/milestone_assets.py . check --json
+python <skill>/scripts/technical_debt_assets.py . check --json
 python <skill>/scripts/asset_status.py . --topic "<topic>" --json
 python <skill>/scripts/asset_closeout.py . --topic "<topic>" --json
 python <skill>/scripts/check_completion_gate.py . --json
@@ -172,6 +184,8 @@ In v0.2.0 and later, the managed block is intentionally small. It should cover:
 - `docs/superpowers/archives/` for completed delivery history
 - `docs/superpowers/problems/` for stable reusable failure modes
 - `docs/superpowers/inbox/` for uncertain but potentially reusable signals
+- `Milestone Navigation` with `docs/milestones/INDEX.md` for target stages, slice boundaries, acceptance signals, progress, and evidence links
+- `Technical Debt Navigation` with `docs/technical-debt/INDEX.md` for debt cause, discovery signal, impact, revisit triggers, resolution criteria, and closure evidence
 - the preferred `rg` keyword search command
 - a short note that lifecycle enforcement, plan-boundary checkpoints, and closeout nudges are hook-owned
 
@@ -215,6 +229,11 @@ python <skill>/scripts/check_completion_gate.py . --completed-topic "<topic>" --
 spec+plan coverage exists without archive coverage, even if the generic
 completion gate would otherwise pass. Do not interpret a plain `status: pass`
 as `route: none` for completed requirement work.
+
+Project-level milestone and technical-debt gaps usually produce
+`update-existing` or closeout required actions, not new route values. Preserve
+the existing route vocabulary and dispatch to the milestone/debt writer skills
+only when the evidence says those project-level assets need creation or update.
 
 If preparing a written final handoff, also validate that it includes the
 auditable gate output:
@@ -318,6 +337,7 @@ Also run the writer-owned document validators for any new or modified archive/pr
 - Using `both` for ordinary implementation fixes that do not contain stable failure knowledge
 - Dropping an uncertain but potentially reusable signal instead of routing it to inbox
 - Adding assets but leaving `AGENTS.md` without retrieval guidance for archives/problems/inbox
+- Treating milestone or technical-debt gaps as new asset route values instead of required actions or `update-existing`
 - Duplicating the full generic skill workflow in `AGENTS.md` instead of adding only project-level retrieval guidance
 - Promoting unstable one-off noise into AGENTS or memory too early
 

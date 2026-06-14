@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manage Technical Debt"
+  short_description: "Create and maintain technical-debt records."
+  default_prompt: "Use $manage-technical-debt to create, update, close, or check a docs/technical-debt record."

@@ -69,6 +69,10 @@ def check_existing(text: str) -> dict[str, object]:
         "docs/superpowers/archives",
         "docs/superpowers/problems",
         "docs/superpowers/inbox",
+        "Milestone Navigation",
+        "docs/milestones/INDEX.md",
+        "Technical Debt Navigation",
+        "docs/technical-debt/INDEX.md",
     ]
     missing_terms = [term for term in required_terms if term not in text]
     return {

@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import importlib.util
@@ -18,7 +19,10 @@ CHECKER = SKILLS / "compound-development-asset" / "scripts" / "check_indexes.py"
 COMPLETION_GATE = SKILLS / "compound-development-asset" / "scripts" / "check_completion_gate.py"
 ASSET_STATUS = SKILLS / "compound-development-asset" / "scripts" / "asset_status.py"
 ASSET_CLOSEOUT = SKILLS / "compound-development-asset" / "scripts" / "asset_closeout.py"
+MILESTONE_ASSETS = SKILLS / "compound-development-asset" / "scripts" / "milestone_assets.py"
+TECHNICAL_DEBT_ASSETS = SKILLS / "compound-development-asset" / "scripts" / "technical_debt_assets.py"
 BOOTSTRAP = SKILLS / "compound-development-asset" / "scripts" / "bootstrap_asset_compounding.py"
+AGENT_GUIDANCE = SKILLS / "compound-development-asset" / "scripts" / "ensure_agent_asset_guidance.py"
 ARCHIVE_VALIDATOR = SKILLS / "archive-superpowers-feature" / "scripts" / "validate_archive_asset.py"
 PROBLEM_VALIDATOR = SKILLS / "write-superpowers-problem" / "scripts" / "validate_problem_asset.py"
 INBOX_INSPECTOR = SKILLS / "write-superpowers-problem" / "scripts" / "inspect_inbox_lifecycle.py"
@@ -35,6 +39,73 @@ class AssetScriptTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         shutil.rmtree(self.temp_root, ignore_errors=True)
+
+    def test_v030_skills_exist_with_required_metadata(self) -> None:
+        milestone_skill = SKILLS / "manage-superpowers-milestone" / "SKILL.md"
+        debt_skill = SKILLS / "manage-technical-debt" / "SKILL.md"
+        milestone_agent = SKILLS / "manage-superpowers-milestone" / "agents" / "openai.yaml"
+        debt_agent = SKILLS / "manage-technical-debt" / "agents" / "openai.yaml"
+        self.assertTrue(milestone_skill.is_file())
+        self.assertTrue(debt_skill.is_file())
+        self.assertTrue(milestone_agent.is_file())
+        self.assertTrue(debt_agent.is_file())
+        milestone_text = milestone_skill.read_text(encoding="utf-8")
+        debt_text = debt_skill.read_text(encoding="utf-8")
+        milestone_agent_text = milestone_agent.read_text(encoding="utf-8")
+        debt_agent_text = debt_agent.read_text(encoding="utf-8")
+        self.assertIn("name: manage-superpowers-milestone", milestone_text)
+        self.assertIn("description:", milestone_text)
+        self.assertIn("milestone_assets.py", milestone_text)
+        self.assertIn("strategic significance", milestone_text.lower())
+        self.assertIn("target stage", milestone_text.lower())
+        self.assertIn("acceptance criteria", milestone_text.lower())
+        self.assertIn("slice boundary", milestone_text.lower())
+        self.assertIn("Milestone Navigation", milestone_text)
+        self.assertIn("AGENTS.md", milestone_text)
+        self.assertIn("docs/milestones/INDEX.md", milestone_text)
+        self.assertIn("name: manage-technical-debt", debt_text)
+        self.assertIn("description:", debt_text)
+        self.assertIn("technical_debt_assets.py", debt_text)
+        self.assertIn("technical debt is not split into large and small", debt_text.lower())
+        self.assertIn("why the debt exists", debt_text.lower())
+        self.assertIn("how the debt was discovered", debt_text.lower())
+        self.assertIn("initial resolution direction", debt_text.lower())
+        self.assertIn("Technical Debt Navigation", debt_text)
+        self.assertIn("AGENTS.md", debt_text)
+        self.assertIn("docs/technical-debt/INDEX.md", debt_text)
+        self.assertIn('interface:\n  display_name: "Manage Superpowers Milestone"', milestone_agent_text)
+        self.assertIn('  short_description: "Create and maintain milestone ledgers."', milestone_agent_text)
+        self.assertIn(
+            '  default_prompt: "Use $manage-superpowers-milestone to create, update, recompute, or check a docs/milestones progress ledger."',
+            milestone_agent_text,
+        )
+        self.assertIn('interface:\n  display_name: "Manage Technical Debt"', debt_agent_text)
+        self.assertIn('  short_description: "Create and maintain technical-debt records."', debt_agent_text)
+        self.assertIn(
+            '  default_prompt: "Use $manage-technical-debt to create, update, close, or check a docs/technical-debt record."',
+            debt_agent_text,
+        )
+
+    def test_v030_manifest_and_docs_mention_new_asset_types(self) -> None:
+        manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["version"], "0.3.0")
+        self.assertIn("milestones", manifest["interface"]["longDescription"])
+        self.assertIn("technical debt", manifest["interface"]["longDescription"].lower())
+
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Version `0.3.0`", readme)
+        self.assertIn("manage-superpowers-milestone", readme)
+        self.assertIn("manage-technical-debt", readme)
+
+        guidance = (
+            SKILLS / "compound-development-asset" / "references" / "agents-asset-guidance-template.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("docs/milestones/", guidance)
+        self.assertIn("docs/technical-debt/", guidance)
+        self.assertIn("Milestone Navigation", guidance)
+        self.assertIn("docs/milestones/INDEX.md", guidance)
+        self.assertIn("Technical Debt Navigation", guidance)
+        self.assertIn("docs/technical-debt/INDEX.md", guidance)
 
     def run_json(self, *args: object) -> dict[str, object]:
         completed = subprocess.run(
@@ -110,8 +181,126 @@ class AssetScriptTests(unittest.TestCase):
         )
         return repo
 
+    def create_debt_named_repo(self) -> Path:
+        repo = self.temp_root / "debt_named_repo"
+        for area in ("specs", "plans", "archives/2026-06"):
+            (repo / "docs" / "superpowers" / area).mkdir(parents=True, exist_ok=True)
+        topic = "asset-compounding-v0.3.0-milestones-and-debt"
+        (repo / f"docs/superpowers/specs/2026-06-13-{topic}-design.md").write_text(
+            "# Asset Compounding Milestones And Debt Design\n\nSpec.\n",
+            encoding="utf-8",
+        )
+        (repo / f"docs/superpowers/plans/2026-06-13-{topic}.md").write_text(
+            "# Asset Compounding Milestones And Debt Plan\n\nPlan.\n",
+            encoding="utf-8",
+        )
+        return repo
+
     def audit_dir(self, plugin_data: Path, repo: Path, session_id: str = "session-1") -> Path:
         return plugin_data / f"{repo.name}--{session_id}"
+
+    def test_asset_core_registry_includes_project_level_assets(self) -> None:
+        scripts_root = SKILLS / "compound-development-asset" / "scripts"
+        spec = importlib.util.spec_from_file_location("asset_core_areas", scripts_root / "asset_core" / "areas.py")
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(module)
+
+        self.assertEqual(module.ASSET_AREAS["archives"]["suffix"], "-archives.md")
+        self.assertEqual(module.ASSET_AREAS["milestones"]["kind"], "milestone")
+        self.assertEqual(module.ASSET_AREAS["technical-debt"]["kind"], "technical-debt")
+        self.assertEqual(module.ASSET_AREAS["milestones"]["root"], "docs/milestones")
+        self.assertEqual(module.ASSET_AREAS["technical-debt"]["root"], "docs/technical-debt")
+
+    def test_asset_core_canonical_slug_matches_existing_suffixes(self) -> None:
+        scripts_root = SKILLS / "compound-development-asset" / "scripts"
+        spec = importlib.util.spec_from_file_location("asset_core_topics", scripts_root / "asset_core" / "topics.py")
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(module)
+
+        self.assertEqual(module.canonical_slug("2026-05-01-demo-feature-archives.md"), "demo-feature")
+        self.assertEqual(module.canonical_slug("Demo Feature"), "demo-feature")
+        self.assertEqual(module.canonical_slug("2026-05-01-demo-feature-debt.md"), "demo-feature")
+        self.assertEqual(
+            module.date_slug_from_name("2026-05-01-demo-feature-archives.md", "-archives.md"),
+            ("2026-05-01", "demo-feature"),
+        )
+
+    def test_asset_core_iter_assets_keeps_default_scope_and_allows_explicit_project_areas(self) -> None:
+        repo = self.create_repo()
+        milestone_root = repo / "docs/milestones/2026-06/demo-milestone"
+        milestone_root.mkdir(parents=True)
+        (milestone_root / "README.md").write_text("# Demo Milestone\n", encoding="utf-8")
+        debt_root = repo / "docs/technical-debt/2026-06"
+        debt_root.mkdir(parents=True)
+        (debt_root / "2026-06-13-demo-debt-debt.md").write_text("# Demo Debt\n", encoding="utf-8")
+
+        scripts_root = SKILLS / "compound-development-asset" / "scripts"
+        sys.path.insert(0, str(scripts_root))
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "asset_core_discovery",
+                scripts_root / "asset_core" / "discovery.py",
+            )
+            self.assertIsNotNone(spec)
+            module = importlib.util.module_from_spec(spec)
+            assert spec and spec.loader
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop("asset_core_discovery", None)
+            sys.path.remove(str(scripts_root))
+
+        superpowers_root = repo / "docs/superpowers"
+        default_areas = {asset.area for asset in module.iter_assets(superpowers_root)}
+        self.assertEqual(default_areas, {"specs", "plans"})
+
+        milestone_assets = module.iter_assets(superpowers_root, ["milestones"])
+        self.assertEqual(
+            [(asset.area, asset.date, asset.slug, asset.title) for asset in milestone_assets],
+            [("milestones", "2026-06", "demo-milestone", "Demo Milestone")],
+        )
+        debt_assets = module.iter_assets(superpowers_root, ["technical-debt"])
+        self.assertEqual([(asset.area, asset.title) for asset in debt_assets], [("technical-debt", "Demo Debt")])
+
+    def test_asset_core_iter_assets_preserves_legacy_asset_root_inputs(self) -> None:
+        scripts_root = SKILLS / "compound-development-asset" / "scripts"
+        sys.path.insert(0, str(scripts_root))
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "asset_core_discovery",
+                scripts_root / "asset_core" / "discovery.py",
+            )
+            self.assertIsNotNone(spec)
+            module = importlib.util.module_from_spec(spec)
+            assert spec and spec.loader
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop("asset_core_discovery", None)
+            sys.path.remove(str(scripts_root))
+
+        repo = self.create_repo()
+        superpowers_assets = module.iter_assets(repo / "docs/superpowers")
+        self.assertIn(("specs", "demo-feature"), {(asset.area, asset.slug) for asset in superpowers_assets})
+        self.assertIn(("plans", "demo-feature"), {(asset.area, asset.slug) for asset in superpowers_assets})
+
+        asset_root = self.temp_root / "standalone_asset_root"
+        archive_root = asset_root / "archives/2026-05"
+        archive_root.mkdir(parents=True)
+        (archive_root / "2026-05-01-standalone-feature-archives.md").write_text(
+            "# Standalone Feature Archive\n",
+            encoding="utf-8",
+        )
+
+        loose_assets = module.iter_assets(asset_root)
+        self.assertEqual(
+            [(asset.area, asset.slug, asset.title) for asset in loose_assets],
+            [("archives", "standalone-feature", "Standalone Feature Archive")],
+        )
 
     def add_archive(self, repo: Path) -> Path:
         archive = repo / "docs/superpowers/archives/2026-05/2026-05-01-demo-feature-archives.md"
@@ -270,6 +459,170 @@ Promote if repeated.
         )
         return inbox
 
+    def add_project_index_assets(self, repo: Path, *, duplicate_checklist_link: bool = False) -> None:
+        milestone_root = repo / "docs/milestones/2026-06/demo-milestone"
+        milestone_root.mkdir(parents=True, exist_ok=True)
+        (milestone_root / "README.md").write_text(
+            "# Demo Milestone\n\n## Strategic Significance\n\nImportant.\n",
+            encoding="utf-8",
+        )
+        (milestone_root / "CHECKLIST.md").write_text(
+            """# Demo Milestone Checklist
+
+## Progress Summary
+
+- Status: In Progress
+- Progress: 0/1
+- Done: 0
+- In progress: 1
+- Not started: 0
+
+## Checklist
+
+- [ ] 1. Demo slice
+  - Status: In Progress
+  - Related spec: None yet.
+  - Related plan: None yet.
+  - Related archive: None yet.
+  - Completion signal: Pending.
+""",
+            encoding="utf-8",
+        )
+        checklist_cell = "[Checklist](2026-06/demo-milestone/CHECKLIST.md)"
+        if duplicate_checklist_link:
+            checklist_cell = (
+                "[Checklist](2026-06/demo-milestone/CHECKLIST.md) "
+                "[Checklist copy](2026-06/demo-milestone/CHECKLIST.md)"
+            )
+        (repo / "docs/milestones/INDEX.md").write_text(
+            f"""# Milestones
+
+| Month | Milestone | Checklist | Status | Progress | Notes |
+| --- | --- | --- | --- | --- | --- |
+| 2026-06 | [Demo Milestone](2026-06/demo-milestone/README.md) | {checklist_cell} | In Progress | 0/1 | Important |
+""",
+            encoding="utf-8",
+        )
+        debt_root = repo / "docs/technical-debt/2026-06"
+        debt_root.mkdir(parents=True, exist_ok=True)
+        (debt_root / "2026-06-13-demo-debt-debt.md").write_text(
+            """# Demo Debt
+
+- Date: `2026-06-13`
+- Topic slug: `demo-debt`
+- Status: `Open`
+- Milestone: `Demo Milestone`
+- Debt type: `Architecture`
+- Priority: `Medium`
+- Revisit trigger: `Before adding another demo slice.`
+- Scope: `Demo`
+- Related slice: `Demo slice`
+
+## Summary
+
+Debt.
+
+## Why This Is Debt
+
+It blocks future work.
+
+## Current Impact
+
+More code drift.
+
+## Resolution Criteria
+
+- Shared helper exists.
+
+## Initial Resolution Direction
+
+Extract helper.
+
+## Non-Goals
+
+- New behavior.
+
+## Related Assets
+
+- None yet.
+""",
+            encoding="utf-8",
+        )
+        (repo / "docs/technical-debt/INDEX.md").write_text(
+            """# Technical Debt Index
+
+| Month | Debt | Status | Priority | Milestone | Revisit Trigger | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-06 | [Demo debt](2026-06/2026-06-13-demo-debt-debt.md) | Open | Medium | Demo Milestone | Before adding another demo slice. | Demo |
+""",
+            encoding="utf-8",
+        )
+
+    def create_technical_debt(
+        self,
+        repo: Path,
+        *,
+        date: str = "2026-06-13",
+        slug: str = "demo-debt",
+        title: str = "Demo Debt",
+        priority: str = "Medium",
+    ) -> dict[str, object]:
+        return self.run_json(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "create",
+            "--date",
+            date,
+            "--slug",
+            slug,
+            "--title",
+            title,
+            "--milestone",
+            "Demo Alpha",
+            "--debt-type",
+            "Architecture",
+            "--priority",
+            priority,
+            "--revisit-trigger",
+            "Before adding another demo slice.",
+            "--scope",
+            "Demo runtime",
+            "--related-slice",
+            "Demo Slice",
+            "--summary",
+            "Demo runtime owns duplicated helper logic.",
+            "--why",
+            "The duplication will make future slices drift.",
+            "--impact",
+            "Future search tools will copy fallback behavior.",
+            "--resolution-criteria",
+            "Shared helper is extracted and used by both call sites.",
+            "--resolution-direction",
+            "Extract shared helper functions.",
+            "--non-goal",
+            "Changing public behavior.",
+            "--write",
+            "--json",
+        )
+
+    def load_index_module(self) -> object:
+        scripts_root = SKILLS / "compound-development-asset" / "scripts"
+        sys.path.insert(0, str(scripts_root))
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "asset_core_indexes",
+                scripts_root / "asset_core" / "indexes.py",
+            )
+            self.assertIsNotNone(spec)
+            module = importlib.util.module_from_spec(spec)
+            assert spec and spec.loader
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+            return module
+        finally:
+            sys.modules.pop("asset_core_indexes", None)
+            sys.path.remove(str(scripts_root))
+
     def test_spec_plan_without_archive_routes_to_archive(self) -> None:
         repo = self.create_repo()
         result = self.run_json(ROUTER, repo, "--keywords", "demo", "feature", "--json")
@@ -280,11 +633,56 @@ Promote if repeated.
         result = self.run_json(FINDER, repo, "demo", "feature", "--json")
         self.assertIn("plans", {item["area"] for item in result["results"]})
 
+    def test_finder_includes_project_level_ledgers_by_default(self) -> None:
+        repo = self.create_repo()
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "Demo Feature",
+            "--strategic-significance",
+            "Demo Alpha proves a strategically important project path.",
+            "--acceptance",
+            "Demo Alpha can complete tracked stages.",
+            "--write",
+            "--json",
+        )
+        self.create_technical_debt(repo, slug="demo-feature", title="Demo Feature Debt")
+
+        result = self.run_json(FINDER, repo, "demo", "feature", "--json")
+
+        self.assertIn("milestones", {item["area"] for item in result["results"]})
+        self.assertIn("technical-debt", {item["area"] for item in result["results"]})
+
     def test_existing_archive_routes_to_update_existing(self) -> None:
         repo = self.create_repo()
         self.add_archive(repo)
         result = self.run_json(ROUTER, repo, "--keywords", "demo", "feature", "completed", "--json")
         self.assertEqual(result["routes"], ["update-existing"])
+
+    def test_changed_milestone_and_technical_debt_assets_route_to_update_existing(self) -> None:
+        repo = self.create_repo()
+
+        result = self.run_json(
+            ROUTER,
+            repo,
+            "--changed-file",
+            "docs/milestones/2026-06/demo-alpha/README.md",
+            "--changed-file",
+            "docs/technical-debt/2026-06/2026-06-13-demo-feature-debt.md",
+            "--json",
+        )
+
+        self.assertEqual(result["routes"], ["update-existing"])
+        self.assertIn("Changed files include milestone assets.", result["facts"])
+        self.assertIn("Changed files include technical-debt assets.", result["facts"])
 
     def test_lightweight_polish_signal_routes_to_none(self) -> None:
         repo = self.temp_root / "lightweight_repo"
@@ -423,6 +821,557 @@ Promote if repeated.
         self.assertEqual(self.run_json(PROBLEM_VALIDATOR, problem, "--json")["issues"], [])
         self.assertEqual(self.run_json(CHECKER, repo, "--json")["issues"], [])
 
+    def test_check_area_accepts_repo_root_for_superpowers_indexes(self) -> None:
+        repo = self.create_repo()
+        self.add_archive(repo)
+        (repo / "docs/superpowers/archives/INDEX.md").write_text(
+            """# Superpowers Archive Index
+
+## 2026-05
+
+- [missing-archive.md](./2026-05/missing-archive.md): Missing archive.
+""",
+            encoding="utf-8",
+        )
+        module = self.load_index_module()
+
+        issues = module.check_area(repo, "archives")
+
+        self.assertIn("dead_link", {issue["code"] for issue in issues})
+
+    def test_check_indexes_accepts_docs_root_for_all_areas(self) -> None:
+        repo = self.create_repo()
+        self.add_archive(repo)
+        self.add_problem(repo)
+        self.add_project_index_assets(repo)
+
+        result = self.run_json(CHECKER, repo / "docs", "--area", "all", "--json")
+
+        self.assertEqual(result["issues"], [])
+
+    def test_check_indexes_accepts_docs_root_without_superpowers_for_milestones(self) -> None:
+        repo = self.temp_root / "project_only_repo"
+        milestones_root = repo / "docs/milestones"
+        milestones_root.mkdir(parents=True, exist_ok=True)
+        (milestones_root / "INDEX.md").write_text(
+            """# Milestones
+
+| Month | Milestone | Checklist | Status | Progress | Notes |
+| --- | --- | --- | --- | --- | --- |
+| 2026-06 | [Missing Milestone](2026-06/missing-milestone/README.md) | [Checklist](2026-06/missing-milestone/CHECKLIST.md) | In Progress | 0/1 | Missing |
+""",
+            encoding="utf-8",
+        )
+
+        result = self.run_json_fail(CHECKER, repo / "docs", "--area", "milestones", "--json")
+
+        self.assertIn("dead_link", {issue["code"] for issue in result["issues"]})
+
+    def test_check_indexes_reports_duplicate_table_local_links(self) -> None:
+        repo = self.create_repo()
+        self.add_project_index_assets(repo, duplicate_checklist_link=True)
+
+        result = self.run_json_fail(CHECKER, repo, "--area", "milestones", "--json")
+
+        self.assertIn("duplicate_entry", {issue["code"] for issue in result["issues"]})
+
+    def test_check_indexes_accepts_milestone_and_technical_debt_areas(self) -> None:
+        repo = self.create_repo()
+        self.add_project_index_assets(repo)
+
+        self.assertEqual(self.run_json(CHECKER, repo, "--area", "milestones", "--json")["issues"], [])
+        self.assertEqual(self.run_json(CHECKER, repo, "--area", "technical-debt", "--json")["issues"], [])
+
+    def test_technical_debt_assets_create_close_and_check(self) -> None:
+        repo = self.create_repo()
+        archive = self.add_archive(repo)
+        created = self.run_json(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "create",
+            "--date",
+            "2026-06-13",
+            "--slug",
+            "demo-debt",
+            "--title",
+            "Demo Debt",
+            "--milestone",
+            "Demo Alpha",
+            "--debt-type",
+            "Architecture",
+            "--priority",
+            "Medium",
+            "--revisit-trigger",
+            "Before adding another demo slice.",
+            "--scope",
+            "Demo runtime",
+            "--related-slice",
+            "Demo Slice",
+            "--summary",
+            "Demo runtime owns duplicated helper logic.",
+            "--why",
+            "The duplication will make future slices drift.",
+            "--impact",
+            "Future search tools will copy fallback behavior.",
+            "--resolution-criteria",
+            "Shared helper is extracted and used by both call sites.",
+            "--resolution-direction",
+            "Extract shared helper functions.",
+            "--non-goal",
+            "Changing public behavior.",
+            "--write",
+            "--json",
+        )
+        self.assertEqual(created["status"], "created")
+        closed = self.run_json(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "close",
+            "--slug",
+            "demo-debt",
+            "--archive",
+            str(archive.relative_to(repo).as_posix()),
+            "--closure",
+            "Shared helper extraction is archived by the demo feature archive.",
+            "--write",
+            "--json",
+        )
+        self.assertEqual(closed["status"], "closed")
+        checked = self.run_json(TECHNICAL_DEBT_ASSETS, repo, "check", "--slug", "demo-debt", "--json")
+        self.assertEqual(checked["issues"], [])
+
+    def test_technical_debt_check_rejects_closed_debt_without_archive(self) -> None:
+        repo = self.create_repo()
+        self.run_json(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "create",
+            "--date",
+            "2026-06-13",
+            "--slug",
+            "unlinked-debt",
+            "--title",
+            "Unlinked Debt",
+            "--milestone",
+            "Demo Alpha",
+            "--debt-type",
+            "Architecture",
+            "--priority",
+            "High",
+            "--revisit-trigger",
+            "Before release.",
+            "--scope",
+            "Demo",
+            "--related-slice",
+            "Demo Slice",
+            "--summary",
+            "Debt.",
+            "--why",
+            "It blocks future work.",
+            "--impact",
+            "It causes drift.",
+            "--resolution-criteria",
+            "Archive exists.",
+            "--resolution-direction",
+            "Refactor.",
+            "--non-goal",
+            "Feature work.",
+            "--write",
+            "--json",
+        )
+        debt = repo / "docs/technical-debt/2026-06/2026-06-13-unlinked-debt-debt.md"
+        text = debt.read_text(encoding="utf-8").replace("- Status: `Open`", "- Status: `Closed`")
+        debt.write_text(text + "\n## Closure\n\nClosed without archive.\n", encoding="utf-8")
+        result = self.run_json_fail(TECHNICAL_DEBT_ASSETS, repo, "check", "--slug", "unlinked-debt", "--json")
+        self.assertEqual(result["issues"][0]["code"], "closed_debt_missing_archive")
+
+    def test_technical_debt_check_requires_archive_link_in_closure_section(self) -> None:
+        repo = self.create_repo()
+        archive = self.add_archive(repo)
+        self.create_technical_debt(repo, slug="closure-link-debt", title="Closure Link Debt")
+        debt = repo / "docs/technical-debt/2026-06/2026-06-13-closure-link-debt-debt.md"
+        archive_link = str(archive.relative_to(repo).as_posix())
+        text = debt.read_text(encoding="utf-8")
+        text = text.replace("- Status: `Open`", "- Status: `Closed`")
+        text = text.replace("- None yet.", f"- Archive: [{archive.name}]({archive_link})")
+        debt.write_text(text + "\n## Closure\n\nClosed without a closure-local archive link.\n", encoding="utf-8")
+
+        result = self.run_json_fail(TECHNICAL_DEBT_ASSETS, repo, "check", "--slug", "closure-link-debt", "--json")
+
+        self.assertIn("closed_debt_missing_archive", {issue["code"] for issue in result["issues"]})
+
+    def test_technical_debt_create_rejects_duplicate_slug_across_months(self) -> None:
+        repo = self.create_repo()
+        self.create_technical_debt(repo, date="2026-06-13", slug="duplicate-debt", title="Duplicate Debt")
+
+        result = self.run_json_fail(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "create",
+            "--date",
+            "2026-07-01",
+            "--slug",
+            "duplicate-debt",
+            "--title",
+            "Duplicate Debt Again",
+            "--milestone",
+            "Demo Alpha",
+            "--debt-type",
+            "Architecture",
+            "--priority",
+            "Medium",
+            "--revisit-trigger",
+            "Before adding another demo slice.",
+            "--scope",
+            "Demo runtime",
+            "--related-slice",
+            "Demo Slice",
+            "--summary",
+            "Demo runtime owns duplicated helper logic.",
+            "--why",
+            "The duplication will make future slices drift.",
+            "--impact",
+            "Future search tools will copy fallback behavior.",
+            "--resolution-criteria",
+            "Shared helper is extracted and used by both call sites.",
+            "--resolution-direction",
+            "Extract shared helper functions.",
+            "--non-goal",
+            "Changing public behavior.",
+            "--write",
+            "--json",
+        )
+
+        self.assertEqual(result["issues"][0]["code"], "duplicate_technical_debt_slug")
+
+    def test_technical_debt_check_and_commands_reject_duplicate_slugs(self) -> None:
+        repo = self.create_repo()
+        self.create_technical_debt(repo, date="2026-06-13", slug="ambiguous-debt", title="Ambiguous Debt")
+        first = repo / "docs/technical-debt/2026-06/2026-06-13-ambiguous-debt-debt.md"
+        second = repo / "docs/technical-debt/2026-07/2026-07-01-ambiguous-debt-debt.md"
+        second.parent.mkdir(parents=True)
+        second.write_text(
+            first.read_text(encoding="utf-8").replace("- Date: `2026-06-13`", "- Date: `2026-07-01`"),
+            encoding="utf-8",
+        )
+
+        checked = self.run_json_fail(TECHNICAL_DEBT_ASSETS, repo, "check", "--slug", "ambiguous-debt", "--json")
+        updated = self.run_json_fail(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "set-status",
+            "--slug",
+            "ambiguous-debt",
+            "--status",
+            "In Progress",
+            "--write",
+            "--json",
+        )
+
+        self.assertEqual(checked["issues"][0]["code"], "duplicate_technical_debt_slug")
+        self.assertEqual(updated["issues"][0]["code"], "duplicate_technical_debt_slug")
+
+    def test_technical_debt_check_requires_metadata_and_filename_match(self) -> None:
+        repo = self.create_repo()
+        self.create_technical_debt(repo, slug="metadata-debt", title="Metadata Debt")
+        debt = repo / "docs/technical-debt/2026-06/2026-06-13-metadata-debt-debt.md"
+        lines = [
+            line
+            for line in debt.read_text(encoding="utf-8").splitlines()
+            if not line.startswith("- Milestone: ")
+        ]
+        text = "\n".join(lines).replace("- Topic slug: `metadata-debt`", "- Topic slug: `different-debt`")
+        debt.write_text(text + "\n", encoding="utf-8")
+
+        result = self.run_json_fail(TECHNICAL_DEBT_ASSETS, repo, "check", "--slug", "metadata-debt", "--json")
+        codes = {issue["code"] for issue in result["issues"]}
+
+        self.assertIn("missing_debt_metadata", codes)
+        self.assertIn("debt_filename_metadata_mismatch", codes)
+
+    def test_technical_debt_set_status_missing_slug_returns_json_error(self) -> None:
+        repo = self.create_repo()
+
+        result = self.run_json_fail(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "set-status",
+            "--slug",
+            "missing-debt",
+            "--status",
+            "In Progress",
+            "--write",
+            "--json",
+        )
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["issues"][0]["code"], "technical_debt_not_found")
+
+    def test_milestone_assets_create_recompute_and_check(self) -> None:
+        repo = self.create_repo()
+        result = self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "First Slice",
+            "--slice",
+            "Second Slice",
+            "--strategic-significance",
+            "Demo Alpha proves a strategically important two-stage project path.",
+            "--acceptance",
+            "Demo Alpha can complete both tracked stages.",
+            "--write",
+            "--json",
+        )
+        self.assertEqual(result["status"], "created")
+        checklist = repo / "docs/milestones/2026-06/demo-alpha/CHECKLIST.md"
+        self.assertTrue(checklist.is_file())
+
+        updated = self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "update-slice",
+            "--slug",
+            "demo-alpha",
+            "--slice",
+            "First Slice",
+            "--status",
+            "Done",
+            "--spec",
+            "../../../superpowers/specs/2026-05-01-demo-feature-design.md",
+            "--plan",
+            "../../../superpowers/plans/2026-05-01-demo-feature.md",
+            "--archive",
+            "../../../superpowers/archives/2026-05/2026-05-01-demo-feature-archives.md",
+            "--completion-signal",
+            "Demo feature archive exists.",
+            "--write",
+            "--json",
+        )
+        self.assertEqual(updated["status"], "updated")
+        recomputed = self.run_json(MILESTONE_ASSETS, repo, "recompute", "--slug", "demo-alpha", "--write", "--json")
+        self.assertEqual(recomputed["progress"], "1/2")
+        checked = self.run_json(MILESTONE_ASSETS, repo, "check", "--slug", "demo-alpha", "--json")
+        self.assertEqual(checked["issues"], [])
+
+    def test_milestone_update_slice_keeps_index_current_without_recompute(self) -> None:
+        repo = self.create_repo()
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "First Slice",
+            "--slice",
+            "Second Slice",
+            "--strategic-significance",
+            "Demo Alpha proves a strategically important two-stage project path.",
+            "--acceptance",
+            "Demo Alpha can complete both tracked stages.",
+            "--write",
+            "--json",
+        )
+
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "update-slice",
+            "--slug",
+            "demo-alpha",
+            "--slice",
+            "First Slice",
+            "--status",
+            "Done",
+            "--archive",
+            "../../../superpowers/archives/2026-05/2026-05-01-demo-feature-archives.md",
+            "--write",
+            "--json",
+        )
+
+        checked = self.run_json(MILESTONE_ASSETS, repo, "check", "--slug", "demo-alpha", "--json")
+        self.assertEqual(checked["issues"], [])
+
+    def test_milestone_deferred_slice_is_counted_and_indexed(self) -> None:
+        repo = self.create_repo()
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "First Slice",
+            "--strategic-significance",
+            "Demo Alpha proves a strategically important project path.",
+            "--acceptance",
+            "Demo Alpha can complete its tracked stage.",
+            "--write",
+            "--json",
+        )
+
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "update-slice",
+            "--slug",
+            "demo-alpha",
+            "--slice",
+            "First Slice",
+            "--status",
+            "Deferred",
+            "--write",
+            "--json",
+        )
+
+        checklist = repo / "docs/milestones/2026-06/demo-alpha/CHECKLIST.md"
+        text = checklist.read_text(encoding="utf-8")
+        self.assertIn("- Status: Deferred", text)
+        self.assertIn("- Deferred: 1", text)
+        self.assertIn("- Split: 0", text)
+        checked = self.run_json(MILESTONE_ASSETS, repo, "check", "--slug", "demo-alpha", "--json")
+        self.assertEqual(checked["issues"], [])
+        index = (repo / "docs/milestones/INDEX.md").read_text(encoding="utf-8")
+        self.assertIn("| 2026-06 | [Demo Alpha](2026-06/demo-alpha/README.md) | [Checklist](2026-06/demo-alpha/CHECKLIST.md) | Deferred | 0/1 |", index)
+
+    def test_milestone_split_slice_is_counted_and_indexed(self) -> None:
+        repo = self.create_repo()
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "First Slice",
+            "--strategic-significance",
+            "Demo Alpha proves a strategically important project path.",
+            "--acceptance",
+            "Demo Alpha can complete its tracked stage.",
+            "--write",
+            "--json",
+        )
+
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "update-slice",
+            "--slug",
+            "demo-alpha",
+            "--slice",
+            "First Slice",
+            "--status",
+            "Split",
+            "--write",
+            "--json",
+        )
+
+        checklist = repo / "docs/milestones/2026-06/demo-alpha/CHECKLIST.md"
+        text = checklist.read_text(encoding="utf-8")
+        self.assertIn("- Status: Split", text)
+        self.assertIn("- Deferred: 0", text)
+        self.assertIn("- Split: 1", text)
+        checked = self.run_json(MILESTONE_ASSETS, repo, "check", "--slug", "demo-alpha", "--json")
+        self.assertEqual(checked["issues"], [])
+        index = (repo / "docs/milestones/INDEX.md").read_text(encoding="utf-8")
+        self.assertIn("| 2026-06 | [Demo Alpha](2026-06/demo-alpha/README.md) | [Checklist](2026-06/demo-alpha/CHECKLIST.md) | Split | 0/1 |", index)
+
+    def test_milestone_check_missing_slug_returns_error(self) -> None:
+        repo = self.create_repo()
+
+        result = self.run_json_fail(MILESTONE_ASSETS, repo, "check", "--slug", "missing-alpha", "--json")
+
+        self.assertEqual(result["issues"][0]["code"], "milestone_not_found")
+        self.assertEqual(result["issues"][0]["severity"], "error")
+
+    def test_milestone_create_rejects_duplicate_without_clobbering(self) -> None:
+        repo = self.create_repo()
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "First Slice",
+            "--acceptance",
+            "Demo Alpha can complete the tracked stage.",
+            "--write",
+            "--json",
+        )
+        readme = repo / "docs/milestones/2026-06/demo-alpha/README.md"
+        readme.write_text("original milestone sentinel\n", encoding="utf-8")
+
+        result = self.run_json_fail(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Clobber Alpha",
+            "--slice",
+            "Replacement Slice",
+            "--acceptance",
+            "This duplicate must not overwrite existing files.",
+            "--write",
+            "--json",
+        )
+
+        self.assertEqual(result["issues"][0]["code"], "milestone_already_exists")
+        self.assertEqual(readme.read_text(encoding="utf-8"), "original milestone sentinel\n")
+
+    def test_milestone_check_warns_for_small_milestone_without_strategic_significance(self) -> None:
+        repo = self.create_repo()
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "thin-alpha",
+            "--title",
+            "Thin Alpha",
+            "--slice",
+            "First Slice",
+            "--slice",
+            "Second Slice",
+            "--acceptance",
+            "Thin Alpha completes both stages.",
+            "--write",
+            "--json",
+        )
+        result = self.run_json(MILESTONE_ASSETS, repo, "check", "--slug", "thin-alpha", "--json")
+        self.assertEqual(result["issues"][0]["code"], "small_milestone_missing_strategic_significance")
+        self.assertEqual(result["issues"][0]["severity"], "warning")
+
     def test_archive_validator_rejects_missing_contract_sections(self) -> None:
         repo = self.create_repo()
         bad_archive = repo / "docs/superpowers/archives/2026-05/2026-05-02-bad-archive-archives.md"
@@ -447,11 +1396,21 @@ Promote if repeated.
             "docs/superpowers/archives",
             "docs/superpowers/problems",
             "docs/superpowers/inbox",
+            "docs/milestones",
+            "docs/technical-debt",
         ])
         agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("Existing rules.", agents_text)
         self.assertEqual(agents_text.count("<!-- asset-compounding-guidance:start -->"), 1)
         self.assertIn("docs/superpowers/inbox/", agents_text)
+        self.assertIn("docs/milestones/", agents_text)
+        self.assertIn("docs/technical-debt/", agents_text)
+        self.assertIn("Milestone Navigation", agents_text)
+        self.assertIn("docs/milestones/INDEX.md", agents_text)
+        self.assertIn("Technical Debt Navigation", agents_text)
+        self.assertIn("docs/technical-debt/INDEX.md", agents_text)
+        self.assertFalse((repo / "docs/milestones/INDEX.md").exists())
+        self.assertFalse((repo / "docs/technical-debt/INDEX.md").exists())
         self.assertIn("hook-assisted asset compounding", agents_text)
         self.assertIn("rg -n", agents_text)
         self.assertIn("/hooks", agents_text)
@@ -472,6 +1431,46 @@ Promote if repeated.
         agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
         self.assertEqual(agents_text.count("<!-- asset-compounding-guidance:start -->"), 1)
         self.assertEqual(second["created_dirs"], [])
+
+    def test_agent_guidance_refreshes_old_milestone_and_debt_directory_only_block(self) -> None:
+        repo = self.temp_root / "old_guidance_repo"
+        repo.mkdir()
+        (repo / "AGENTS.md").write_text(
+            """# Repository Guidelines
+
+<!-- asset-compounding-guidance:start -->
+## Asset Compounding Retrieval Guide
+
+### Asset Directories
+
+- Specs: `docs/superpowers/specs/`
+- Plans: `docs/superpowers/plans/`
+- Archives: `docs/superpowers/archives/`
+- Problems: `docs/superpowers/problems/`
+- Inbox: `docs/superpowers/inbox/`
+- Milestones: `docs/milestones/`
+- Technical debt: `docs/technical-debt/`
+<!-- asset-compounding-guidance:end -->
+""",
+            encoding="utf-8",
+        )
+
+        dry_run = self.run_json_fail(AGENT_GUIDANCE, repo, "--json")
+        self.assertTrue(dry_run["needs_update"])
+        self.assertIn("Milestone Navigation", dry_run["missing_terms"])
+        self.assertIn("docs/milestones/INDEX.md", dry_run["missing_terms"])
+        self.assertIn("Technical Debt Navigation", dry_run["missing_terms"])
+        self.assertIn("docs/technical-debt/INDEX.md", dry_run["missing_terms"])
+
+        updated = self.run_json(AGENT_GUIDANCE, repo, "--write", "--json")
+
+        self.assertTrue(updated["changed"])
+        agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertEqual(agents_text.count("<!-- asset-compounding-guidance:start -->"), 1)
+        self.assertIn("Milestone Navigation", agents_text)
+        self.assertIn("docs/milestones/INDEX.md", agents_text)
+        self.assertIn("Technical Debt Navigation", agents_text)
+        self.assertIn("docs/technical-debt/INDEX.md", agents_text)
 
     def test_completion_gate_detects_solution_folder_and_relayout_drift(self) -> None:
         repo = self.temp_root / "relayout_repo"
@@ -541,6 +1540,65 @@ Promote if repeated.
         self.assertEqual(result["status"], "needs_attention")
         self.assertEqual(result["issues"][0]["code"], "possible_missing_requirement_archive")
 
+    def test_completion_gate_preserves_debt_suffix_in_archive_warning(self) -> None:
+        repo = self.create_debt_named_repo()
+
+        result = self.run_json(COMPLETION_GATE, repo, "--json")
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["issues"][0]["code"], "possible_missing_requirement_archive")
+        self.assertIn("asset-compounding-v0.3.0-milestones-and-debt", result["issues"][0]["message"])
+
+    def test_completion_gate_completed_topic_without_debt_does_not_match_debt_topic(self) -> None:
+        repo = self.create_debt_named_repo()
+
+        result = self.run_json_fail(
+            COMPLETION_GATE,
+            repo,
+            "--completed-topic",
+            "asset-compounding-v0.3.0-milestones-and",
+            "--json",
+        )
+
+        self.assertEqual(result["issues"][0]["code"], "completed_topic_not_found")
+
+    def test_completion_gate_archive_topic_normalization_keeps_legacy_suffix_stripping(self) -> None:
+        repo = self.create_repo()
+
+        result = self.run_json_fail(
+            COMPLETION_GATE,
+            repo,
+            "--completed-topic",
+            "2026-05-01-demo-feature-implementation-plan.md",
+            "--json",
+        )
+
+        self.assertEqual(result["issues"][0]["code"], "missing_requirement_archive")
+        self.assertEqual(result["checks"]["completed_topics"], ["demo-feature"])
+
+    def test_completion_gate_domain_checks_are_importable(self) -> None:
+        scripts_root = SKILLS / "compound-development-asset" / "scripts"
+        script_path = str(scripts_root)
+        relatives = (
+            "checks/archive_checks.py",
+            "checks/handoff_checks.py",
+            "checks/repo_structure_checks.py",
+        )
+        sys.path.insert(0, script_path)
+        try:
+            for relative in relatives:
+                spec = importlib.util.spec_from_file_location(relative.replace("/", "_"), scripts_root / relative)
+                self.assertIsNotNone(spec)
+                module = importlib.util.module_from_spec(spec)
+                assert spec and spec.loader
+                spec.loader.exec_module(module)
+        finally:
+            sys.path.remove(script_path)
+
+        repo = self.create_repo()
+        result = self.run_json_fail(COMPLETION_GATE, repo, "--completed-topic", "demo-feature", "--json")
+        self.assertEqual(result["issues"][0]["code"], "missing_requirement_archive")
+
     def test_completion_gate_blocks_completed_topic_without_archive(self) -> None:
         repo = self.create_repo()
 
@@ -573,6 +1631,151 @@ Promote if repeated.
         self.assertEqual(result["inbox_assets"], [])
         self.assertEqual(result["indexes"]["status"], "pass")
         self.assertEqual(result["completion_gate"]["status"], "pass")
+
+    def test_asset_status_and_closeout_report_milestone_and_debt_gaps(self) -> None:
+        repo = self.create_repo()
+        self.add_archive(repo)
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "Demo Feature",
+            "--slice",
+            "Second Slice",
+            "--strategic-significance",
+            "Demo Alpha proves a strategically important two-stage project path.",
+            "--acceptance",
+            "Demo Alpha can complete both tracked stages.",
+            "--write",
+            "--json",
+        )
+        self.run_json(
+            TECHNICAL_DEBT_ASSETS,
+            repo,
+            "create",
+            "--date",
+            "2026-06-13",
+            "--slug",
+            "demo-feature",
+            "--title",
+            "Demo Feature Debt",
+            "--milestone",
+            "Demo Alpha",
+            "--debt-type",
+            "Architecture",
+            "--priority",
+            "Medium",
+            "--revisit-trigger",
+            "Before adding another demo feature.",
+            "--scope",
+            "Demo",
+            "--related-slice",
+            "Demo Feature",
+            "--summary",
+            "Demo feature debt remains open.",
+            "--why",
+            "It affects future feature work.",
+            "--impact",
+            "Future slices will copy behavior.",
+            "--resolution-criteria",
+            "Archive proves repayment.",
+            "--resolution-direction",
+            "Refactor helper.",
+            "--non-goal",
+            "Changing behavior.",
+            "--write",
+            "--json",
+        )
+
+        status = self.run_json(ASSET_STATUS, repo, "--topic", "demo-feature", "--json")
+        self.assertEqual(status["requirement_archive"]["status"], "found")
+        self.assertEqual(len(status["milestone_assets"]), 1)
+        self.assertEqual(len(status["technical_debt_assets"]), 1)
+
+        closeout = self.run_json_fail(ASSET_CLOSEOUT, repo, "--topic", "demo-feature", "--json")
+        self.assertEqual(closeout["route"], "update-existing")
+        self.assertIn("update milestone progress", closeout["required_actions"])
+        self.assertIn("resolve or update technical debt records", closeout["required_actions"])
+
+    def test_asset_closeout_ignores_unrelated_milestone_progress_mismatch(self) -> None:
+        repo = self.create_repo()
+        archive = self.add_archive(repo)
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "demo-alpha",
+            "--title",
+            "Demo Alpha",
+            "--slice",
+            "Demo Feature",
+            "--strategic-significance",
+            "Demo Alpha proves a strategically important project path.",
+            "--acceptance",
+            "Demo Alpha can complete tracked stages.",
+            "--write",
+            "--json",
+        )
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "update-slice",
+            "--slug",
+            "demo-alpha",
+            "--slice",
+            "Demo Feature",
+            "--status",
+            "Done",
+            "--spec",
+            "../../../superpowers/specs/2026-05-01-demo-feature-design.md",
+            "--plan",
+            "../../../superpowers/plans/2026-05-01-demo-feature.md",
+            "--archive",
+            str(archive.relative_to(repo).as_posix()),
+            "--completion-signal",
+            "Demo feature archive exists.",
+            "--write",
+            "--json",
+        )
+        self.run_json(
+            MILESTONE_ASSETS,
+            repo,
+            "create",
+            "--month",
+            "2026-06",
+            "--slug",
+            "unrelated-beta",
+            "--title",
+            "Unrelated Beta",
+            "--slice",
+            "Unrelated Slice",
+            "--strategic-significance",
+            "Unrelated Beta tracks a separate project path.",
+            "--acceptance",
+            "Unrelated Beta can complete tracked stages.",
+            "--write",
+            "--json",
+        )
+        unrelated_checklist = repo / "docs/milestones/2026-06/unrelated-beta/CHECKLIST.md"
+        unrelated_text = unrelated_checklist.read_text(encoding="utf-8")
+        unrelated_checklist.write_text(unrelated_text.replace("- Progress: 0/1", "- Progress: 1/1"), encoding="utf-8")
+
+        closeout = self.run_json(ASSET_CLOSEOUT, repo, "--topic", "demo-feature", "--json")
+
+        self.assertEqual(closeout["route"], "none")
+        self.assertNotIn("update milestone progress", closeout["required_actions"])
+        self.assertEqual(len(closeout["related_assets"]["milestones"]), 1)
+        self.assertEqual(closeout["related_assets"]["milestones"][0], "docs/milestones/2026-06/demo-alpha/README.md")
 
     def test_asset_status_treats_inbox_only_topic_as_not_requiring_archive(self) -> None:
         repo = self.create_repo()

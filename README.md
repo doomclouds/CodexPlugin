@@ -25,9 +25,9 @@ codex plugin add superpowers-asset-compounding@codex-plugin
 
 安装或升级后，开启一个新线程再使用插件，确保 Codex 重新加载插件内的 skills、hooks 和工具配置。
 
-## 更新本地商城快照
+## 更新远端商城快照
 
-当 GitHub 仓库更新后，本地 Codex 不会自动热更新插件。手动刷新 Git marketplace snapshot：
+当 GitHub 仓库更新后，本地 Codex 不会自动热更新远端 Git marketplace snapshot。手动刷新远端 marketplace snapshot：
 
 ```powershell
 codex plugin marketplace upgrade codex-plugin
@@ -36,7 +36,7 @@ codex plugin add git-workflow@codex-plugin
 codex plugin add superpowers-asset-compounding@codex-plugin
 ```
 
-然后开启新线程验证。
+然后开启新线程验证。旧的 `local-home` cache 同步脚本不再作为本仓库发布流程使用。
 
 ## 仓库结构
 
