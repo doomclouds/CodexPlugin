@@ -117,7 +117,16 @@ from problem/inbox signals. When a topic only matches problem or inbox assets,
 the requirement archive and completion gate are reported as `not_required`
 instead of forcing a missing archive finding.
 
-When this plugin is upgraded, bump `.codex-plugin/plugin.json` version, sync the
-local cache, validate the plugin, and commit the source plugin repository.
+When this plugin is upgraded, bump `.codex-plugin/plugin.json`, commit and push
+the source plugin repository, then refresh the remote marketplace snapshot:
 
-This is a local-home plugin for this machine. It does not publish assets or upload repository content.
+```powershell
+codex plugin marketplace upgrade codex-plugin
+codex plugin add superpowers-asset-compounding@codex-plugin
+```
+
+The older `sync_local_plugin_cache.py` / `local-home` cache workflow is deprecated
+for this repository. Keep it only for legacy local-plugin maintenance outside the
+remote marketplace flow.
+
+This plugin does not publish assets or upload repository content by itself.
