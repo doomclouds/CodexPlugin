@@ -230,6 +230,26 @@ class AssetScriptTests(unittest.TestCase):
             ["breakpoints", "colors", "elevation", "motion", "shape", "spacing", "typography"],
         )
 
+    def test_design_package_create_rejects_unsafe_slug_and_does_not_escape_docs_designs(self) -> None:
+        repo = self.temp_root / "unsafe_design_repo"
+        repo.mkdir()
+
+        result = self.run_json_fail(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "../superpowers/x",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["errors"][0]["code"], "invalid_design_slug")
+        self.assertFalse((repo / "docs" / "superpowers" / "x").exists())
+        self.assertFalse((repo / "docs" / "superpowers").exists())
+
     def test_design_package_check_reports_missing_source_image_and_screenshots(self) -> None:
         repo = self.temp_root / "invalid_design_repo"
         repo.mkdir()
@@ -289,6 +309,42 @@ class AssetScriptTests(unittest.TestCase):
         self.assertEqual(result["errors"], [])
 
         summary = self.run_json(DESIGN_PACKAGE, "summarize", repo, package, "--json")
+        self.assertEqual(summary["status"], "implementation-ready")
+        self.assertTrue(summary["approved_source_image"])
+        self.assertEqual(summary["screenshot_count"], 2)
+
+    def test_design_package_check_and_summarize_resolve_relative_package_under_repo_root(self) -> None:
+        repo = self.temp_root / "relative_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "sample-dashboard",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        (package / "assets/source/selected-ui-design.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-desktop.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-mobile.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/generated-options/round-01-option-a.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        visual_source = (package / "visual-source.md").read_text(encoding="utf-8")
+        (package / "visual-source.md").write_text(
+            visual_source.replace("Approval status: `Not approved`", "Approval status: `Approved`"),
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        result = self.run_json(DESIGN_PACKAGE, "check", repo, "docs/designs/sample-dashboard", "--json")
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["errors"], [])
+
+        summary = self.run_json(DESIGN_PACKAGE, "summarize", repo, "docs/designs/sample-dashboard", "--json")
         self.assertEqual(summary["status"], "implementation-ready")
         self.assertTrue(summary["approved_source_image"])
         self.assertEqual(summary["screenshot_count"], 2)

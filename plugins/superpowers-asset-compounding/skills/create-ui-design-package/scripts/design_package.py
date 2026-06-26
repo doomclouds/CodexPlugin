@@ -47,6 +47,7 @@ GUIDE_FILES = (
 )
 PLACEHOLDER_MARKERS = ("TODO", "TBD")
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+SAFE_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 def skill_root() -> Path:
@@ -55,6 +56,36 @@ def skill_root() -> Path:
 
 def title_from_slug(slug: str) -> str:
     return " ".join(part.capitalize() for part in slug.split("-") if part)
+
+
+def resolve_package_path(root: Path, package: Path | str) -> Path:
+    package_path = Path(package)
+    if package_path.is_absolute():
+        return package_path.resolve()
+    return (root / package_path).resolve()
+
+
+def validate_design_slug(root: Path, slug: str) -> list[dict[str, str]]:
+    package = package_path(root, slug)
+    if not SAFE_SLUG_RE.fullmatch(slug):
+        return [
+            issue(
+                "invalid_design_slug",
+                "Slug must be a lowercase hyphen slug made of letters, numbers, and hyphens.",
+                package,
+            )
+        ]
+    designs_root = (root / "docs" / "designs").resolve()
+    resolved_package = package.resolve()
+    if not resolved_package.is_relative_to(designs_root):
+        return [
+            issue(
+                "invalid_design_slug",
+                "Slug must resolve inside docs/designs.",
+                package,
+            )
+        ]
+    return []
 
 
 def render_template(name: str, slug: str, mode: str, source: str) -> str:
@@ -83,7 +114,17 @@ def package_path(root: Path, slug: str) -> Path:
 
 
 def create_package(root: Path, slug: str, mode: str, source: str, write: bool) -> dict[str, object]:
+    errors = validate_design_slug(root, slug)
     package = package_path(root, slug)
+    if errors:
+        return {
+            "status": "needs_attention",
+            "package": str(package),
+            "errors": errors,
+            "warnings": [],
+            "created": [],
+        }
+
     created: list[str] = []
     for relative in PACKAGE_DIRS:
         target = package / relative
@@ -244,7 +285,7 @@ def validate_generated_option_references(package: Path, options: list[Path]) -> 
 
 
 def check_package(root: Path, package: Path) -> dict[str, object]:
-    del root
+    package = resolve_package_path(root, package)
     errors: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
     if not package.exists():
@@ -327,6 +368,7 @@ def check_package(root: Path, package: Path) -> dict[str, object]:
 
 
 def summarize_package(root: Path, package: Path) -> dict[str, object]:
+    package = resolve_package_path(root, package)
     check = check_package(root, package)
     source_image = package / "assets" / "source" / "selected-ui-design.png"
     screenshots = screenshot_paths(package)
@@ -384,13 +426,13 @@ def main() -> int:
     if args.command == "create":
         result = create_package(root, args.slug, args.mode, args.source, args.write)
         emit(result, args.json)
-        return 0
+        return 0 if not result.get("errors") else 1
     if args.command == "check":
-        result = check_package(root, Path(args.package).resolve())
+        result = check_package(root, args.package)
         emit(result, args.json)
         return 0 if result["status"] == "pass" else 1
     if args.command == "summarize":
-        result = summarize_package(root, Path(args.package).resolve())
+        result = summarize_package(root, args.package)
         emit(result, args.json)
         return 0
     return 1
