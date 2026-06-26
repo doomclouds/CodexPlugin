@@ -3208,6 +3208,96 @@ Old managed block.
         self.assertEqual(result["unknown_command_repos"], {})
         self.assertEqual(result["repos"], ["RepoA"])
 
+    def test_hook_report_archive_dry_run_reports_eligible_sessions_without_moving(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session = plugin_data / "RepoA--old-session"
+        session.mkdir(parents=True)
+        session.joinpath("events.jsonl").write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "timestampUtc": "2026-06-01T00:00:00Z",
+                    "hookEventName": "Stop",
+                    "decision": "allow",
+                    "reasonCode": "asset_gate_present",
+                    "repoName": "RepoA",
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json(HOOK_REPORT, plugin_data, "archive", "--before", "2026-06-10", "--dry-run", "--json")
+
+        self.assertEqual(result["status"], "dry_run")
+        self.assertEqual(result["sessionCount"], 1)
+        self.assertEqual(result["eventCount"], 1)
+        self.assertTrue(session.exists())
+        self.assertFalse((plugin_data / "_archives").exists())
+
+    def test_hook_report_archive_moves_sessions_and_writes_manifest(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session = plugin_data / "RepoA--old-session"
+        session.mkdir(parents=True)
+        original_text = (
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "timestampUtc": "2026-06-01T00:00:00Z",
+                    "hookEventName": "Stop",
+                    "decision": "allow",
+                    "reasonCode": "asset_gate_present",
+                    "repoName": "RepoA",
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+        session.joinpath("events.jsonl").write_text(original_text, encoding="utf-8")
+
+        result = self.run_json(HOOK_REPORT, plugin_data, "archive", "--before", "2026-06-10", "--json")
+
+        self.assertEqual(result["status"], "archived")
+        self.assertEqual(result["sessionCount"], 1)
+        self.assertEqual(result["eventCount"], 1)
+        self.assertFalse(session.exists())
+        archive_root = Path(result["archivePath"])
+        self.assertTrue(archive_root.is_dir())
+        self.assertRegex(archive_root.as_posix(), r"_archives/2026-06-01_to_2026-06-01/[0-9a-f]{16}")
+        archived_events = archive_root / "RepoA--old-session" / "events.jsonl"
+        self.assertEqual(archived_events.read_text(encoding="utf-8"), original_text)
+        manifest = json.loads((archive_root / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["archiveHash"], result["archiveHash"])
+        self.assertEqual(manifest["files"][0]["eventCount"], 1)
+        self.assertEqual(manifest["files"][0]["repoName"], "RepoA")
+
+        summary = self.run_json(HOOK_REPORT, plugin_data, "--archives-only", "--json")
+        self.assertEqual(summary["total_events"], 1)
+        self.assertEqual(summary["repos"], ["RepoA"])
+
+    def test_hook_report_archive_excludes_current_sessions_by_default(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        current = plugin_data / "RepoA--current-session"
+        old = plugin_data / "RepoA--old-session"
+        current.mkdir(parents=True)
+        old.mkdir(parents=True)
+        current.joinpath("state.json").write_text("{}", encoding="utf-8")
+        current.joinpath("events.jsonl").write_text(
+            '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","reasonCode":"asset_gate_present","repoName":"RepoA"}\n',
+            encoding="utf-8",
+        )
+        old.joinpath("events.jsonl").write_text(
+            '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","reasonCode":"asset_gate_present","repoName":"RepoA"}\n',
+            encoding="utf-8",
+        )
+
+        result = self.run_json(HOOK_REPORT, plugin_data, "archive", "--before", "2026-06-10", "--json")
+
+        self.assertEqual(result["sessionCount"], 1)
+        self.assertTrue(current.exists())
+        self.assertFalse(old.exists())
+
     def test_hook_jsonl_append_helper_serializes_concurrent_writers(self) -> None:
         spec = importlib.util.spec_from_file_location("asset_hook_under_test", HOOK_SCRIPT)
         self.assertIsNotNone(spec)

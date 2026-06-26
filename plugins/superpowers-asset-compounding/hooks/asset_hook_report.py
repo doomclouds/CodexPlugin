@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import shutil
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -41,6 +44,51 @@ def iter_event_records(root: Path) -> tuple[list[dict[str, Any]], list[dict[str,
 def iter_events(root: Path) -> list[dict[str, Any]]:
     events, _invalid_records = iter_event_records(root)
     return events
+
+
+def session_event_files(root: Path, include_archives: bool = False) -> list[Path]:
+    files: list[Path] = []
+    for path in sorted(root.rglob("events.jsonl")):
+        in_archives = "_archives" in path.parts
+        if in_archives and not include_archives:
+            continue
+        if not in_archives:
+            files.append(path)
+    return files
+
+
+def read_event_file(path: Path) -> tuple[list[dict[str, Any]], int]:
+    events: list[dict[str, Any]] = []
+    invalid = 0
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return [], 0
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            invalid += 1
+            continue
+        if isinstance(payload, dict):
+            events.append(payload)
+    return events, invalid
+
+
+def session_bounds(path: Path) -> dict[str, Any]:
+    events, invalid = read_event_file(path)
+    timestamps = [str(event.get("timestampUtc")) for event in events if event.get("timestampUtc")]
+    return {
+        "path": path,
+        "session": path.parent.name,
+        "events": events,
+        "invalid": invalid,
+        "firstTimestampUtc": min(timestamps) if timestamps else None,
+        "lastTimestampUtc": max(timestamps) if timestamps else None,
+        "repoName": next((event.get("repoName") for event in events if event.get("repoName")), None),
+    }
 
 
 def parse_date_filter(value: str | None) -> str | None:
@@ -289,6 +337,136 @@ def percentile(sorted_values: list[int], fraction: float) -> int:
     return sorted_values[index]
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def archive_hash(file_rows: list[dict[str, Any]]) -> str:
+    digest = hashlib.sha256()
+    for row in sorted(file_rows, key=lambda item: str(item["originalPath"])):
+        digest.update(str(row["originalPath"]).encode("utf-8"))
+        digest.update(str(row["sha256"]).encode("utf-8"))
+    return digest.hexdigest()[:16]
+
+
+def archive_filters(args: argparse.Namespace) -> dict[str, str | None]:
+    until = parse_date_filter(args.until or args.before)
+    return {
+        "since": parse_date_filter(args.since),
+        "until": until,
+        "repo": args.repo or None,
+        "reason": None,
+    }
+
+
+def select_archive_sessions(root: Path, filters: dict[str, str | None], include_current: bool) -> list[dict[str, Any]]:
+    sessions: list[dict[str, Any]] = []
+    for event_file in session_event_files(root):
+        info = session_bounds(event_file)
+        session_dir = event_file.parent
+        if session_dir.name == "_archives" or "_archives" in session_dir.parts:
+            continue
+        if not include_current and (session_dir / "state.json").exists():
+            continue
+        events = [event for event in info["events"] if event_matches_filters(event, filters)]
+        if not events:
+            continue
+        info["events"] = events
+        info["eventCount"] = len(events)
+        info["isCurrent"] = (session_dir / "state.json").exists()
+        info["sourceDir"] = session_dir
+        sessions.append(info)
+    return sessions
+
+
+def run_archive(args: argparse.Namespace) -> int:
+    root = Path(args.plugin_data).resolve()
+    filters = archive_filters(args)
+    sessions = select_archive_sessions(root, filters, args.include_current)
+    total_events = sum(int(session["eventCount"]) for session in sessions)
+    timestamps = [
+        timestamp[:10]
+        for session in sessions
+        for timestamp in (
+            str(event.get("timestampUtc"))
+            for event in session["events"]
+            if isinstance(event.get("timestampUtc"), str) and len(str(event.get("timestampUtc"))) >= 10
+        )
+    ]
+    from_date = min(timestamps) if timestamps else None
+    until_date = max(timestamps) if timestamps else None
+    file_rows: list[dict[str, Any]] = []
+    for session in sessions:
+        source_dir = Path(session["sourceDir"])
+        event_file = source_dir / "events.jsonl"
+        file_rows.append(
+            {
+                "session": str(session["session"]),
+                "repoName": session["repoName"],
+                "originalPath": str(source_dir.relative_to(root).as_posix()),
+                "eventCount": int(session["eventCount"]),
+                "firstTimestampUtc": session["firstTimestampUtc"],
+                "lastTimestampUtc": session["lastTimestampUtc"],
+                "sha256": sha256_file(event_file),
+            }
+        )
+    hash_value = archive_hash(file_rows)
+    archive_root = (
+        root / "_archives" / f"{from_date or 'unknown'}_to_{until_date or 'unknown'}" / hash_value
+    )
+    result = {
+        "status": "dry_run" if args.dry_run else "archived",
+        "archivePath": None if args.dry_run else str(archive_root),
+        "archiveHash": hash_value,
+        "fromDate": from_date,
+        "untilDate": until_date,
+        "sessionCount": len(sessions),
+        "eventCount": total_events,
+        "filters": filters,
+        "files": file_rows,
+    }
+    if args.dry_run:
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print_text(result)
+        return 0
+
+    archive_root.mkdir(parents=True, exist_ok=False)
+    manifest_rows: list[dict[str, Any]] = []
+    for row in file_rows:
+        source_dir = root / Path(str(row["originalPath"]))
+        destination_dir = archive_root / str(row["session"])
+        shutil.copytree(source_dir, destination_dir)
+        destination_hash = sha256_file(destination_dir / "events.jsonl")
+        if destination_hash != row["sha256"]:
+            raise RuntimeError(f"hash mismatch for {row['session']}")
+        row["archivedPath"] = str(destination_dir.relative_to(root).as_posix())
+        shutil.rmtree(source_dir)
+        manifest_rows.append(dict(row))
+
+    manifest = {
+        "archiveHash": hash_value,
+        "fromDate": from_date,
+        "untilDate": until_date,
+        "sessionCount": len(sessions),
+        "eventCount": total_events,
+        "filters": filters,
+        "files": manifest_rows,
+    }
+    (archive_root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    result["files"] = manifest_rows
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print_text(result)
+    return 0
+
+
 def print_text(summary: dict[str, Any]) -> None:
     print(f"total_events: {summary['total_events']}")
     print(f"stop_blocks: {summary['stop_blocks']}")
@@ -315,11 +493,36 @@ def print_text(summary: dict[str, Any]) -> None:
 
 
 def main() -> int:
+    default_plugin_data = os.environ.get("PLUGIN_DATA") or ".asset-plugin-data"
+    argv = sys.argv[1:]
+    if argv and argv[0] == "archive":
+        plugin_data = default_plugin_data
+        archive_argv = argv[1:]
+    elif len(argv) >= 2 and argv[1] == "archive":
+        plugin_data = argv[0]
+        archive_argv = argv[2:]
+    else:
+        plugin_data = None
+        archive_argv = []
+
+    if plugin_data is not None:
+        archive = argparse.ArgumentParser(description="Archive asset-compounding hook usage events.")
+        archive.add_argument("plugin_data", nargs="?", default=plugin_data)
+        archive.add_argument("--before")
+        archive.add_argument("--since")
+        archive.add_argument("--until")
+        archive.add_argument("--repo")
+        archive.add_argument("--dry-run", action="store_true")
+        archive.add_argument("--include-current", action="store_true")
+        archive.add_argument("--json", action="store_true")
+        args = archive.parse_args([plugin_data, *archive_argv])
+        return run_archive(args)
+
     parser = argparse.ArgumentParser(description="Summarize asset-compounding hook usage events.")
     parser.add_argument(
         "plugin_data",
         nargs="?",
-        default=os.environ.get("PLUGIN_DATA") or ".asset-plugin-data",
+        default=default_plugin_data,
         help="PLUGIN_DATA root containing per-session events.jsonl files.",
     )
     parser.add_argument("--since")
