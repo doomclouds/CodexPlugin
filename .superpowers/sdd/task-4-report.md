@@ -66,3 +66,16 @@ Focused report test then passed.
 ## Concerns
 
 - Git reported LF-to-CRLF normalization warnings for the two edited files. No functional issue was observed, but the repository's line-ending policy may rewrite them on later touch.
+
+## Reviewer Follow-up Fix
+
+- Addressed reviewer finding that `--reason` filtering widened legacy aggregate fields to all matching session-context events.
+- Added strict assertions that `command_kinds`, `asset_files_changed_this_tool`, `hook_duration_ms`, `slow_events`, `unknown_command_*`, and `repos` stay based on filtered events only.
+- Kept only the new session-summary fields (`stop_block_sessions`, `sessions_with_gate_due`, `top_signal_sets`, `signals_added`) on widened session context.
+
+### Follow-up Verification
+
+- Focused RED: `test_hook_report_filters_events_and_summarizes_sessions` failed with leaked `command_kinds={'file-edit': 1}` under `--reason missing_asset_gate`.
+- Focused GREEN: same test passed after restoring strict legacy aggregates.
+- Report-focused suite: `test_hook_report_filters_events_and_summarizes_sessions`, `test_hook_report_summarizes_usage_events`, and `test_hook_report_clusters_unknown_commands_without_raw_command_text` passed.
+- Full suite: `python -m unittest plugins.superpowers-asset-compounding.tests.test_asset_scripts` passed (`100` tests).

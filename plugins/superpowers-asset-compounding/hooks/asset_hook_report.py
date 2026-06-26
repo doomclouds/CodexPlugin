@@ -115,15 +115,16 @@ def summarize(
     invalid_records = invalid_records or []
     filters = filters or {"since": None, "until": None, "repo": None, "reason": None}
     session_context_events = session_context_events or events
+    strict_events = events
     by_hook = Counter(str(event.get("hookEventName") or "unknown") for event in events)
     decisions = Counter(str(event.get("decision") or "unknown") for event in events)
     reason_codes = Counter(str(event.get("reasonCode") or "unknown") for event in events)
     command_kinds = Counter(
         str(event.get("commandKind") or "none")
-        for event in session_context_events
+        for event in strict_events
         if event.get("hookEventName") == "PostToolUse"
     )
-    post_tool_events = [event for event in session_context_events if event.get("hookEventName") == "PostToolUse"]
+    post_tool_events = [event for event in strict_events if event.get("hookEventName") == "PostToolUse"]
     unknown_command_events = [
         event
         for event in post_tool_events
@@ -131,26 +132,26 @@ def summarize(
     ]
     durations = sorted(
         int(event["durationMs"])
-        for event in session_context_events
+        for event in strict_events
         if isinstance(event.get("durationMs"), int)
     )
     slow_events = sorted(
         (
             event
-            for event in session_context_events
+            for event in strict_events
             if isinstance(event.get("durationMs"), int)
         ),
         key=lambda event: int(event["durationMs"]),
         reverse=True,
     )[:10]
-    repo_names = sorted({str(event.get("repoName")) for event in session_context_events if event.get("repoName")})
+    repo_names = sorted({str(event.get("repoName")) for event in strict_events if event.get("repoName")})
     stop_blocks_by_reason = Counter(
         str(event.get("reasonCode") or "unknown")
         for event in events
         if event.get("hookEventName") == "Stop" and event.get("decision") == "block"
     )
-    sessions = session_summaries(session_context_events)
-    stop_block_sessions = [session for session in sessions if int(session["stopBlockCount"]) > 0]
+    session_summary_items = session_summaries(session_context_events)
+    stop_block_sessions = [session for session in session_summary_items if int(session["stopBlockCount"]) > 0]
     signal_sets = Counter(
         tuple(sorted(str(signal) for signal in event.get("signals", [])))
         for event in session_context_events
@@ -187,7 +188,7 @@ def summarize(
         ),
         "stop_blocks_by_reason": dict(sorted(stop_blocks_by_reason.items())),
         "stop_block_sessions": stop_block_sessions,
-        "sessions_with_gate_due": sum(1 for session in sessions if session["assetGateDueEver"] is True),
+        "sessions_with_gate_due": sum(1 for session in session_summary_items if session["assetGateDueEver"] is True),
         "top_signal_sets": [
             {"signals": list(signals), "count": count}
             for signals, count in sorted(signal_sets.items(), key=lambda item: (-item[1], list(item[0])))

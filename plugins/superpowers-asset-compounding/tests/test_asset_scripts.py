@@ -3200,6 +3200,13 @@ Old managed block.
         self.assertEqual(result["sessions_with_gate_due"], 1)
         self.assertEqual(result["signals_added"], {"edited-files": 1})
         self.assertEqual(result["top_signal_sets"][0]["signals"], ["edited-files"])
+        self.assertEqual(result["command_kinds"], {})
+        self.assertEqual(result["asset_files_changed_this_tool"], 0)
+        self.assertEqual(result["hook_duration_ms"]["count"], 0)
+        self.assertEqual(result["slow_events"], [])
+        self.assertEqual(result["unknown_command_tools"], {})
+        self.assertEqual(result["unknown_command_repos"], {})
+        self.assertEqual(result["repos"], ["RepoA"])
 
     def test_hook_jsonl_append_helper_serializes_concurrent_writers(self) -> None:
         spec = importlib.util.spec_from_file_location("asset_hook_under_test", HOOK_SCRIPT)
