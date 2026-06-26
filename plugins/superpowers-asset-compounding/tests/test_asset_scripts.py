@@ -92,16 +92,19 @@ class AssetScriptTests(unittest.TestCase):
             debt_agent_text,
         )
 
-    def test_v030_manifest_and_docs_mention_new_asset_types(self) -> None:
+    def test_asset_compounding_plugin_metadata_mentions_v032_audit_archive(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["version"], "0.3.1")
+        self.assertEqual(manifest["version"], "0.3.2")
         self.assertIn("milestones", manifest["interface"]["longDescription"])
         self.assertIn("technical debt", manifest["interface"]["longDescription"].lower())
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("Version `0.3.1`", readme)
+        self.assertIn("v0.3.2", readme)
         self.assertIn("manage-superpowers-milestone", readme)
         self.assertIn("manage-technical-debt", readme)
+        self.assertIn("archive --before", readme)
+        self.assertIn("--since", readme)
+        self.assertIn("merge_only_closeout", readme)
 
         guidance = (
             SKILLS / "compound-development-asset" / "references" / "agents-asset-guidance-template.md"
