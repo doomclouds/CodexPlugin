@@ -226,6 +226,7 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
         state = load_state(event)
         validation = import_handoff_checks_module().validate_asset_gate_text(message)
         if not validation.get("valid"):
+            sanitized_validation = sanitize_validation_for_audit(validation)
             append_usage_event(
                 event,
                 "Stop",
@@ -235,7 +236,7 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
                 hasMeaningfulWork=has_stop_closeout_work(state),
                 signals=state.get("meaningfulWorkSignals", []),
                 candidateCount=len(state.get("subagentCandidates", [])),
-                validation=validation,
+                validation=sanitized_validation,
             )
             return {
                 "decision": "block",
@@ -847,6 +848,16 @@ def validation_reason(result: dict[str, Any]) -> str:
     if not parts:
         return "asset_gate validation failed"
     return "; ".join(parts)
+
+
+def sanitize_validation_for_audit(result: dict[str, Any]) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {
+        "valid": bool(result.get("valid")),
+        "code": str(result.get("code") or "invalid_asset_gate_output"),
+        "missing": [str(item) for item in (result.get("missing") or [])],
+        "invalid": [str(item) for item in (result.get("invalid") or [])],
+    }
+    return sanitized
 
 
 def is_push_only_closeout(state: dict[str, Any]) -> bool:

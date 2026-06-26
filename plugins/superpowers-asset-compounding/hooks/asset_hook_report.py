@@ -372,15 +372,44 @@ def select_archive_sessions(root: Path, filters: dict[str, str | None], include_
             continue
         if not include_current and (session_dir / "state.json").exists():
             continue
-        matched_events = [event for event in info["events"] if event_matches_filters(event, filters)]
-        if not matched_events:
+        if not session_matches_archive_filters(info, filters):
             continue
+        matched_events = [event for event in info["events"] if event_matches_filters(event, filters)]
         info["matchedEventCount"] = len(matched_events)
         info["eventCount"] = len(info["events"])
         info["isCurrent"] = (session_dir / "state.json").exists()
         info["sourceDir"] = session_dir
         sessions.append(info)
     return sessions
+
+
+def session_matches_archive_filters(session: dict[str, Any], filters: dict[str, str | None]) -> bool:
+    first_date = timestamp_to_date(session.get("firstTimestampUtc"))
+    last_date = timestamp_to_date(session.get("lastTimestampUtc"))
+    if filters.get("repo") and session.get("repoName") != filters["repo"]:
+        return False
+    if filters.get("since") and (first_date is None or first_date < str(filters["since"])):
+        return False
+    if filters.get("until") and (last_date is None or last_date > str(filters["until"])):
+        return False
+    return True
+
+
+def timestamp_to_date(value: Any) -> str | None:
+    if not isinstance(value, str) or len(value) < 10:
+        return None
+    return value[:10]
+
+
+def resolve_archive_root(base_root: Path) -> Path:
+    if not base_root.exists():
+        return base_root
+    suffix = 2
+    while True:
+        candidate = base_root.with_name(f"{base_root.name}-{suffix}")
+        if not candidate.exists():
+            return candidate
+        suffix += 1
 
 
 def run_archive(args: argparse.Namespace) -> int:
@@ -415,9 +444,10 @@ def run_archive(args: argparse.Namespace) -> int:
             }
         )
     hash_value = archive_hash(file_rows)
-    archive_root = (
+    base_archive_root = (
         root / "_archives" / f"{from_date or 'unknown'}_to_{until_date or 'unknown'}" / hash_value
     )
+    archive_root = resolve_archive_root(base_archive_root)
     result = {
         "status": "dry_run" if args.dry_run else "archived",
         "archivePath": None if args.dry_run else str(archive_root),
