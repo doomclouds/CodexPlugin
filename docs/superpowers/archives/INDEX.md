@@ -3,6 +3,7 @@
 ## 2026-06
 
 - [2026-06-26-asset-compounding-audit-closeout-v0.3.2-archives.md](./2026-06/2026-06-26-asset-compounding-audit-closeout-v0.3.2-archives.md): 归档 superpowers-asset-compounding v0.3.2，补齐结构化 asset_gate 校验、merge-only 收尾放行、过滤化审计报表与审计日志归档能力。
+- [UI Design Package Skill](./2026-06/2026-06-26-ui-design-package-skill-archives.md): Adds a visual-first `docs/designs/<slug>/` package workflow with approved source images, reference prototypes, screenshots, tokens, contracts, and subagent task packs for Superpowers-compatible UI implementation.
 - [2026-06-13-asset-compounding-v0.3.0-milestones-and-debt-archives.md](./2026-06/2026-06-13-asset-compounding-v0.3.0-milestones-and-debt-archives.md): 归档 superpowers-asset-compounding v0.3.0/v0.3.1，新增 milestone 与 technical-debt 管理技能，并让版本化 AGENTS 导航覆盖项目上下文、状态回填和自动刷新边界。
 - [2026-06-13-hook-launcher-audit-directories-v0.2.9-archives.md](./2026-06/2026-06-13-hook-launcher-audit-directories-v0.2.9-archives.md): Hook Launcher Audit Directories v0.2.9 通过插件自带 launcher 避开裸 Python/WindowsApps alias，并让审计目录显示项目名。
 - [2026-06-06-asset-hook-closeout-ux-archives.md](./2026-06/2026-06-06-asset-hook-closeout-ux-archives.md): Asset Hook Closeout UX v0.2.6 降低 push-only 和 cleanup-only 收尾提示噪音，并在 SessionStart 增加 worktree 上下文。
