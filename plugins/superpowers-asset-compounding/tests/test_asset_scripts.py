@@ -2349,7 +2349,17 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 "session_id": "session-1",
                 "turn_id": "turn-1",
                 "cwd": str(repo),
-                "last_assistant_message": "asset_gate:\n  route: none\n  asset_candidates: none",
+                "last_assistant_message": (
+                    "asset_gate:\n"
+                    "  event_type: cleanup-only\n"
+                    "  route: none\n"
+                    "  reason: cleanup-only\n"
+                    "  evidence: tool output\n"
+                    "  related_assets: none\n"
+                    "  asset_candidates: none\n"
+                    "  deferred_signals: none\n"
+                    "  next_step: none"
+                ),
             },
             plugin_data=plugin_data,
         )
@@ -2358,6 +2368,113 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(stdout, "")
         state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertFalse(state["assetGateDue"])
+
+    def test_stop_blocks_invalid_asset_gate_without_clearing_state(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "dotnet test .\\LightRAGNet.slnx"},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "asset_gate:\n  route: none\nreason: missing fields",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("invalid asset_gate", payload["reason"])
+        events = [
+            json.loads(line)
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["reasonCode"], "invalid_asset_gate")
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
+        self.assertIn("verification-ran", state["meaningfulWorkSignals"])
+
+    def test_stop_allows_merge_only_closeout_without_asset_gate(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "git merge --no-ff feature/demo"},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "已 merge 回 main，仅同步分支历史。",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        events = [
+            json.loads(line)
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["reasonCode"], "merge_only_closeout")
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["meaningfulWorkSignals"], [])
+
+    def test_stop_requires_asset_gate_when_merge_follows_verification(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        for command in ("dotnet test .\\LightRAGNet.slnx", "git merge --no-ff feature/demo"):
+            self.run_hook(
+                {
+                    "hook_event_name": "PostToolUse",
+                    "session_id": "session-1",
+                    "turn_id": "turn-1",
+                    "cwd": str(repo),
+                    "tool_name": "Bash",
+                    "tool_input": {"command": command},
+                    "tool_response": {"exit_code": 0},
+                },
+                plugin_data=plugin_data,
+            )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "验证后已 merge。",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(json.loads(stdout)["decision"], "block")
 
     def test_post_tool_use_marks_meaningful_work_and_stop_requires_asset_gate(self) -> None:
         repo = self.create_repo()
@@ -2432,7 +2549,17 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 "session_id": "session-1",
                 "turn_id": "turn-1",
                 "cwd": str(repo),
-                "last_assistant_message": "asset_gate:\n  route: none\n  asset_candidates: none",
+                "last_assistant_message": (
+                    "asset_gate:\n"
+                    "  event_type: cleanup-only\n"
+                    "  route: none\n"
+                    "  reason: cleanup-only\n"
+                    "  evidence: tool output\n"
+                    "  related_assets: none\n"
+                    "  asset_candidates: none\n"
+                    "  deferred_signals: none\n"
+                    "  next_step: none"
+                ),
             },
             plugin_data=plugin_data,
         )
@@ -2766,7 +2893,17 @@ Old managed block.
                 "session_id": "session-1",
                 "turn_id": "turn-1",
                 "cwd": str(repo),
-                "last_assistant_message": "asset_gate:\n  route: none\n  reason: cleanup-only",
+                "last_assistant_message": (
+                    "asset_gate:\n"
+                    "  event_type: cleanup-only\n"
+                    "  route: none\n"
+                    "  reason: cleanup-only\n"
+                    "  evidence: tool output\n"
+                    "  related_assets: none\n"
+                    "  asset_candidates: none\n"
+                    "  deferred_signals: none\n"
+                    "  next_step: none"
+                ),
             },
             plugin_data=plugin_data,
         )

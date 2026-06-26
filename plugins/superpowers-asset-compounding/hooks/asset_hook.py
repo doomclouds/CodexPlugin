@@ -224,6 +224,23 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
     message = str(event.get("last_assistant_message") or "")
     if "asset_gate:" in message:
         state = load_state(event)
+        validation = import_handoff_checks_module().validate_asset_gate_text(message)
+        if not validation.get("valid"):
+            append_usage_event(
+                event,
+                "Stop",
+                decision="block",
+                reason_code="invalid_asset_gate",
+                hasAssetGate=True,
+                hasMeaningfulWork=has_stop_closeout_work(state),
+                signals=state.get("meaningfulWorkSignals", []),
+                candidateCount=len(state.get("subagentCandidates", [])),
+                validation=validation,
+            )
+            return {
+                "decision": "block",
+                "reason": f"invalid asset_gate block: {validation_reason(validation)}",
+            }
         append_usage_event(
             event,
             "Stop",
@@ -254,6 +271,19 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
             "Stop",
             decision="allow",
             reason_code="push_only_closeout",
+            hasAssetGate=False,
+            hasMeaningfulWork=True,
+            signals=state.get("meaningfulWorkSignals", []),
+        )
+        clear_closeout_state(state)
+        save_state(event, state)
+        return None
+    if is_merge_only_closeout(state):
+        append_usage_event(
+            event,
+            "Stop",
+            decision="allow",
+            reason_code="merge_only_closeout",
             hasAssetGate=False,
             hasMeaningfulWork=True,
             signals=state.get("meaningfulWorkSignals", []),
@@ -434,6 +464,14 @@ def import_bootstrap_module() -> Any:
     if str(scripts_root) not in sys.path:
         sys.path.insert(0, str(scripts_root))
     return importlib.import_module("bootstrap_asset_compounding")
+
+
+def import_handoff_checks_module() -> Any:
+    plugin_root = Path(os.environ.get("PLUGIN_ROOT") or Path(__file__).resolve().parents[1])
+    scripts_root = plugin_root / "skills" / "compound-development-asset" / "scripts"
+    if str(scripts_root) not in sys.path:
+        sys.path.insert(0, str(scripts_root))
+    return importlib.import_module("checks.handoff_checks")
 
 
 def state_path(event: dict[str, Any]) -> Path:
@@ -780,11 +818,35 @@ def has_stop_closeout_work(state: dict[str, Any]) -> bool:
     )
 
 
+def validation_reason(result: dict[str, Any]) -> str:
+    parts: list[str] = []
+    missing = result.get("missing") or []
+    invalid = result.get("invalid") or []
+    if missing:
+        parts.append(f"missing required fields: {', '.join(str(item) for item in missing)}")
+    if invalid:
+        parts.append(f"invalid values: {', '.join(str(item) for item in invalid)}")
+    if not parts:
+        return "asset_gate validation failed"
+    return "; ".join(parts)
+
+
 def is_push_only_closeout(state: dict[str, Any]) -> bool:
     signals = set(state.get("meaningfulWorkSignals") or [])
     return bool(
         signals == {"git-closeout"}
         and state.get("lastGitCloseoutKind") == "git-push"
+        and not state.get("subagentCandidates")
+        and not state.get("assetFilesChanged")
+        and not state.get("verificationEvidence")
+    )
+
+
+def is_merge_only_closeout(state: dict[str, Any]) -> bool:
+    signals = set(state.get("meaningfulWorkSignals") or [])
+    return bool(
+        signals == {"git-closeout"}
+        and state.get("lastGitCloseoutKind") == "git-merge"
         and not state.get("subagentCandidates")
         and not state.get("assetFilesChanged")
         and not state.get("verificationEvidence")
