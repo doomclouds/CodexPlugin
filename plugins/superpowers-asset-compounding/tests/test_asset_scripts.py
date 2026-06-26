@@ -3222,6 +3222,39 @@ for index in range(25):
             [expected_kind for _tool_name, _tool_input, expected_kind in commands],
         )
 
+    def test_post_tool_use_classifies_common_script_and_runner_commands(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        cases = [
+            ("python scripts\\audit.py --json", "python-script"),
+            ("python -m pytest tests", "pytest"),
+            ("pytest tests/test_demo.py", "pytest"),
+            ("node scripts/report.mjs", "node-script"),
+            ("node_modules\\.bin\\vitest run tests/demo.test.ts", "vitest"),
+            ("Get-Content file.txt | Select-String demo", "powershell-readonly"),
+            ("Set-Content file.txt 'demo'", "powershell-write"),
+        ]
+
+        for index, (command, expected_kind) in enumerate(cases, start=1):
+            code, stdout, stderr = self.run_hook(
+                {
+                    "hook_event_name": "PostToolUse",
+                    "session_id": f"session-{index}",
+                    "turn_id": "turn-1",
+                    "cwd": str(repo),
+                    "tool_name": "Bash",
+                    "tool_input": {"command": command},
+                    "tool_response": {"exit_code": 0},
+                },
+                plugin_data=plugin_data,
+            )
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(stdout, "")
+            events_path = plugin_data / f"repo--session-{index}" / "events.jsonl"
+            events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(events[-1]["commandKind"], expected_kind, command)
+            self.assertNotIn("command", events[-1])
+
     def test_inbox_lifecycle_script_forces_utf8_stdout_for_chinese_text(self) -> None:
         repo = self.create_repo()
         inbox_root = repo / "docs/superpowers/inbox/2026-06"

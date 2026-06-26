@@ -730,6 +730,7 @@ def plan_has_completed_step(tool_input: Any) -> bool:
 
 
 def classify_command_kind(command: str, tool_name: str = "") -> str:
+    normalized_command = command.replace("\\", "/")
     if tool_name in {"apply_patch", "Edit", "Write"}:
         return "file-edit"
     if re.search(r"\bdotnet\s+test\b", command):
@@ -738,6 +739,23 @@ def classify_command_kind(command: str, tool_name: str = "") -> str:
         return "dotnet-build"
     if re.search(r"\bpython(?:\.exe)?\s+-m\s+unittest\b", command):
         return "python-unittest"
+    if re.search(r"\b(?:python(?:\.exe)?|py)\s+-m\s+pytest\b", command) or re.search(r"\bpytest\b", command):
+        return "pytest"
+    if re.search(r"(?:^|[\\/])vitest(?:\.cmd|\.ps1|\.exe)?\b", normalized_command) or re.search(
+        r"\bvitest\s+run\b",
+        command,
+    ):
+        return "vitest"
+    if re.search(r"\b(?:python(?:\.exe)?|py)\b", command):
+        return "python-script"
+    if re.search(r"\bnode(?:\.exe)?\s+", command):
+        return "node-script"
+    if re.search(
+        r"\b(?:set-content|add-content|out-file|new-item|remove-item|move-item|copy-item)\b",
+        command,
+        re.IGNORECASE,
+    ):
+        return "powershell-write"
     if re.search(r"\bnpm\s+test\b", command):
         return "npm-test"
     if re.search(r"\bnpm\s+run\s+build\b", command):
