@@ -1917,6 +1917,83 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(result["status"], "needs_attention")
         self.assertEqual(result["issues"][0]["code"], "missing_asset_gate_output")
 
+    def test_completion_gate_blocks_incomplete_asset_gate_as_error(self) -> None:
+        repo = self.temp_root / "incomplete_gate_repo"
+        repo.mkdir()
+
+        result = self.run_json_fail(
+            COMPLETION_GATE,
+            repo,
+            "--skip-structure-checks",
+            "--require-asset-gate",
+            "--handoff-text",
+            "asset_gate:\n  route: none\nreason: too short",
+            "--json",
+        )
+
+        codes = {issue["code"] for issue in result["issues"]}
+        self.assertIn("invalid_asset_gate_output", codes)
+        messages = "\n".join(issue["message"] for issue in result["issues"])
+        self.assertIn("event_type", messages)
+        self.assertIn("evidence", messages)
+        self.assertIn("asset_candidates", messages)
+
+    def test_completion_gate_blocks_unknown_asset_gate_route(self) -> None:
+        repo = self.temp_root / "bad_route_gate_repo"
+        repo.mkdir()
+
+        result = self.run_json_fail(
+            COMPLETION_GATE,
+            repo,
+            "--skip-structure-checks",
+            "--require-asset-gate",
+            "--handoff-text",
+            (
+                "asset_gate:\n"
+                "  event_type: implementation-boundary\n"
+                "  route: skip\n"
+                "reason: tested\n"
+                "evidence: unit tests\n"
+                "related_assets: none\n"
+                "asset_candidates: none\n"
+                "deferred_signals: none\n"
+                "next_step: none"
+            ),
+            "--json",
+        )
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["issues"][0]["code"], "invalid_asset_gate_output")
+        self.assertIn("route", result["issues"][0]["message"])
+        self.assertIn("skip", result["issues"][0]["message"])
+
+    def test_completion_gate_accepts_structured_asset_gate(self) -> None:
+        repo = self.temp_root / "valid_gate_repo"
+        repo.mkdir()
+
+        result = self.run_json(
+            COMPLETION_GATE,
+            repo,
+            "--skip-structure-checks",
+            "--require-asset-gate",
+            "--handoff-text",
+            (
+                "asset_gate:\n"
+                "  event_type: implementation-boundary\n"
+                "  route: none\n"
+                "reason: no reusable signal\n"
+                "evidence: focused unit tests passed\n"
+                "related_assets: none\n"
+                "asset_candidates: none\n"
+                "deferred_signals: none\n"
+                "next_step: none"
+            ),
+            "--json",
+        )
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["issues"], [])
+
     def test_completion_gate_accepts_asset_candidates_and_asset_gate(self) -> None:
         repo = self.temp_root / "candidate_repo"
         repo.mkdir()
