@@ -372,11 +372,11 @@ def select_archive_sessions(root: Path, filters: dict[str, str | None], include_
             continue
         if not include_current and (session_dir / "state.json").exists():
             continue
-        events = [event for event in info["events"] if event_matches_filters(event, filters)]
-        if not events:
+        matched_events = [event for event in info["events"] if event_matches_filters(event, filters)]
+        if not matched_events:
             continue
-        info["events"] = events
-        info["eventCount"] = len(events)
+        info["matchedEventCount"] = len(matched_events)
+        info["eventCount"] = len(info["events"])
         info["isCurrent"] = (session_dir / "state.json").exists()
         info["sourceDir"] = session_dir
         sessions.append(info)
@@ -433,7 +433,7 @@ def run_archive(args: argparse.Namespace) -> int:
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:
-            print_text(result)
+            print_archive_text(result)
         return 0
 
     archive_root.mkdir(parents=True, exist_ok=False)
@@ -445,9 +445,9 @@ def run_archive(args: argparse.Namespace) -> int:
         destination_hash = sha256_file(destination_dir / "events.jsonl")
         if destination_hash != row["sha256"]:
             raise RuntimeError(f"hash mismatch for {row['session']}")
-        row["archivedPath"] = str(destination_dir.relative_to(root).as_posix())
-        shutil.rmtree(source_dir)
-        manifest_rows.append(dict(row))
+        manifest_row = dict(row)
+        manifest_row["archivedPath"] = str(destination_dir.relative_to(root).as_posix())
+        manifest_rows.append(manifest_row)
 
     manifest = {
         "archiveHash": hash_value,
@@ -459,11 +459,17 @@ def run_archive(args: argparse.Namespace) -> int:
         "files": manifest_rows,
     }
     (archive_root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    saved_manifest = json.loads((archive_root / "manifest.json").read_text(encoding="utf-8"))
+    if saved_manifest.get("archiveHash") != hash_value:
+        raise RuntimeError("manifest verification failed")
+    for row in file_rows:
+        source_dir = root / Path(str(row["originalPath"]))
+        shutil.rmtree(source_dir)
     result["files"] = manifest_rows
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
-        print_text(result)
+        print_archive_text(result)
     return 0
 
 
@@ -490,6 +496,27 @@ def print_text(summary: dict[str, Any]) -> None:
             f"- count={cluster['count']} tool={cluster['toolName']} repo={cluster['repoName']} "
             f"hash={cluster['commandHash']} length={cluster['commandLength']}"
         )
+
+
+def print_archive_text(result: dict[str, Any]) -> None:
+    print(f"status: {result['status']}")
+    print(f"archive_hash: {result['archiveHash']}")
+    print(f"from_date: {result['fromDate']}")
+    print(f"until_date: {result['untilDate']}")
+    print(f"session_count: {result['sessionCount']}")
+    print(f"event_count: {result['eventCount']}")
+    archive_path = result.get("archivePath")
+    if archive_path:
+        print(f"archive_path: {archive_path}")
+    print("files:")
+    for row in result["files"]:
+        line = (
+            f"- session={row['session']} repo={row['repoName']} events={row['eventCount']} "
+            f"original_path={row['originalPath']}"
+        )
+        if row.get("archivedPath"):
+            line += f" archived_path={row['archivedPath']}"
+        print(line)
 
 
 def main() -> int:

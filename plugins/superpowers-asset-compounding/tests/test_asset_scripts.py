@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
@@ -9,6 +10,7 @@ import tempfile
 import unittest
 import importlib.util
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -3236,6 +3238,29 @@ Old managed block.
         self.assertTrue(session.exists())
         self.assertFalse((plugin_data / "_archives").exists())
 
+    def test_hook_report_archive_text_mode_dry_run_does_not_crash(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session = plugin_data / "RepoA--old-session"
+        session.mkdir(parents=True)
+        session.joinpath("events.jsonl").write_text(
+            '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","decision":"allow","reasonCode":"asset_gate_present","repoName":"RepoA"}\n',
+            encoding="utf-8",
+        )
+
+        completed = subprocess.run(
+            ["python", str(HOOK_REPORT), str(plugin_data), "archive", "--before", "2026-06-10", "--dry-run"],
+            check=False,
+            text=True,
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
+        self.assertIn("status: dry_run", completed.stdout)
+        self.assertIn("session_count: 1", completed.stdout)
+        self.assertNotIn("archivePath", completed.stdout)
+
     def test_hook_report_archive_moves_sessions_and_writes_manifest(self) -> None:
         plugin_data = self.temp_root / "plugin-data"
         session = plugin_data / "RepoA--old-session"
@@ -3275,6 +3300,75 @@ Old managed block.
         summary = self.run_json(HOOK_REPORT, plugin_data, "--archives-only", "--json")
         self.assertEqual(summary["total_events"], 1)
         self.assertEqual(summary["repos"], ["RepoA"])
+
+    def test_hook_report_archive_manifest_write_failure_keeps_source_session(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session = plugin_data / "RepoA--old-session"
+        session.mkdir(parents=True)
+        session.joinpath("events.jsonl").write_text(
+            '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","decision":"allow","reasonCode":"asset_gate_present","repoName":"RepoA"}\n',
+            encoding="utf-8",
+        )
+
+        spec = importlib.util.spec_from_file_location("asset_hook_report_under_test", HOOK_REPORT)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        args = argparse.Namespace(
+            plugin_data=str(plugin_data),
+            before="2026-06-10",
+            since=None,
+            until=None,
+            repo=None,
+            dry_run=False,
+            include_current=False,
+            json=True,
+        )
+
+        original_write_text = Path.write_text
+
+        def failing_write_text(path: Path, data: str, *args: object, **kwargs: object) -> int:
+            if path.name == "manifest.json":
+                raise OSError("manifest write failed")
+            return original_write_text(path, data, *args, **kwargs)
+
+        with mock.patch.object(Path, "write_text", autospec=True, side_effect=failing_write_text):
+            with self.assertRaises(OSError):
+                module.run_archive(args)
+
+        self.assertTrue(session.exists(), "source session should remain if manifest write fails")
+        archive_root = plugin_data / "_archives"
+        archived_copy = next(archive_root.rglob("RepoA--old-session"), None)
+        self.assertIsNotNone(archived_copy, "copied archive payload should still exist for inspection")
+
+    def test_hook_report_archive_uses_full_session_accounting_for_cross_window_match(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session = plugin_data / "RepoA--mixed-session"
+        session.mkdir(parents=True)
+        session.joinpath("events.jsonl").write_text(
+            "\n".join(
+                [
+                    '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","decision":"allow","reasonCode":"asset_gate_present","repoName":"RepoA"}',
+                    '{"timestampUtc":"2026-06-20T00:00:00Z","hookEventName":"PostToolUse","repoName":"RepoA","toolName":"functions.update_plan"}',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json(HOOK_REPORT, plugin_data, "archive", "--before", "2026-06-10", "--json")
+        manifest = json.loads((Path(str(result["archivePath"])) / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(result["sessionCount"], 1)
+        self.assertEqual(result["eventCount"], 2)
+        self.assertEqual(result["fromDate"], "2026-06-01")
+        self.assertEqual(result["untilDate"], "2026-06-20")
+        self.assertEqual(result["files"][0]["eventCount"], 2)
+        self.assertEqual(manifest["eventCount"], 2)
+        self.assertEqual(manifest["files"][0]["eventCount"], 2)
+        self.assertEqual(manifest["fromDate"], "2026-06-01")
+        self.assertEqual(manifest["untilDate"], "2026-06-20")
 
     def test_hook_report_archive_excludes_current_sessions_by_default(self) -> None:
         plugin_data = self.temp_root / "plugin-data"
