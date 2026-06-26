@@ -519,37 +519,10 @@ def print_archive_text(result: dict[str, Any]) -> None:
         print(line)
 
 
-def main() -> int:
-    default_plugin_data = os.environ.get("PLUGIN_DATA") or ".asset-plugin-data"
-    argv = sys.argv[1:]
-    if argv and argv[0] == "archive":
-        plugin_data = default_plugin_data
-        archive_argv = argv[1:]
-    elif len(argv) >= 2 and argv[1] == "archive":
-        plugin_data = argv[0]
-        archive_argv = argv[2:]
-    else:
-        plugin_data = None
-        archive_argv = []
-
-    if plugin_data is not None:
-        archive = argparse.ArgumentParser(description="Archive asset-compounding hook usage events.")
-        archive.add_argument("plugin_data", nargs="?", default=plugin_data)
-        archive.add_argument("--before")
-        archive.add_argument("--since")
-        archive.add_argument("--until")
-        archive.add_argument("--repo")
-        archive.add_argument("--dry-run", action="store_true")
-        archive.add_argument("--include-current", action="store_true")
-        archive.add_argument("--json", action="store_true")
-        args = archive.parse_args([plugin_data, *archive_argv])
-        return run_archive(args)
-
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Summarize asset-compounding hook usage events.")
     parser.add_argument(
         "plugin_data",
-        nargs="?",
-        default=default_plugin_data,
         help="PLUGIN_DATA root containing per-session events.jsonl files.",
     )
     parser.add_argument("--since")
@@ -559,7 +532,38 @@ def main() -> int:
     parser.add_argument("--active-only", action="store_true")
     parser.add_argument("--archives-only", action="store_true")
     parser.add_argument("--json", action="store_true")
-    args = parser.parse_args()
+
+    subparsers = parser.add_subparsers(dest="command")
+    archive = subparsers.add_parser(
+        "archive",
+        description="Archive asset-compounding hook usage events.",
+        help="Archive asset-compounding hook usage events.",
+    )
+    archive.add_argument("--before")
+    archive.add_argument("--since")
+    archive.add_argument("--until")
+    archive.add_argument("--repo")
+    archive.add_argument("--dry-run", action="store_true")
+    archive.add_argument("--include-current", action="store_true")
+    archive.add_argument("--json", action="store_true")
+    return parser
+
+
+def normalize_argv(argv: list[str], default_plugin_data: str) -> list[str]:
+    if not argv:
+        return [default_plugin_data]
+    if argv[0] == "archive" or argv[0].startswith("-"):
+        return [default_plugin_data, *argv]
+    return argv
+
+
+def main() -> int:
+    parser = build_parser()
+    default_plugin_data = os.environ.get("PLUGIN_DATA") or ".asset-plugin-data"
+    args = parser.parse_args(normalize_argv(sys.argv[1:], default_plugin_data))
+
+    if getattr(args, "command", None) == "archive":
+        return run_archive(args)
 
     if args.active_only and args.archives_only:
         error = {"error": "cannot combine --active-only with --archives-only"}

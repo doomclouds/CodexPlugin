@@ -3238,6 +3238,51 @@ Old managed block.
         self.assertTrue(session.exists())
         self.assertFalse((plugin_data / "_archives").exists())
 
+    def test_hook_report_top_level_help_lists_archive_subcommand(self) -> None:
+        completed = subprocess.run(
+            ["python", str(HOOK_REPORT), "--help"],
+            check=False,
+            text=True,
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
+        self.assertIn("{archive}", completed.stdout)
+        self.assertRegex(completed.stdout, r"\n\s+archive\s+\S")
+
+    def test_hook_report_archive_help_is_discoverable_as_subcommand(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+
+        completed = subprocess.run(
+            ["python", str(HOOK_REPORT), str(plugin_data), "archive", "--help"],
+            check=False,
+            text=True,
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
+        self.assertIn("--before", completed.stdout)
+        self.assertIn("--dry-run", completed.stdout)
+
+    def test_hook_report_summary_mode_still_works_with_positional_plugin_data(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session = plugin_data / "RepoA--summary-session"
+        session.mkdir(parents=True)
+        session.joinpath("events.jsonl").write_text(
+            '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","decision":"allow","reasonCode":"asset_gate_present","repoName":"RepoA"}\n',
+            encoding="utf-8",
+        )
+
+        result = self.run_json(HOOK_REPORT, plugin_data, "--json")
+
+        self.assertEqual(result["total_events"], 1)
+        self.assertEqual(result["by_hook"], {"Stop": 1})
+        self.assertEqual(result["repos"], ["RepoA"])
+
     def test_hook_report_archive_text_mode_dry_run_does_not_crash(self) -> None:
         plugin_data = self.temp_root / "plugin-data"
         session = plugin_data / "RepoA--old-session"
