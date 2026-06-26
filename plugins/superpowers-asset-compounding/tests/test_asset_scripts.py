@@ -136,17 +136,24 @@ class AssetScriptTests(unittest.TestCase):
                 "Approved source image",
                 "Allowed Deviations",
                 "Forbidden Deviations",
+                "Approval notes",
             ],
             "visual-decision-log-template.md": [
                 "Round 1",
                 "Generated",
                 "User feedback",
                 "Decision",
+                "Retained decisions",
+                "Rejected decisions",
+                "Next revision direction",
             ],
             "prototype-implementation-template.md": [
                 "Implementation mode",
                 "Run command",
                 "Rendered screenshots",
+                "Screenshot capture instructions",
+                "Deviations approved",
+                "Blocked",
             ],
             "subagent-task-pack-template.md": ["Do not invent colors", "BLOCKED: design detail missing", "DONE requires"],
             "visual-fidelity-checklist-template.md": [
@@ -154,8 +161,21 @@ class AssetScriptTests(unittest.TestCase):
                 "Known deviations",
                 "pass/fail",
             ],
-            "traceability-template.md": ["Source Of Truth Order", "Design Graph", "AI Reading Recipes"],
-            "component-board-template.md": ["Rendered Scenes", "Rendered Components", "Design Decisions"],
+            "traceability-template.md": [
+                "Source Of Truth Order",
+                "Design Graph",
+                "AI Reading Recipes",
+                "Asset-to-contract mapping",
+                "Implementation touchpoints",
+                "Open questions",
+            ],
+            "component-board-template.md": [
+                "Rendered Scenes",
+                "Rendered Components",
+                "Design Decisions",
+                "Key component examples",
+                "State and variant examples",
+            ],
             "design-tokens-schema.md": ['"colors"', '"typography"', '"spacing"', '"motion"'],
         }
 

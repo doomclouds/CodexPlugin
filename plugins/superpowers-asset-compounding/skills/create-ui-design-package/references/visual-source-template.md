@@ -5,6 +5,10 @@
 - Approval status: `Not approved`
 - Date: `{{DATE}}`
 
+## Approval notes
+
+- Record who approved the source image, when approval happened, and any conditions attached to that approval.
+
 ## Must Match
 
 - Overall layout

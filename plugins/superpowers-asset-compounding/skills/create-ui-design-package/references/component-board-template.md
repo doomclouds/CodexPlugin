@@ -18,6 +18,15 @@ Capture selected visual and interaction direction in text-native form so impleme
 | --- | --- | --- |
 | Primary component | `assets/components/` | `contracts/component-contracts.md` |
 
+## Key component examples
+
+- Record the primary component examples that best capture the intended design language.
+- Include the visual elements a subagent must inspect before inventing new UI.
+
+## State and variant examples
+
+- Record hover, focus, pressed, disabled, empty, loading, error, and responsive variants that the implementation must preserve.
+
 ## Design Decisions
 
 - Record component density, hierarchy, spacing rhythm, and state treatment.

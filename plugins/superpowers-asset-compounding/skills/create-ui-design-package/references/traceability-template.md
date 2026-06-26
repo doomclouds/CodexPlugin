@@ -26,6 +26,23 @@ docs/designs/{{DESIGN_SLUG}}/
 | --- | --- | --- | --- |
 | Primary UI fidelity | `assets/source/selected-ui-design.png` | `contracts/visual-system.md` | `assets/screenshots/implementation-desktop.png` |
 
+## Asset-to-contract mapping
+
+| Asset or package | Contract source | Notes |
+| --- | --- | --- |
+| `assets/source/selected-ui-design.png` | `contracts/visual-system.md` | Visual truth for layout, hierarchy, and spacing. |
+| `design-tokens.json` | `contracts/design-tokens.md` | Reusable values that implementation should consume. |
+| `component-board.md` | `contracts/component-contracts.md` | Selected component patterns and variants. |
+
+## Implementation touchpoints
+
+- Record the exact files, components, or routes that implement the design package.
+- Record where screenshots are captured and where contract evidence lives.
+
+## Open questions
+
+- Record unresolved decisions, missing references, or platform conflicts before the next revision.
+
 ## AI Reading Recipes
 
 For implementation:
@@ -39,4 +56,3 @@ For implementation:
 ## Coverage Audit
 
 Every required image must be referenced by at least one Markdown file.
-

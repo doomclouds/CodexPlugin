@@ -12,6 +12,12 @@ npm install
 npm run dev
 ```
 
+## Screenshot capture instructions
+
+- Capture the desktop screenshot after the prototype is fully rendered and interactive.
+- Capture the mobile or narrow screenshot after resizing to the target viewport.
+- Store the images in `assets/screenshots/` with stable filenames before marking the work done.
+
 ## Rendered screenshots
 
 - Desktop screenshot: `assets/screenshots/implementation-desktop.png`
@@ -21,3 +27,10 @@ npm run dev
 
 - None recorded.
 
+## Deviations approved
+
+- Record any approved deviation from the source image or design contract.
+
+## Blocked
+
+- Record any deviation that cannot be accepted yet and what decision is missing.

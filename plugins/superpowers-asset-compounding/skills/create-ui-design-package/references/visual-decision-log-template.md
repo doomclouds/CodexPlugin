@@ -17,3 +17,14 @@ Decision:
 
 - Record retained and rejected visual decisions.
 
+## Retained decisions
+
+- Record the visual decisions that remain in scope after this round.
+
+## Rejected decisions
+
+- Record the visual directions or details that were explicitly discarded.
+
+## Next revision direction
+
+- Record what should change in the next round and what evidence is still needed.
