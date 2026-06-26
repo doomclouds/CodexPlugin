@@ -31,6 +31,9 @@ def iter_event_records(root: Path) -> tuple[list[dict[str, Any]], list[dict[str,
                 )
                 continue
             if isinstance(payload, dict):
+                payload["_eventFile"] = str(path)
+                payload["_session"] = path.parent.name
+                payload["_archived"] = "_archives" in path.parts
                 events.append(payload)
     return events, invalid_records
 
@@ -40,17 +43,87 @@ def iter_events(root: Path) -> list[dict[str, Any]]:
     return events
 
 
-def summarize(events: list[dict[str, Any]], invalid_records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def parse_date_filter(value: str | None) -> str | None:
+    return value or None
+
+
+def event_date(event: dict[str, Any]) -> str | None:
+    timestamp = event.get("timestampUtc")
+    if not isinstance(timestamp, str) or len(timestamp) < 10:
+        return None
+    return timestamp[:10]
+
+
+def event_matches_filters(event: dict[str, Any], filters: dict[str, str | None]) -> bool:
+    date = event_date(event)
+    if filters.get("since") and (date is None or date < str(filters["since"])):
+        return False
+    if filters.get("until") and (date is None or date > str(filters["until"])):
+        return False
+    if filters.get("repo") and event.get("repoName") != filters["repo"]:
+        return False
+    if filters.get("reason") and event.get("reasonCode") != filters["reason"]:
+        return False
+    return True
+
+
+def session_summaries(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for event in events:
+        grouped.setdefault(str(event.get("_session") or "unknown"), []).append(event)
+    summaries = []
+    for session, session_events in sorted(grouped.items()):
+        timestamps = [str(event.get("timestampUtc")) for event in session_events if event.get("timestampUtc")]
+        final_signals: list[str] = []
+        for event in session_events:
+            signals = event.get("signals")
+            if isinstance(signals, list):
+                final_signals = sorted(str(signal) for signal in signals)
+        stop_blocks = [
+            event for event in session_events if event.get("hookEventName") == "Stop" and event.get("decision") == "block"
+        ]
+        summaries.append(
+            {
+                "session": session,
+                "repoName": next((event.get("repoName") for event in session_events if event.get("repoName")), None),
+                "firstTimestampUtc": min(timestamps) if timestamps else None,
+                "lastTimestampUtc": max(timestamps) if timestamps else None,
+                "toolEventCount": sum(1 for event in session_events if event.get("hookEventName") == "PostToolUse"),
+                "stopBlockCount": len(stop_blocks),
+                "reasonCodes": sorted({str(event.get("reasonCode")) for event in stop_blocks}),
+                "finalSignals": final_signals,
+                "assetGateDueEver": any(event.get("assetGateDue") is True for event in session_events),
+                "assetFilesChangedEver": any(event.get("assetFilesChanged") is True for event in session_events),
+                "signalsAdded": sorted(
+                    {
+                        str(signal)
+                        for event in session_events
+                        for signal in (event.get("signalsAdded") or [])
+                    }
+                ),
+            }
+        )
+    return summaries
+
+
+def summarize(
+    events: list[dict[str, Any]],
+    invalid_records: list[dict[str, Any]] | None = None,
+    filters: dict[str, str | None] | None = None,
+    session_context_events: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     invalid_records = invalid_records or []
+    filters = filters or {"since": None, "until": None, "repo": None, "reason": None}
+    session_context_events = session_context_events or events
     by_hook = Counter(str(event.get("hookEventName") or "unknown") for event in events)
     decisions = Counter(str(event.get("decision") or "unknown") for event in events)
     reason_codes = Counter(str(event.get("reasonCode") or "unknown") for event in events)
     command_kinds = Counter(
         str(event.get("commandKind") or "none")
-        for event in events
+        for event in session_context_events
         if event.get("hookEventName") == "PostToolUse"
     )
-    post_tool_events = [event for event in events if event.get("hookEventName") == "PostToolUse"]
+    post_tool_events = [event for event in session_context_events if event.get("hookEventName") == "PostToolUse"]
     unknown_command_events = [
         event
         for event in post_tool_events
@@ -58,21 +131,39 @@ def summarize(events: list[dict[str, Any]], invalid_records: list[dict[str, Any]
     ]
     durations = sorted(
         int(event["durationMs"])
-        for event in events
+        for event in session_context_events
         if isinstance(event.get("durationMs"), int)
     )
     slow_events = sorted(
         (
             event
-            for event in events
+            for event in session_context_events
             if isinstance(event.get("durationMs"), int)
         ),
         key=lambda event: int(event["durationMs"]),
         reverse=True,
     )[:10]
-    repo_names = sorted({str(event.get("repoName")) for event in events if event.get("repoName")})
+    repo_names = sorted({str(event.get("repoName")) for event in session_context_events if event.get("repoName")})
+    stop_blocks_by_reason = Counter(
+        str(event.get("reasonCode") or "unknown")
+        for event in events
+        if event.get("hookEventName") == "Stop" and event.get("decision") == "block"
+    )
+    sessions = session_summaries(session_context_events)
+    stop_block_sessions = [session for session in sessions if int(session["stopBlockCount"]) > 0]
+    signal_sets = Counter(
+        tuple(sorted(str(signal) for signal in event.get("signals", [])))
+        for event in session_context_events
+        if isinstance(event.get("signals"), list) and event.get("signals")
+    )
+    signals_added = Counter(
+        str(signal)
+        for event in session_context_events
+        for signal in (event.get("signalsAdded") or [])
+    )
 
     return {
+        "filters": filters,
         "total_events": len(events),
         "by_hook": dict(sorted(by_hook.items())),
         "decisions": dict(sorted(decisions.items())),
@@ -94,6 +185,14 @@ def summarize(events: list[dict[str, Any]], invalid_records: list[dict[str, Any]
         "asset_files_changed_this_tool": sum(
             1 for event in post_tool_events if event.get("assetFilesChangedThisTool") is True
         ),
+        "stop_blocks_by_reason": dict(sorted(stop_blocks_by_reason.items())),
+        "stop_block_sessions": stop_block_sessions,
+        "sessions_with_gate_due": sum(1 for session in sessions if session["assetGateDueEver"] is True),
+        "top_signal_sets": [
+            {"signals": list(signals), "count": count}
+            for signals, count in sorted(signal_sets.items(), key=lambda item: (-item[1], list(item[0])))
+        ][:10],
+        "signals_added": dict(sorted(signals_added.items())),
         "command_kinds": dict(sorted(command_kinds.items())),
         "unknown_command_kind_ratio": ratio(command_kinds.get("unknown", 0), len(post_tool_events)),
         "unknown_command_tools": dict(
@@ -222,11 +321,41 @@ def main() -> int:
         default=os.environ.get("PLUGIN_DATA") or ".asset-plugin-data",
         help="PLUGIN_DATA root containing per-session events.jsonl files.",
     )
+    parser.add_argument("--since")
+    parser.add_argument("--until")
+    parser.add_argument("--repo")
+    parser.add_argument("--reason")
+    parser.add_argument("--active-only", action="store_true")
+    parser.add_argument("--archives-only", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
+    if args.active_only and args.archives_only:
+        error = {"error": "cannot combine --active-only with --archives-only"}
+        if args.json:
+            print(json.dumps(error, ensure_ascii=False, indent=2))
+        else:
+            print(error["error"])
+        return 1
+
+    filters = {
+        "since": parse_date_filter(args.since),
+        "until": parse_date_filter(args.until),
+        "repo": args.repo or None,
+        "reason": args.reason or None,
+    }
     events, invalid_records = iter_event_records(Path(args.plugin_data).resolve())
-    summary = summarize(events, invalid_records)
+    if args.active_only:
+        events = [event for event in events if event.get("_archived") is not True]
+    elif args.archives_only:
+        events = [event for event in events if event.get("_archived") is True]
+    scoped_events = [event for event in events if event_matches_filters(event, {**filters, "reason": None})]
+    filtered_events = [event for event in scoped_events if event_matches_filters(event, filters)]
+    matched_sessions = {str(event.get("_session") or "unknown") for event in filtered_events}
+    session_context_events = [
+        event for event in scoped_events if str(event.get("_session") or "unknown") in matched_sessions
+    ]
+    summary = summarize(filtered_events, invalid_records, filters, session_context_events)
     if args.json:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
     else:

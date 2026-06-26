@@ -3118,6 +3118,89 @@ Old managed block.
         self.assertEqual(report["unknown_command_clusters"][0]["repoName"], "CodexPlugin")
         self.assertNotIn("command", report["unknown_command_clusters"][0])
 
+    def test_hook_report_filters_events_and_summarizes_sessions(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session_a = plugin_data / "RepoA--session-a"
+        session_b = plugin_data / "RepoB--session-b"
+        session_a.mkdir(parents=True)
+        session_b.mkdir(parents=True)
+        session_a.joinpath("events.jsonl").write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "timestampUtc": "2026-06-10T00:00:00Z",
+                            "hookEventName": "PostToolUse",
+                            "decision": "recorded",
+                            "reasonCode": "tool_observed",
+                            "repoName": "RepoA",
+                            "signals": ["edited-files"],
+                            "signalsAdded": ["edited-files"],
+                            "assetGateDue": True,
+                            "commandKind": "file-edit",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "timestampUtc": "2026-06-10T00:01:00Z",
+                            "hookEventName": "Stop",
+                            "decision": "block",
+                            "reasonCode": "missing_asset_gate",
+                            "repoName": "RepoA",
+                            "signals": ["edited-files"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        session_b.joinpath("events.jsonl").write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "timestampUtc": "2026-06-11T00:00:00Z",
+                    "hookEventName": "Stop",
+                    "decision": "allow",
+                    "reasonCode": "no_meaningful_work",
+                    "repoName": "RepoB",
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json(
+            HOOK_REPORT,
+            plugin_data,
+            "--since",
+            "2026-06-10",
+            "--until",
+            "2026-06-10",
+            "--repo",
+            "RepoA",
+            "--reason",
+            "missing_asset_gate",
+            "--json",
+        )
+
+        self.assertEqual(result["filters"]["since"], "2026-06-10")
+        self.assertEqual(result["filters"]["until"], "2026-06-10")
+        self.assertEqual(result["filters"]["repo"], "RepoA")
+        self.assertEqual(result["filters"]["reason"], "missing_asset_gate")
+        self.assertEqual(result["total_events"], 1)
+        self.assertEqual(result["stop_blocks_by_reason"], {"missing_asset_gate": 1})
+        self.assertEqual(result["stop_block_sessions"][0]["session"], "RepoA--session-a")
+        self.assertEqual(result["stop_block_sessions"][0]["finalSignals"], ["edited-files"])
+        self.assertEqual(result["sessions_with_gate_due"], 1)
+        self.assertEqual(result["signals_added"], {"edited-files": 1})
+        self.assertEqual(result["top_signal_sets"][0]["signals"], ["edited-files"])
+
     def test_hook_jsonl_append_helper_serializes_concurrent_writers(self) -> None:
         spec = importlib.util.spec_from_file_location("asset_hook_under_test", HOOK_SCRIPT)
         self.assertIsNotNone(spec)
