@@ -92,6 +92,37 @@ class AssetScriptTests(unittest.TestCase):
             debt_agent_text,
         )
 
+    def test_ui_design_package_skill_exists_with_required_metadata(self) -> None:
+        skill_root = SKILLS / "create-ui-design-package"
+        skill = skill_root / "SKILL.md"
+        agent = skill_root / "agents" / "openai.yaml"
+
+        self.assertTrue(skill.is_file())
+        self.assertTrue(agent.is_file())
+
+        skill_text = skill.read_text(encoding="utf-8")
+        agent_text = agent.read_text(encoding="utf-8")
+
+        self.assertIn("name: create-ui-design-package", skill_text)
+        self.assertIn("description:", skill_text)
+        self.assertIn("docs/designs/<slug>/", skill_text)
+        self.assertIn("Visual Iteration Loop", skill_text)
+        self.assertIn("No approved source image, no image-to-code", skill_text)
+        self.assertIn("No rendered screenshots, no fidelity claim", skill_text)
+        self.assertIn("subagent-task-pack.md", skill_text)
+        self.assertIn("visual-fidelity-checklist.md", skill_text)
+        self.assertIn("design_package.py", skill_text)
+        self.assertIn("Superpowers Workflow Compatibility", skill_text)
+        self.assertIn("Product Design", skill_text)
+        self.assertIn("ImageGen", skill_text)
+
+        self.assertIn('interface:\n  display_name: "Create UI Design Package"', agent_text)
+        self.assertIn('  short_description: "Create visual-first UI design packages."', agent_text)
+        self.assertIn(
+            '  default_prompt: "Use $create-ui-design-package to create a visual-first docs/designs UI package for subagent implementation."',
+            agent_text,
+        )
+
     def test_asset_compounding_plugin_metadata_mentions_v032_audit_archive(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["version"], "0.3.2")

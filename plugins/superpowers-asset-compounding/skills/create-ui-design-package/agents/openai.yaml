@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create UI Design Package"
+  short_description: "Create visual-first UI design packages."
+  default_prompt: "Use $create-ui-design-package to create a visual-first docs/designs UI package for subagent implementation."
