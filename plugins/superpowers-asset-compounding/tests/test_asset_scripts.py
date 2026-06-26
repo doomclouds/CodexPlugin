@@ -102,9 +102,16 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("v0.3.2", readme)
         self.assertIn("manage-superpowers-milestone", readme)
         self.assertIn("manage-technical-debt", readme)
+        self.assertIn("structured `asset_gate` validation", readme)
         self.assertIn("archive --before", readme)
         self.assertIn("--since", readme)
         self.assertIn("merge_only_closeout", readme)
+        self.assertIn("session summaries", readme)
+        self.assertIn("report filters", readme)
+        self.assertIn(
+            "The reports do not include raw commands, prompts, diffs, command output, full repository paths, or secrets",
+            readme,
+        )
 
         guidance = (
             SKILLS / "compound-development-asset" / "references" / "agents-asset-guidance-template.md"

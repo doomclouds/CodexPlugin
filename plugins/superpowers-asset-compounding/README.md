@@ -4,8 +4,8 @@ Local Codex plugin for turning completed work and reusable debugging lessons int
 
 Version `0.3.2` combines six skills with plugin-bundled Codex lifecycle hooks.
 This release adds structured `asset_gate` validation, `merge_only_closeout`
-auto-allow handling, filtered audit reports, session signal summaries, and
-audit log archiving for `v0.3.2` on top of the v0.3.1 managed-guidance refreshes, the
+auto-allow handling, report filters, session summaries, and audit log archiving
+for `v0.3.2` on top of the v0.3.1 managed-guidance refreshes, the
 v0.3.0 milestone/debt navigation improvements, and the earlier hook launcher,
 audit reliability, report diagnostics, and closeout UX updates.
 
@@ -120,6 +120,7 @@ clusters keyed by command hash and length, filtered stop-gate diagnostics,
 session signal summaries, and invalid JSONL line/file counts. It intentionally
 omits raw commands, prompts, diffs, command output, full repository paths, and
 secrets even if an event accidentally contains one.
+The reports do not include raw commands, prompts, diffs, command output, full repository paths, or secrets.
 
 `asset_status.py --topic <topic>` distinguishes completed requirement status
 from problem/inbox signals. When a topic only matches problem or inbox assets,

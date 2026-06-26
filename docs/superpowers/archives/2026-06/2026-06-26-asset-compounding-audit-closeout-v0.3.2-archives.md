@@ -27,11 +27,12 @@
 
 ## Verification Snapshot
 
-- `$env:PYTHONIOENCODING='utf-8'; python -m unittest plugins.superpowers-asset-compounding.tests.test_asset_scripts` -> `Ran 109 tests in 18.185s` and `OK`.
-- `python -m json.tool plugins\superpowers-asset-compounding\.codex-plugin\plugin.json` -> valid JSON with `"version": "0.3.2"`.
-- `python C:\Users\10062\.codex\plugins\cache\codex-plugin\superpowers-asset-compounding\0.3.1\skills\archive-superpowers-feature\scripts\validate_archive_asset.py docs\superpowers\archives\2026-06\2026-06-26-asset-compounding-audit-closeout-v0.3.2-archives.md` -> archive document validated.
-- `$env:PYTHONIOENCODING='utf-8'; python plugins\superpowers-asset-compounding\skills\compound-development-asset\scripts\check_indexes.py docs\superpowers` -> `OK`.
-- `git diff --check` -> passed with no whitespace errors.
+- Focused metadata regression test: OK.
+- Asset script unit suite: 109 tests OK.
+- Plugin manifest JSON validation: valid.
+- Archive asset validator: OK.
+- Superpowers index check: OK.
+- Whitespace check: passed.
 
 ## Source Documents
 
