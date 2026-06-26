@@ -33,6 +33,7 @@ HOOK_SCRIPT = ROOT / "hooks" / "asset_hook.py"
 HOOK_REPORT = ROOT / "hooks" / "asset_hook_report.py"
 HOOK_LAUNCHER = ROOT / "hooks" / "run_asset_hook.cmd"
 HOOK_BASH_LAUNCHER = ROOT / "hooks" / "run_asset_hook.sh"
+DESIGN_PACKAGE = SKILLS / "create-ui-design-package" / "scripts" / "design_package.py"
 
 
 class AssetScriptTests(unittest.TestCase):
@@ -186,6 +187,111 @@ class AssetScriptTests(unittest.TestCase):
             self.assertIn("{{DESIGN_SLUG}}", text, filename)
             for term in expected_terms:
                 self.assertIn(term, text, filename)
+
+    def test_design_package_create_scaffolds_docs_design_package(self) -> None:
+        repo = self.temp_root / "design_repo"
+        repo.mkdir()
+
+        result = self.run_json(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "sample-dashboard",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.assertEqual(result["status"], "created")
+        self.assertEqual(result["package"], str(package))
+        self.assertTrue((package / "START_HERE.md").is_file())
+        self.assertTrue((package / "design-brief.md").is_file())
+        self.assertTrue((package / "visual-source.md").is_file())
+        self.assertTrue((package / "visual-decision-log.md").is_file())
+        self.assertTrue((package / "prototype-implementation.md").is_file())
+        self.assertTrue((package / "subagent-task-pack.md").is_file())
+        self.assertTrue((package / "visual-fidelity-checklist.md").is_file())
+        self.assertTrue((package / "design-tokens.json").is_file())
+        self.assertTrue((package / "traceability.md").is_file())
+        self.assertTrue((package / "component-board.md").is_file())
+        self.assertTrue((package / "contracts" / "visual-system.md").is_file())
+        self.assertTrue((package / "guides" / "implementation-readiness.md").is_file())
+        self.assertTrue((package / "assets" / "generated-options").is_dir())
+        self.assertTrue((package / "assets" / "source").is_dir())
+        self.assertTrue((package / "assets" / "screenshots").is_dir())
+        self.assertTrue((package / "assets" / "components").is_dir())
+        self.assertTrue((package / "prototype").is_dir())
+
+        tokens = json.loads((package / "design-tokens.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            sorted(tokens),
+            ["breakpoints", "colors", "elevation", "motion", "shape", "spacing", "typography"],
+        )
+
+    def test_design_package_check_reports_missing_source_image_and_screenshots(self) -> None:
+        repo = self.temp_root / "invalid_design_repo"
+        repo.mkdir()
+        self.run_json(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "sample-dashboard",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        result = self.run_json_fail(
+            DESIGN_PACKAGE,
+            "check",
+            repo,
+            repo / "docs" / "designs" / "sample-dashboard",
+            "--json",
+        )
+
+        codes = {issue["code"] for issue in result["errors"]}
+        self.assertIn("missing_approved_source_image", codes)
+        self.assertIn("missing_rendered_screenshot", codes)
+        self.assertIn("visual_source_not_approved", codes)
+
+    def test_design_package_check_passes_for_complete_reference_package(self) -> None:
+        repo = self.temp_root / "valid_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "sample-dashboard",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        (package / "assets/source/selected-ui-design.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-desktop.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-mobile.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/generated-options/round-01-option-a.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        visual_source = (package / "visual-source.md").read_text(encoding="utf-8")
+        (package / "visual-source.md").write_text(
+            visual_source.replace("Approval status: `Not approved`", "Approval status: `Approved`"),
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        result = self.run_json(DESIGN_PACKAGE, "check", repo, package, "--json")
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["errors"], [])
+
+        summary = self.run_json(DESIGN_PACKAGE, "summarize", repo, package, "--json")
+        self.assertEqual(summary["status"], "implementation-ready")
+        self.assertTrue(summary["approved_source_image"])
+        self.assertEqual(summary["screenshot_count"], 2)
 
     def test_asset_compounding_plugin_metadata_mentions_v032_audit_archive(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
