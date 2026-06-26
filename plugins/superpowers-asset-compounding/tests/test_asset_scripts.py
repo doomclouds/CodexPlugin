@@ -123,6 +123,14 @@ class AssetScriptTests(unittest.TestCase):
             '  default_prompt: "Use $create-ui-design-package to create a visual-first docs/designs UI package for subagent implementation."',
             agent_text,
         )
+        self.assertIn(
+            "python <skill>\\scripts\\design_package.py create . <slug> --mode new --write",
+            skill_text,
+        )
+        self.assertIn(
+            "python <skill>\\scripts\\design_package.py create . <slug> --mode extend --source docs/designs/<source> --write",
+            skill_text,
+        )
 
     def test_plugin_metadata_mentions_ui_design_package_skill(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
@@ -138,6 +146,9 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("selected-ui-design.png", readme)
         self.assertIn("subagent-task-pack.md", readme)
         self.assertIn("visual-fidelity-checklist.md", readme)
+        self.assertIn("core Superpowers assets live under `docs/superpowers/`", readme)
+        self.assertIn("UI design packages live under `docs/designs/`", readme)
+        self.assertNotIn("The intended project-local asset layout is `docs/superpowers/`.", readme)
 
     def test_ui_design_package_templates_define_required_handoff_contracts(self) -> None:
         reference_root = SKILLS / "create-ui-design-package" / "references"
@@ -328,6 +339,66 @@ class AssetScriptTests(unittest.TestCase):
         self.assertTrue(summary["approved_source_image"])
         self.assertEqual(summary["screenshot_count"], 2)
 
+    def test_design_package_check_requires_second_screenshot_evidence(self) -> None:
+        repo = self.temp_root / "single_screenshot_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "sample-dashboard",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        (package / "assets/source/selected-ui-design.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-desktop.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/generated-options/round-01-option-a.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        visual_source = (package / "visual-source.md").read_text(encoding="utf-8")
+        (package / "visual-source.md").write_text(
+            visual_source.replace("Approval status: `Not approved`", "Approval status: `Approved`"),
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
+        codes = {issue["code"] for issue in result["errors"]}
+        self.assertIn("missing_secondary_screenshot_evidence", codes)
+
+    def test_design_package_check_requires_generated_options(self) -> None:
+        repo = self.temp_root / "missing_options_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "sample-dashboard",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        (package / "assets/source/selected-ui-design.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-desktop.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-mobile.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        visual_source = (package / "visual-source.md").read_text(encoding="utf-8")
+        (package / "visual-source.md").write_text(
+            visual_source.replace("Approval status: `Not approved`", "Approval status: `Approved`"),
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
+        codes = {issue["code"] for issue in result["errors"]}
+        self.assertIn("missing_generated_options", codes)
+
     def test_design_package_check_and_summarize_resolve_relative_package_under_repo_root(self) -> None:
         repo = self.temp_root / "relative_design_repo"
         repo.mkdir()
@@ -363,6 +434,24 @@ class AssetScriptTests(unittest.TestCase):
         self.assertEqual(summary["status"], "implementation-ready")
         self.assertTrue(summary["approved_source_image"])
         self.assertEqual(summary["screenshot_count"], 2)
+
+    def test_design_package_check_rejects_absolute_package_path_outside_docs_designs(self) -> None:
+        repo = self.temp_root / "outside_design_repo"
+        repo.mkdir()
+        outside = self.temp_root / "outside-package"
+        outside.mkdir()
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, outside.resolve(), "--json")
+        self.assertEqual(result["errors"][0]["code"], "design_package_outside_docs_designs")
+
+    def test_design_package_summarize_rejects_absolute_package_path_outside_docs_designs(self) -> None:
+        repo = self.temp_root / "outside_design_summary_repo"
+        repo.mkdir()
+        outside = self.temp_root / "outside-summary-package"
+        outside.mkdir()
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "summarize", repo, outside.resolve(), "--json")
+        self.assertEqual(result["errors"][0]["code"], "design_package_outside_docs_designs")
 
     def test_asset_guidance_includes_docs_designs_retrieval(self) -> None:
         guidance = (

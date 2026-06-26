@@ -49,13 +49,13 @@ If these are already clear, play back the brief instead of asking again.
 Use:
 
 ```powershell
-python <skill>\scripts\design_package.py create . <slug> --mode new
+python <skill>\scripts\design_package.py create . <slug> --mode new --write
 ```
 
 For an extension of an existing design package:
 
 ```powershell
-python <skill>\scripts\design_package.py create . <slug> --mode extend --source docs/designs/<source>
+python <skill>\scripts\design_package.py create . <slug> --mode extend --source docs/designs/<source> --write
 ```
 
 ### 3. Run visual exploration
@@ -109,8 +109,7 @@ Only modify production application code when the user explicitly asks for produc
 Run the prototype or product UI and capture screenshots:
 
 - desktop screenshot for web/desktop UI
-- mobile screenshot for responsive UI
-- narrow/no-color screenshot for TUI or terminal UI
+- at least one mobile screenshot for responsive UI, or a narrow/no-color screenshot for TUI or terminal UI
 
 Store screenshots under:
 
@@ -146,6 +145,8 @@ python <skill>\scripts\design_package.py check . docs/designs/<slug> --json
 ```
 
 Fix every error before handoff.
+
+`check` and `summarize` only accept packages that resolve inside `<repo>/docs/designs/`.
 
 ## Missing Detail Protocol
 

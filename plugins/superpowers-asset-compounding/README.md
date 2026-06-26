@@ -38,7 +38,7 @@ stream with a dedicated reason code.
 
 After enabling or upgrading the plugin, review and trust the hook definitions with `/hooks`. Codex skips plugin-bundled command hooks until the current hook definition has been trusted.
 
-The intended project-local asset layout is `docs/superpowers/`.
+The core Superpowers assets live under `docs/superpowers/`. UI design packages live under `docs/designs/`.
 
 Initialize a repository with:
 
@@ -148,6 +148,10 @@ docs/designs/<slug>/
 Key files include `assets/source/selected-ui-design.png`, `design-tokens.json`,
 `component-board.md`, `contracts/`, `subagent-task-pack.md`, and
 `visual-fidelity-checklist.md`.
+
+Validation expects at least one persisted generated option under
+`assets/generated-options/`, plus rendered screenshot evidence with a desktop
+view and at least one mobile, narrow, or no-color companion view.
 
 Superpowers specs and plans should link the design package instead of duplicating it. UI implementation subagents should read `START_HERE.md` and `subagent-task-pack.md` before editing UI code.
 

@@ -48,6 +48,7 @@ GUIDE_FILES = (
 PLACEHOLDER_MARKERS = ("TODO", "TBD")
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 SAFE_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+SECONDARY_SCREENSHOT_MARKERS = ("mobile", "narrow", "no-color", "no_color", "nocolor")
 
 
 def skill_root() -> Path:
@@ -65,6 +66,23 @@ def resolve_package_path(root: Path, package: Path | str) -> Path:
     return (root / package_path).resolve()
 
 
+def designs_root(root: Path) -> Path:
+    return (root / "docs" / "designs").resolve()
+
+
+def validate_package_location(root: Path, package: Path) -> list[dict[str, str]]:
+    allowed_root = designs_root(root)
+    if package.is_relative_to(allowed_root):
+        return []
+    return [
+        issue(
+            "design_package_outside_docs_designs",
+            "Package path must resolve inside <repo>/docs/designs.",
+            package,
+        )
+    ]
+
+
 def validate_design_slug(root: Path, slug: str) -> list[dict[str, str]]:
     package = package_path(root, slug)
     if not SAFE_SLUG_RE.fullmatch(slug):
@@ -75,9 +93,9 @@ def validate_design_slug(root: Path, slug: str) -> list[dict[str, str]]:
                 package,
             )
         ]
-    designs_root = (root / "docs" / "designs").resolve()
+    allowed_root = designs_root(root)
     resolved_package = package.resolve()
-    if not resolved_package.is_relative_to(designs_root):
+    if not resolved_package.is_relative_to(allowed_root):
         return [
             issue(
                 "invalid_design_slug",
@@ -265,6 +283,17 @@ def generated_option_paths(package: Path) -> list[Path]:
     return sorted(path for path in root.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS)
 
 
+def screenshot_categories(paths: list[Path]) -> set[str]:
+    categories: set[str] = set()
+    for path in paths:
+        name = path.stem.lower()
+        if "desktop" in name:
+            categories.add("desktop")
+        if any(marker in name for marker in SECONDARY_SCREENSHOT_MARKERS):
+            categories.add("secondary")
+    return categories
+
+
 def validate_generated_option_references(package: Path, options: list[Path]) -> list[dict[str, str]]:
     if not options:
         return []
@@ -288,6 +317,9 @@ def check_package(root: Path, package: Path) -> dict[str, object]:
     package = resolve_package_path(root, package)
     errors: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
+    errors.extend(validate_package_location(root, package))
+    if errors:
+        return {"status": "needs_attention", "package": str(package), "errors": errors, "warnings": warnings}
     if not package.exists():
         errors.append(issue("missing_design_package", "Design package directory does not exist.", package))
         return {"status": "needs_attention", "package": str(package), "errors": errors, "warnings": warnings}
@@ -322,13 +354,31 @@ def check_package(root: Path, package: Path) -> dict[str, object]:
                 package / "assets" / "screenshots",
             )
         )
+    else:
+        categories = screenshot_categories(screenshots)
+        if "desktop" not in categories:
+            errors.append(
+                issue(
+                    "missing_desktop_screenshot_evidence",
+                    "Rendered screenshot evidence must include a desktop screenshot.",
+                    package / "assets" / "screenshots",
+                )
+            )
+        if "secondary" not in categories:
+            errors.append(
+                issue(
+                    "missing_secondary_screenshot_evidence",
+                    "Rendered screenshot evidence must include at least one mobile, narrow, or no-color screenshot.",
+                    package / "assets" / "screenshots",
+                )
+            )
 
     generated_options = generated_option_paths(package)
     if not generated_options:
-        warnings.append(
+        errors.append(
             issue(
                 "missing_generated_options",
-                "No generated visual options are stored in assets/generated-options.",
+                "At least one persisted generated visual option is required in assets/generated-options.",
                 package / "assets" / "generated-options",
             )
         )
@@ -434,7 +484,7 @@ def main() -> int:
     if args.command == "summarize":
         result = summarize_package(root, args.package)
         emit(result, args.json)
-        return 0
+        return 0 if result["status"] == "implementation-ready" else 1
     return 1
 
 

@@ -15,6 +15,7 @@ Added a visual-first UI design package skill that creates `docs/designs/<slug>/`
 - Added `create-ui-design-package` with ImageGen/Product Design orchestration guidance and hard gates.
 - Added templates for design briefs, visual sources, visual decision logs, prototype evidence, subagent task packs, fidelity checklists, traceability, component boards, and token schema.
 - Added `design_package.py create/check/summarize` for package scaffolding, validation, and status reporting.
+- Hardened design package validation so persisted generated options, repo-local `docs/designs/` package paths, and dual screenshot evidence (`desktop` plus `mobile`/`narrow`/`no-color`) are required before a package passes.
 - Added `docs/designs/` to bootstrap and AGENTS retrieval guidance.
 - Updated plugin README and manifest metadata to expose UI design package workflows.
 
@@ -31,7 +32,7 @@ Added a visual-first UI design package skill that creates `docs/designs/<slug>/`
 - `python -m json.tool plugins\superpowers-asset-compounding\.codex-plugin\plugin.json` -> valid JSON.
 - `git diff --check` -> passed.
 - `design_package.py create` smoke test -> created `docs/designs/smoke-dashboard`.
-- `design_package.py check` smoke test -> returned `needs_attention` and blocked incomplete package without approved source image and rendered screenshots.
+- `design_package.py check` smoke test -> returned `needs_attention` and blocks incomplete packages without approved source image, required screenshot evidence, or persisted generated options.
 - `bootstrap_asset_compounding.py --write --json` smoke test -> created `docs/designs` and inserted AGENTS guidance that mentions design packages.
 
 ## Source Documents
