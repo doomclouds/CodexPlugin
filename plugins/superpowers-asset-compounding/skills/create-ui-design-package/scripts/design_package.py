@@ -283,14 +283,15 @@ def generated_option_paths(package: Path) -> list[Path]:
     return sorted(path for path in root.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS)
 
 
-def screenshot_categories(paths: list[Path]) -> set[str]:
-    categories: set[str] = set()
+def screenshot_categories(paths: list[Path]) -> dict[str, set[Path]]:
+    categories: dict[str, set[Path]] = {"desktop": set(), "secondary": set()}
     for path in paths:
         name = path.stem.lower()
+        resolved = path.resolve()
         if "desktop" in name:
-            categories.add("desktop")
+            categories["desktop"].add(resolved)
         if any(marker in name for marker in SECONDARY_SCREENSHOT_MARKERS):
-            categories.add("secondary")
+            categories["secondary"].add(resolved)
     return categories
 
 
@@ -356,7 +357,7 @@ def check_package(root: Path, package: Path) -> dict[str, object]:
         )
     else:
         categories = screenshot_categories(screenshots)
-        if "desktop" not in categories:
+        if not categories["desktop"]:
             errors.append(
                 issue(
                     "missing_desktop_screenshot_evidence",
@@ -364,11 +365,23 @@ def check_package(root: Path, package: Path) -> dict[str, object]:
                     package / "assets" / "screenshots",
                 )
             )
-        if "secondary" not in categories:
+        if not categories["secondary"]:
             errors.append(
                 issue(
                     "missing_secondary_screenshot_evidence",
                     "Rendered screenshot evidence must include at least one mobile, narrow, or no-color screenshot.",
+                    package / "assets" / "screenshots",
+                )
+            )
+        elif not any(
+            desktop_path != secondary_path
+            for desktop_path in categories["desktop"]
+            for secondary_path in categories["secondary"]
+        ):
+            errors.append(
+                issue(
+                    "screenshot_evidence_requires_distinct_files",
+                    "Rendered screenshot evidence must use separate desktop and mobile, narrow, or no-color files.",
                     package / "assets" / "screenshots",
                 )
             )

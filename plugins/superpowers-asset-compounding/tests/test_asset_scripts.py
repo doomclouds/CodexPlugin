@@ -369,6 +369,36 @@ class AssetScriptTests(unittest.TestCase):
         codes = {issue["code"] for issue in result["errors"]}
         self.assertIn("missing_secondary_screenshot_evidence", codes)
 
+    def test_design_package_check_rejects_single_mixed_screenshot_file(self) -> None:
+        repo = self.temp_root / "mixed_screenshot_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "sample-dashboard",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        (package / "assets/source/selected-ui-design.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-desktop-mobile.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/generated-options/round-01-option-a.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        visual_source = (package / "visual-source.md").read_text(encoding="utf-8")
+        (package / "visual-source.md").write_text(
+            visual_source.replace("Approval status: `Not approved`", "Approval status: `Approved`"),
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
+        codes = {issue["code"] for issue in result["errors"]}
+        self.assertIn("screenshot_evidence_requires_distinct_files", codes)
+
     def test_design_package_check_requires_generated_options(self) -> None:
         repo = self.temp_root / "missing_options_design_repo"
         repo.mkdir()

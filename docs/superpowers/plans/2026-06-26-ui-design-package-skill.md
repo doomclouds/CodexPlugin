@@ -1204,11 +1204,17 @@ def check_package(root: Path, package: Path) -> dict[str, object]:
     if not has_approved_source(package):
         errors.append(issue("visual_source_not_approved", "visual-source.md must mark approval status as Approved.", package / "visual-source.md"))
 
-    if not screenshot_paths(package):
-        errors.append(issue("missing_rendered_screenshot", "At least one rendered implementation screenshot is required.", package / "assets" / "screenshots"))
+    screenshots = screenshot_paths(package)
+    categories = screenshot_categories(screenshots)
+    if not categories["desktop"]:
+        errors.append(issue("missing_desktop_screenshot_evidence", "Rendered screenshot evidence must include a desktop screenshot.", package / "assets" / "screenshots"))
+    if not categories["secondary"]:
+        errors.append(issue("missing_secondary_screenshot_evidence", "Rendered screenshot evidence must include at least one mobile, narrow, or no-color screenshot.", package / "assets" / "screenshots"))
+    elif not any(desktop_path != secondary_path for desktop_path in categories["desktop"] for secondary_path in categories["secondary"]):
+        errors.append(issue("screenshot_evidence_requires_distinct_files", "Rendered screenshot evidence must use separate desktop and mobile, narrow, or no-color files.", package / "assets" / "screenshots"))
 
     if not generated_option_paths(package):
-        warnings.append(issue("missing_generated_options", "No generated visual options are stored in assets/generated-options.", package / "assets" / "generated-options"))
+        errors.append(issue("missing_generated_options", "At least one persisted generated visual option is required in assets/generated-options.", package / "assets" / "generated-options"))
 
     errors.extend(validate_tokens(package))
     errors.extend(validate_links(package))
