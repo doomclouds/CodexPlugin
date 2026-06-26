@@ -2,12 +2,12 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.3.1` combines six skills with plugin-bundled Codex lifecycle hooks.
-This release adds versioned AGENTS managed guidance refreshes and richer
-milestone/technical-debt repository navigation on top of the v0.3.0 project
-milestone ledger and technical-debt record support. It keeps the v0.2.9
-plugin-owned hook launcher reliability updates, v0.2.8 audit reliability
-updates, v0.2.7 audit report diagnostics, and v0.2.6 closeout UX improvements.
+Version `0.3.2` combines six skills with plugin-bundled Codex lifecycle hooks.
+This release adds structured `asset_gate` validation, `merge_only_closeout`
+auto-allow handling, report filters, session summaries, and audit log archiving
+for `v0.3.2` on top of the v0.3.1 managed-guidance refreshes, the
+v0.3.0 milestone/debt navigation improvements, and the earlier hook launcher,
+audit reliability, report diagnostics, and closeout UX updates.
 
 The plugin provides six skills:
 
@@ -25,10 +25,13 @@ The plugin also bundles hooks under `hooks/hooks.json`:
 - `Stop`: asks the main agent for one continuation when meaningful work is ending without an `asset_gate` block.
 - `PreCompact` / `PostCompact`: preserve and restore compact pending asset state across compaction.
 
-The `Stop` hook intentionally auto-allows two low-value closeout cases:
-push-only synchronization after work has already been closed out, and explicit
-cleanup-only abandonment messages such as deleting or abandoning obsolete asset
-work. Both are still recorded in the audit stream with dedicated reason codes.
+The `Stop` hook validates structured `asset_gate` blocks before clearing
+closeout state. It intentionally auto-allows three low-value closeout cases:
+push-only synchronization after work has already been closed out,
+`merge_only_closeout` sessions that only record a merge sync with no edits or
+verification, and explicit cleanup-only abandonment messages such as deleting
+or abandoning obsolete asset work. Each case is still recorded in the audit
+stream with a dedicated reason code.
 
 `UserPromptSubmit` is intentionally not part of the asset lifecycle. It is better suited for prompt risk checks than workflow routing.
 
@@ -106,12 +109,18 @@ Summarize collected usage data with:
 
 ```powershell
 python <plugin>\hooks\asset_hook_report.py <PLUGIN_DATA> --json
+python <plugin>\hooks\asset_hook_report.py <PLUGIN_DATA> --since 2026-06-10 --until 2026-06-20 --repo OpenHarnessTS --json
+python <plugin>\hooks\asset_hook_report.py <PLUGIN_DATA> --reason missing_asset_gate --json
+python <plugin>\hooks\asset_hook_report.py <PLUGIN_DATA> archive --before 2026-06-20 --dry-run --json
+python <plugin>\hooks\asset_hook_report.py <PLUGIN_DATA> archive --before 2026-06-20 --json
 ```
 
 The report includes unknown command tool/repo counts, top unknown command
-clusters keyed by command hash and length, and invalid JSONL line/file counts.
-It intentionally omits raw command text even if an event accidentally contains
-one.
+clusters keyed by command hash and length, filtered stop-gate diagnostics,
+session signal summaries, and invalid JSONL line/file counts. It intentionally
+omits raw commands, prompts, diffs, command output, full repository paths, and
+secrets even if an event accidentally contains one.
+The reports do not include raw commands, prompts, diffs, command output, full repository paths, or secrets.
 
 `asset_status.py --topic <topic>` distinguishes completed requirement status
 from problem/inbox signals. When a topic only matches problem or inbox assets,

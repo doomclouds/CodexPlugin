@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
@@ -9,6 +10,7 @@ import tempfile
 import unittest
 import importlib.util
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,16 +92,26 @@ class AssetScriptTests(unittest.TestCase):
             debt_agent_text,
         )
 
-    def test_v030_manifest_and_docs_mention_new_asset_types(self) -> None:
+    def test_asset_compounding_plugin_metadata_mentions_v032_audit_archive(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["version"], "0.3.1")
+        self.assertEqual(manifest["version"], "0.3.2")
         self.assertIn("milestones", manifest["interface"]["longDescription"])
         self.assertIn("technical debt", manifest["interface"]["longDescription"].lower())
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("Version `0.3.1`", readme)
+        self.assertIn("v0.3.2", readme)
         self.assertIn("manage-superpowers-milestone", readme)
         self.assertIn("manage-technical-debt", readme)
+        self.assertIn("structured `asset_gate` validation", readme)
+        self.assertIn("archive --before", readme)
+        self.assertIn("--since", readme)
+        self.assertIn("merge_only_closeout", readme)
+        self.assertIn("session summaries", readme)
+        self.assertIn("report filters", readme)
+        self.assertIn(
+            "The reports do not include raw commands, prompts, diffs, command output, full repository paths, or secrets",
+            readme,
+        )
 
         guidance = (
             SKILLS / "compound-development-asset" / "references" / "agents-asset-guidance-template.md"
@@ -1917,6 +1929,83 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(result["status"], "needs_attention")
         self.assertEqual(result["issues"][0]["code"], "missing_asset_gate_output")
 
+    def test_completion_gate_blocks_incomplete_asset_gate_as_error(self) -> None:
+        repo = self.temp_root / "incomplete_gate_repo"
+        repo.mkdir()
+
+        result = self.run_json_fail(
+            COMPLETION_GATE,
+            repo,
+            "--skip-structure-checks",
+            "--require-asset-gate",
+            "--handoff-text",
+            "asset_gate:\n  route: none\nreason: too short",
+            "--json",
+        )
+
+        codes = {issue["code"] for issue in result["issues"]}
+        self.assertIn("invalid_asset_gate_output", codes)
+        messages = "\n".join(issue["message"] for issue in result["issues"])
+        self.assertIn("event_type", messages)
+        self.assertIn("evidence", messages)
+        self.assertIn("asset_candidates", messages)
+
+    def test_completion_gate_blocks_unknown_asset_gate_route(self) -> None:
+        repo = self.temp_root / "bad_route_gate_repo"
+        repo.mkdir()
+
+        result = self.run_json_fail(
+            COMPLETION_GATE,
+            repo,
+            "--skip-structure-checks",
+            "--require-asset-gate",
+            "--handoff-text",
+            (
+                "asset_gate:\n"
+                "  event_type: implementation-boundary\n"
+                "  route: skip\n"
+                "reason: tested\n"
+                "evidence: unit tests\n"
+                "related_assets: none\n"
+                "asset_candidates: none\n"
+                "deferred_signals: none\n"
+                "next_step: none"
+            ),
+            "--json",
+        )
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["issues"][0]["code"], "invalid_asset_gate_output")
+        self.assertIn("route", result["issues"][0]["message"])
+        self.assertIn("skip", result["issues"][0]["message"])
+
+    def test_completion_gate_accepts_structured_asset_gate(self) -> None:
+        repo = self.temp_root / "valid_gate_repo"
+        repo.mkdir()
+
+        result = self.run_json(
+            COMPLETION_GATE,
+            repo,
+            "--skip-structure-checks",
+            "--require-asset-gate",
+            "--handoff-text",
+            (
+                "asset_gate:\n"
+                "  event_type: implementation-boundary\n"
+                "  route: none\n"
+                "reason: no reusable signal\n"
+                "evidence: focused unit tests passed\n"
+                "related_assets: none\n"
+                "asset_candidates: none\n"
+                "deferred_signals: none\n"
+                "next_step: none"
+            ),
+            "--json",
+        )
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["issues"], [])
+
     def test_completion_gate_accepts_asset_candidates_and_asset_gate(self) -> None:
         repo = self.temp_root / "candidate_repo"
         repo.mkdir()
@@ -2272,7 +2361,17 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 "session_id": "session-1",
                 "turn_id": "turn-1",
                 "cwd": str(repo),
-                "last_assistant_message": "asset_gate:\n  route: none\n  asset_candidates: none",
+                "last_assistant_message": (
+                    "asset_gate:\n"
+                    "  event_type: cleanup-only\n"
+                    "  route: none\n"
+                    "  reason: cleanup-only\n"
+                    "  evidence: tool output\n"
+                    "  related_assets: none\n"
+                    "  asset_candidates: none\n"
+                    "  deferred_signals: none\n"
+                    "  next_step: none"
+                ),
             },
             plugin_data=plugin_data,
         )
@@ -2281,6 +2380,157 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(stdout, "")
         state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertFalse(state["assetGateDue"])
+
+    def test_stop_blocks_invalid_asset_gate_without_clearing_state(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "dotnet test .\\LightRAGNet.slnx"},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "asset_gate:\n  route: none\nreason: missing fields",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("invalid asset_gate", payload["reason"])
+        events = [
+            json.loads(line)
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["reasonCode"], "invalid_asset_gate")
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
+        self.assertIn("verification-ran", state["meaningfulWorkSignals"])
+
+    def test_stop_invalid_asset_gate_audit_event_omits_free_form_field_values(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        fake_secret = "FAKE-SECRET-12345"
+        raw_invalid_event_type = f"event_type={fake_secret}"
+        raw_invalid_route = f"route={fake_secret}"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": (
+                    "asset_gate:\n"
+                    f"  event_type: {fake_secret}\n"
+                    f"  route: {fake_secret}\n"
+                    f"  reason: leaked {fake_secret}\n"
+                    f"  evidence: copied {fake_secret}\n"
+                    "  related_assets: none\n"
+                    "  asset_candidates: none\n"
+                    "  deferred_signals: none\n"
+                    "  next_step: none\n"
+                ),
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["decision"], "block")
+        events_text = (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8")
+        self.assertNotIn(fake_secret, events_text)
+        self.assertNotIn(raw_invalid_event_type, events_text)
+        self.assertNotIn(raw_invalid_route, events_text)
+        self.assertNotIn("leaked", events_text)
+        self.assertNotIn("copied", events_text)
+        events = [json.loads(line) for line in events_text.splitlines()]
+        validation = events[-1]["validation"]
+        self.assertEqual(validation["code"], "invalid_asset_gate_output")
+        self.assertEqual(validation["missing"], [])
+        self.assertEqual(validation["invalid"], ["event_type", "route"])
+        self.assertNotIn("fields", validation)
+
+    def test_stop_allows_merge_only_closeout_without_asset_gate(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "git merge --no-ff feature/demo"},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "已 merge 回 main，仅同步分支历史。",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        events = [
+            json.loads(line)
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["reasonCode"], "merge_only_closeout")
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["meaningfulWorkSignals"], [])
+
+    def test_stop_requires_asset_gate_when_merge_follows_verification(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        for command in ("dotnet test .\\LightRAGNet.slnx", "git merge --no-ff feature/demo"):
+            self.run_hook(
+                {
+                    "hook_event_name": "PostToolUse",
+                    "session_id": "session-1",
+                    "turn_id": "turn-1",
+                    "cwd": str(repo),
+                    "tool_name": "Bash",
+                    "tool_input": {"command": command},
+                    "tool_response": {"exit_code": 0},
+                },
+                plugin_data=plugin_data,
+            )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "验证后已 merge。",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(json.loads(stdout)["decision"], "block")
 
     def test_post_tool_use_marks_meaningful_work_and_stop_requires_asset_gate(self) -> None:
         repo = self.create_repo()
@@ -2355,7 +2605,17 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 "session_id": "session-1",
                 "turn_id": "turn-1",
                 "cwd": str(repo),
-                "last_assistant_message": "asset_gate:\n  route: none\n  asset_candidates: none",
+                "last_assistant_message": (
+                    "asset_gate:\n"
+                    "  event_type: cleanup-only\n"
+                    "  route: none\n"
+                    "  reason: cleanup-only\n"
+                    "  evidence: tool output\n"
+                    "  related_assets: none\n"
+                    "  asset_candidates: none\n"
+                    "  deferred_signals: none\n"
+                    "  next_step: none"
+                ),
             },
             plugin_data=plugin_data,
         )
@@ -2689,7 +2949,17 @@ Old managed block.
                 "session_id": "session-1",
                 "turn_id": "turn-1",
                 "cwd": str(repo),
-                "last_assistant_message": "asset_gate:\n  route: none\n  reason: cleanup-only",
+                "last_assistant_message": (
+                    "asset_gate:\n"
+                    "  event_type: cleanup-only\n"
+                    "  route: none\n"
+                    "  reason: cleanup-only\n"
+                    "  evidence: tool output\n"
+                    "  related_assets: none\n"
+                    "  asset_candidates: none\n"
+                    "  deferred_signals: none\n"
+                    "  next_step: none"
+                ),
             },
             plugin_data=plugin_data,
         )
@@ -2904,6 +3174,360 @@ Old managed block.
         self.assertEqual(report["unknown_command_clusters"][0]["repoName"], "CodexPlugin")
         self.assertNotIn("command", report["unknown_command_clusters"][0])
 
+    def test_hook_report_filters_events_and_summarizes_sessions(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session_a = plugin_data / "RepoA--session-a"
+        session_b = plugin_data / "RepoB--session-b"
+        session_a.mkdir(parents=True)
+        session_b.mkdir(parents=True)
+        session_a.joinpath("events.jsonl").write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "timestampUtc": "2026-06-10T00:00:00Z",
+                            "hookEventName": "PostToolUse",
+                            "decision": "recorded",
+                            "reasonCode": "tool_observed",
+                            "repoName": "RepoA",
+                            "signals": ["edited-files"],
+                            "signalsAdded": ["edited-files"],
+                            "assetGateDue": True,
+                            "commandKind": "file-edit",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "timestampUtc": "2026-06-10T00:01:00Z",
+                            "hookEventName": "Stop",
+                            "decision": "block",
+                            "reasonCode": "missing_asset_gate",
+                            "repoName": "RepoA",
+                            "signals": ["edited-files"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        session_b.joinpath("events.jsonl").write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "timestampUtc": "2026-06-11T00:00:00Z",
+                    "hookEventName": "Stop",
+                    "decision": "allow",
+                    "reasonCode": "no_meaningful_work",
+                    "repoName": "RepoB",
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json(
+            HOOK_REPORT,
+            plugin_data,
+            "--since",
+            "2026-06-10",
+            "--until",
+            "2026-06-10",
+            "--repo",
+            "RepoA",
+            "--reason",
+            "missing_asset_gate",
+            "--json",
+        )
+
+        self.assertEqual(result["filters"]["since"], "2026-06-10")
+        self.assertEqual(result["filters"]["until"], "2026-06-10")
+        self.assertEqual(result["filters"]["repo"], "RepoA")
+        self.assertEqual(result["filters"]["reason"], "missing_asset_gate")
+        self.assertEqual(result["total_events"], 1)
+        self.assertEqual(result["stop_blocks_by_reason"], {"missing_asset_gate": 1})
+        self.assertEqual(result["stop_block_sessions"][0]["session"], "RepoA--session-a")
+        self.assertEqual(result["stop_block_sessions"][0]["finalSignals"], ["edited-files"])
+        self.assertEqual(result["sessions_with_gate_due"], 1)
+        self.assertEqual(result["signals_added"], {"edited-files": 1})
+        self.assertEqual(result["top_signal_sets"][0]["signals"], ["edited-files"])
+        self.assertEqual(result["command_kinds"], {})
+        self.assertEqual(result["asset_files_changed_this_tool"], 0)
+        self.assertEqual(result["hook_duration_ms"]["count"], 0)
+        self.assertEqual(result["slow_events"], [])
+        self.assertEqual(result["unknown_command_tools"], {})
+        self.assertEqual(result["unknown_command_repos"], {})
+        self.assertEqual(result["repos"], ["RepoA"])
+
+    def test_hook_report_archive_dry_run_reports_eligible_sessions_without_moving(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session = plugin_data / "RepoA--old-session"
+        session.mkdir(parents=True)
+        session.joinpath("events.jsonl").write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "timestampUtc": "2026-06-01T00:00:00Z",
+                    "hookEventName": "Stop",
+                    "decision": "allow",
+                    "reasonCode": "asset_gate_present",
+                    "repoName": "RepoA",
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json(HOOK_REPORT, plugin_data, "archive", "--before", "2026-06-10", "--dry-run", "--json")
+
+        self.assertEqual(result["status"], "dry_run")
+        self.assertEqual(result["sessionCount"], 1)
+        self.assertEqual(result["eventCount"], 1)
+        self.assertTrue(session.exists())
+        self.assertFalse((plugin_data / "_archives").exists())
+
+    def test_hook_report_top_level_help_lists_archive_subcommand(self) -> None:
+        completed = subprocess.run(
+            ["python", str(HOOK_REPORT), "--help"],
+            check=False,
+            text=True,
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
+        self.assertIn("{archive}", completed.stdout)
+        self.assertRegex(completed.stdout, r"\n\s+archive\s+\S")
+
+    def test_hook_report_archive_help_is_discoverable_as_subcommand(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+
+        completed = subprocess.run(
+            ["python", str(HOOK_REPORT), str(plugin_data), "archive", "--help"],
+            check=False,
+            text=True,
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
+        self.assertIn("--before", completed.stdout)
+        self.assertIn("--dry-run", completed.stdout)
+
+    def test_hook_report_summary_mode_still_works_with_positional_plugin_data(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session = plugin_data / "RepoA--summary-session"
+        session.mkdir(parents=True)
+        session.joinpath("events.jsonl").write_text(
+            '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","decision":"allow","reasonCode":"asset_gate_present","repoName":"RepoA"}\n',
+            encoding="utf-8",
+        )
+
+        result = self.run_json(HOOK_REPORT, plugin_data, "--json")
+
+        self.assertEqual(result["total_events"], 1)
+        self.assertEqual(result["by_hook"], {"Stop": 1})
+        self.assertEqual(result["repos"], ["RepoA"])
+
+    def test_hook_report_archive_text_mode_dry_run_does_not_crash(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session = plugin_data / "RepoA--old-session"
+        session.mkdir(parents=True)
+        session.joinpath("events.jsonl").write_text(
+            '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","decision":"allow","reasonCode":"asset_gate_present","repoName":"RepoA"}\n',
+            encoding="utf-8",
+        )
+
+        completed = subprocess.run(
+            ["python", str(HOOK_REPORT), str(plugin_data), "archive", "--before", "2026-06-10", "--dry-run"],
+            check=False,
+            text=True,
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
+        self.assertIn("status: dry_run", completed.stdout)
+        self.assertIn("session_count: 1", completed.stdout)
+        self.assertNotIn("archivePath", completed.stdout)
+
+    def test_hook_report_archive_moves_sessions_and_writes_manifest(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session = plugin_data / "RepoA--old-session"
+        session.mkdir(parents=True)
+        original_text = (
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "timestampUtc": "2026-06-01T00:00:00Z",
+                    "hookEventName": "Stop",
+                    "decision": "allow",
+                    "reasonCode": "asset_gate_present",
+                    "repoName": "RepoA",
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+        session.joinpath("events.jsonl").write_text(original_text, encoding="utf-8")
+
+        result = self.run_json(HOOK_REPORT, plugin_data, "archive", "--before", "2026-06-10", "--json")
+
+        self.assertEqual(result["status"], "archived")
+        self.assertEqual(result["sessionCount"], 1)
+        self.assertEqual(result["eventCount"], 1)
+        self.assertFalse(session.exists())
+        archive_root = Path(result["archivePath"])
+        self.assertTrue(archive_root.is_dir())
+        self.assertRegex(archive_root.as_posix(), r"_archives/2026-06-01_to_2026-06-01/[0-9a-f]{16}")
+        archived_events = archive_root / "RepoA--old-session" / "events.jsonl"
+        self.assertEqual(archived_events.read_text(encoding="utf-8"), original_text)
+        manifest = json.loads((archive_root / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["archiveHash"], result["archiveHash"])
+        self.assertEqual(manifest["files"][0]["eventCount"], 1)
+        self.assertEqual(manifest["files"][0]["repoName"], "RepoA")
+
+        summary = self.run_json(HOOK_REPORT, plugin_data, "--archives-only", "--json")
+        self.assertEqual(summary["total_events"], 1)
+        self.assertEqual(summary["repos"], ["RepoA"])
+
+    def test_hook_report_archive_manifest_write_failure_keeps_source_session(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session = plugin_data / "RepoA--old-session"
+        session.mkdir(parents=True)
+        session.joinpath("events.jsonl").write_text(
+            '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","decision":"allow","reasonCode":"asset_gate_present","repoName":"RepoA"}\n',
+            encoding="utf-8",
+        )
+
+        spec = importlib.util.spec_from_file_location("asset_hook_report_under_test", HOOK_REPORT)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        args = argparse.Namespace(
+            plugin_data=str(plugin_data),
+            before="2026-06-10",
+            since=None,
+            until=None,
+            repo=None,
+            dry_run=False,
+            include_current=False,
+            json=True,
+        )
+
+        original_write_text = Path.write_text
+
+        def failing_write_text(path: Path, data: str, *args: object, **kwargs: object) -> int:
+            if path.name == "manifest.json":
+                raise OSError("manifest write failed")
+            return original_write_text(path, data, *args, **kwargs)
+
+        with mock.patch.object(Path, "write_text", autospec=True, side_effect=failing_write_text):
+            with self.assertRaises(OSError):
+                module.run_archive(args)
+
+        self.assertTrue(session.exists(), "source session should remain if manifest write fails")
+        archive_root = plugin_data / "_archives"
+        archived_copy = next(archive_root.rglob("RepoA--old-session"), None)
+        self.assertIsNotNone(archived_copy, "copied archive payload should still exist for inspection")
+
+    def test_hook_report_archive_before_uses_session_last_event_boundary(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session = plugin_data / "RepoA--mixed-session"
+        session.mkdir(parents=True)
+        session.joinpath("events.jsonl").write_text(
+            "\n".join(
+                [
+                    '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","decision":"allow","reasonCode":"asset_gate_present","repoName":"RepoA"}',
+                    '{"timestampUtc":"2026-06-20T00:00:00Z","hookEventName":"PostToolUse","repoName":"RepoA","toolName":"functions.update_plan"}',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json(HOOK_REPORT, plugin_data, "archive", "--before", "2026-06-10", "--dry-run", "--json")
+
+        self.assertEqual(result["status"], "dry_run")
+        self.assertEqual(result["sessionCount"], 0)
+        self.assertEqual(result["eventCount"], 0)
+        self.assertEqual(result["files"], [])
+        self.assertIsNone(result["fromDate"])
+        self.assertIsNone(result["untilDate"])
+        self.assertTrue(session.exists())
+
+    def test_hook_report_archive_excludes_current_sessions_by_default(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        current = plugin_data / "RepoA--current-session"
+        old = plugin_data / "RepoA--old-session"
+        current.mkdir(parents=True)
+        old.mkdir(parents=True)
+        current.joinpath("state.json").write_text("{}", encoding="utf-8")
+        current.joinpath("events.jsonl").write_text(
+            '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","reasonCode":"asset_gate_present","repoName":"RepoA"}\n',
+            encoding="utf-8",
+        )
+        old.joinpath("events.jsonl").write_text(
+            '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","reasonCode":"asset_gate_present","repoName":"RepoA"}\n',
+            encoding="utf-8",
+        )
+
+        result = self.run_json(HOOK_REPORT, plugin_data, "archive", "--before", "2026-06-10", "--json")
+
+        self.assertEqual(result["sessionCount"], 1)
+        self.assertTrue(current.exists())
+        self.assertFalse(old.exists())
+
+    def test_hook_report_archive_uses_deterministic_suffix_when_hash_dir_exists(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session = plugin_data / "RepoA--old-session"
+        session.mkdir(parents=True)
+        original_text = (
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "timestampUtc": "2026-06-01T00:00:00Z",
+                    "hookEventName": "Stop",
+                    "decision": "allow",
+                    "reasonCode": "asset_gate_present",
+                    "repoName": "RepoA",
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+        session.joinpath("events.jsonl").write_text(original_text, encoding="utf-8")
+
+        dry_run = self.run_json(HOOK_REPORT, plugin_data, "archive", "--before", "2026-06-10", "--dry-run", "--json")
+        base_archive_root = (
+            plugin_data
+            / "_archives"
+            / "2026-06-01_to_2026-06-01"
+            / str(dry_run["archiveHash"])
+        )
+        base_archive_root.mkdir(parents=True)
+        (base_archive_root / "manifest.json").write_text("{}", encoding="utf-8")
+
+        result = self.run_json(HOOK_REPORT, plugin_data, "archive", "--before", "2026-06-10", "--json")
+
+        self.assertEqual(result["archiveHash"], dry_run["archiveHash"])
+        self.assertTrue(str(result["archivePath"]).endswith(f"{dry_run['archiveHash']}-2"))
+        self.assertTrue(base_archive_root.exists())
+        archive_root = Path(str(result["archivePath"]))
+        manifest = json.loads((archive_root / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["archiveHash"], dry_run["archiveHash"])
+        self.assertEqual(manifest["files"][0]["archivedPath"], f"{archive_root.relative_to(plugin_data).as_posix()}/RepoA--old-session")
+
     def test_hook_jsonl_append_helper_serializes_concurrent_writers(self) -> None:
         spec = importlib.util.spec_from_file_location("asset_hook_under_test", HOOK_SCRIPT)
         self.assertIsNotNone(spec)
@@ -3007,6 +3631,39 @@ for index in range(25):
             [event["commandKind"] for event in events],
             [expected_kind for _tool_name, _tool_input, expected_kind in commands],
         )
+
+    def test_post_tool_use_classifies_common_script_and_runner_commands(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        cases = [
+            ("python scripts\\audit.py --json", "python-script"),
+            ("python -m pytest tests", "pytest"),
+            ("pytest tests/test_demo.py", "pytest"),
+            ("node scripts/report.mjs", "node-script"),
+            ("node_modules\\.bin\\vitest run tests/demo.test.ts", "vitest"),
+            ("Get-Content file.txt | Select-String demo", "powershell-readonly"),
+            ("Set-Content file.txt 'demo'", "powershell-write"),
+        ]
+
+        for index, (command, expected_kind) in enumerate(cases, start=1):
+            code, stdout, stderr = self.run_hook(
+                {
+                    "hook_event_name": "PostToolUse",
+                    "session_id": f"session-{index}",
+                    "turn_id": "turn-1",
+                    "cwd": str(repo),
+                    "tool_name": "Bash",
+                    "tool_input": {"command": command},
+                    "tool_response": {"exit_code": 0},
+                },
+                plugin_data=plugin_data,
+            )
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(stdout, "")
+            events_path = plugin_data / f"repo--session-{index}" / "events.jsonl"
+            events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(events[-1]["commandKind"], expected_kind, command)
+            self.assertNotIn("command", events[-1])
 
     def test_inbox_lifecycle_script_forces_utf8_stdout_for_chinese_text(self) -> None:
         repo = self.create_repo()

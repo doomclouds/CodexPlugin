@@ -224,6 +224,24 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
     message = str(event.get("last_assistant_message") or "")
     if "asset_gate:" in message:
         state = load_state(event)
+        validation = import_handoff_checks_module().validate_asset_gate_text(message)
+        if not validation.get("valid"):
+            sanitized_validation = sanitize_validation_for_audit(validation)
+            append_usage_event(
+                event,
+                "Stop",
+                decision="block",
+                reason_code="invalid_asset_gate",
+                hasAssetGate=True,
+                hasMeaningfulWork=has_stop_closeout_work(state),
+                signals=state.get("meaningfulWorkSignals", []),
+                candidateCount=len(state.get("subagentCandidates", [])),
+                validation=sanitized_validation,
+            )
+            return {
+                "decision": "block",
+                "reason": f"invalid asset_gate block: {validation_reason(validation)}",
+            }
         append_usage_event(
             event,
             "Stop",
@@ -254,6 +272,19 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
             "Stop",
             decision="allow",
             reason_code="push_only_closeout",
+            hasAssetGate=False,
+            hasMeaningfulWork=True,
+            signals=state.get("meaningfulWorkSignals", []),
+        )
+        clear_closeout_state(state)
+        save_state(event, state)
+        return None
+    if is_merge_only_closeout(state):
+        append_usage_event(
+            event,
+            "Stop",
+            decision="allow",
+            reason_code="merge_only_closeout",
             hasAssetGate=False,
             hasMeaningfulWork=True,
             signals=state.get("meaningfulWorkSignals", []),
@@ -434,6 +465,14 @@ def import_bootstrap_module() -> Any:
     if str(scripts_root) not in sys.path:
         sys.path.insert(0, str(scripts_root))
     return importlib.import_module("bootstrap_asset_compounding")
+
+
+def import_handoff_checks_module() -> Any:
+    plugin_root = Path(os.environ.get("PLUGIN_ROOT") or Path(__file__).resolve().parents[1])
+    scripts_root = plugin_root / "skills" / "compound-development-asset" / "scripts"
+    if str(scripts_root) not in sys.path:
+        sys.path.insert(0, str(scripts_root))
+    return importlib.import_module("checks.handoff_checks")
 
 
 def state_path(event: dict[str, Any]) -> Path:
@@ -692,6 +731,7 @@ def plan_has_completed_step(tool_input: Any) -> bool:
 
 
 def classify_command_kind(command: str, tool_name: str = "") -> str:
+    normalized_command = command.replace("\\", "/")
     if tool_name in {"apply_patch", "Edit", "Write"}:
         return "file-edit"
     if re.search(r"\bdotnet\s+test\b", command):
@@ -700,6 +740,23 @@ def classify_command_kind(command: str, tool_name: str = "") -> str:
         return "dotnet-build"
     if re.search(r"\bpython(?:\.exe)?\s+-m\s+unittest\b", command):
         return "python-unittest"
+    if re.search(r"\b(?:python(?:\.exe)?|py)\s+-m\s+pytest\b", command) or re.search(r"\bpytest\b", command):
+        return "pytest"
+    if re.search(r"(?:^|[\\/])vitest(?:\.cmd|\.ps1|\.exe)?\b", normalized_command) or re.search(
+        r"\bvitest\s+run\b",
+        command,
+    ):
+        return "vitest"
+    if re.search(r"\b(?:python(?:\.exe)?|py)\b", command):
+        return "python-script"
+    if re.search(r"\bnode(?:\.exe)?\s+", command):
+        return "node-script"
+    if re.search(
+        r"\b(?:set-content|add-content|out-file|new-item|remove-item|move-item|copy-item)\b",
+        command,
+        re.IGNORECASE,
+    ):
+        return "powershell-write"
     if re.search(r"\bnpm\s+test\b", command):
         return "npm-test"
     if re.search(r"\bnpm\s+run\s+build\b", command):
@@ -780,11 +837,50 @@ def has_stop_closeout_work(state: dict[str, Any]) -> bool:
     )
 
 
+def validation_reason(result: dict[str, Any]) -> str:
+    parts: list[str] = []
+    missing = result.get("missing") or []
+    invalid = result.get("invalid") or []
+    if missing:
+        parts.append(f"missing required fields: {', '.join(str(item) for item in missing)}")
+    if invalid:
+        parts.append(f"invalid values: {', '.join(str(item) for item in invalid)}")
+    if not parts:
+        return "asset_gate validation failed"
+    return "; ".join(parts)
+
+
+def sanitize_validation_for_audit(result: dict[str, Any]) -> dict[str, Any]:
+    invalid_entries = []
+    for item in result.get("invalid") or []:
+        value = str(item)
+        field_name = value.split("=", 1)[0].strip()
+        invalid_entries.append(field_name or value)
+    sanitized: dict[str, Any] = {
+        "valid": bool(result.get("valid")),
+        "code": str(result.get("code") or "invalid_asset_gate_output"),
+        "missing": [str(item) for item in (result.get("missing") or [])],
+        "invalid": invalid_entries,
+    }
+    return sanitized
+
+
 def is_push_only_closeout(state: dict[str, Any]) -> bool:
     signals = set(state.get("meaningfulWorkSignals") or [])
     return bool(
         signals == {"git-closeout"}
         and state.get("lastGitCloseoutKind") == "git-push"
+        and not state.get("subagentCandidates")
+        and not state.get("assetFilesChanged")
+        and not state.get("verificationEvidence")
+    )
+
+
+def is_merge_only_closeout(state: dict[str, Any]) -> bool:
+    signals = set(state.get("meaningfulWorkSignals") or [])
+    return bool(
+        signals == {"git-closeout"}
+        and state.get("lastGitCloseoutKind") == "git-merge"
         and not state.get("subagentCandidates")
         and not state.get("assetFilesChanged")
         and not state.get("verificationEvidence")
