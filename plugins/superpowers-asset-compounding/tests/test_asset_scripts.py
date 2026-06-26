@@ -124,6 +124,21 @@ class AssetScriptTests(unittest.TestCase):
             agent_text,
         )
 
+    def test_plugin_metadata_mentions_ui_design_package_skill(self) -> None:
+        manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("design-packages", manifest["keywords"])
+        self.assertIn("UI design packages", manifest["interface"]["longDescription"])
+        self.assertIn("Create a visual-first UI design package.", manifest["interface"]["defaultPrompt"])
+
+        self.assertIn("create-ui-design-package", readme)
+        self.assertIn("docs/designs/<slug>/", readme)
+        self.assertIn("visual iteration", readme.lower())
+        self.assertIn("selected-ui-design.png", readme)
+        self.assertIn("subagent-task-pack.md", readme)
+        self.assertIn("visual-fidelity-checklist.md", readme)
+
     def test_ui_design_package_templates_define_required_handoff_contracts(self) -> None:
         reference_root = SKILLS / "create-ui-design-package" / "references"
         required = {

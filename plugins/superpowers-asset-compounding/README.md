@@ -2,7 +2,7 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.3.2` combines six skills with plugin-bundled Codex lifecycle hooks.
+Version `0.3.2` combines seven skills with plugin-bundled Codex lifecycle hooks.
 This release adds structured `asset_gate` validation, `merge_only_closeout`
 auto-allow handling, report filters, session summaries, and audit log archiving
 for `v0.3.2` on top of the v0.3.1 managed-guidance refreshes, the
@@ -17,6 +17,7 @@ The plugin provides six skills:
 - `write-superpowers-problem`: writer for problem and inbox assets.
 - `manage-superpowers-milestone`: writer and checker for project milestone ledgers.
 - `manage-technical-debt`: writer and checker for technical-debt records.
+- `create-ui-design-package`: visual-first UI design package creator for `docs/designs/<slug>/`.
 
 The plugin also bundles hooks under `hooks/hooks.json`:
 
@@ -126,6 +127,29 @@ The reports do not include raw commands, prompts, diffs, command output, full re
 from problem/inbox signals. When a topic only matches problem or inbox assets,
 the requirement archive and completion gate are reported as `not_required`
 instead of forcing a missing archive finding.
+
+### UI Design Packages
+
+Use `create-ui-design-package` when UI work needs a user-approved visual baseline before Superpowers spec and implementation planning.
+
+The workflow is:
+
+```text
+brief -> visual iteration -> approved source image -> image-to-code
+-> rendered QA -> design contracts -> subagent task pack
+```
+
+Generated project assets live under:
+
+```text
+docs/designs/<slug>/
+```
+
+Key files include `assets/source/selected-ui-design.png`, `design-tokens.json`,
+`component-board.md`, `contracts/`, `subagent-task-pack.md`, and
+`visual-fidelity-checklist.md`.
+
+Superpowers specs and plans should link the design package instead of duplicating it. UI implementation subagents should read `START_HERE.md` and `subagent-task-pack.md` before editing UI code.
 
 When this plugin is upgraded, bump `.codex-plugin/plugin.json`, commit and push
 the source plugin repository, then refresh the remote marketplace snapshot:
