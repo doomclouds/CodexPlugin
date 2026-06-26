@@ -123,6 +123,50 @@ class AssetScriptTests(unittest.TestCase):
             agent_text,
         )
 
+    def test_ui_design_package_templates_define_required_handoff_contracts(self) -> None:
+        reference_root = SKILLS / "create-ui-design-package" / "references"
+        required = {
+            "start-here-template.md": [
+                "selected-ui-design.png",
+                "subagent-task-pack.md",
+                "visual-fidelity-checklist.md",
+            ],
+            "design-brief-template.md": ["Prototype mode", "Visual references", "Interaction level"],
+            "visual-source-template.md": [
+                "Approved source image",
+                "Allowed Deviations",
+                "Forbidden Deviations",
+            ],
+            "visual-decision-log-template.md": [
+                "Round 1",
+                "Generated",
+                "User feedback",
+                "Decision",
+            ],
+            "prototype-implementation-template.md": [
+                "Implementation mode",
+                "Run command",
+                "Rendered screenshots",
+            ],
+            "subagent-task-pack-template.md": ["Do not invent colors", "BLOCKED: design detail missing", "DONE requires"],
+            "visual-fidelity-checklist-template.md": [
+                "Desktop screenshot",
+                "Known deviations",
+                "pass/fail",
+            ],
+            "traceability-template.md": ["Source Of Truth Order", "Design Graph", "AI Reading Recipes"],
+            "component-board-template.md": ["Rendered Scenes", "Rendered Components", "Design Decisions"],
+            "design-tokens-schema.md": ['"colors"', '"typography"', '"spacing"', '"motion"'],
+        }
+
+        for filename, expected_terms in required.items():
+            path = reference_root / filename
+            self.assertTrue(path.is_file(), filename)
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("{{DESIGN_SLUG}}", text, filename)
+            for term in expected_terms:
+                self.assertIn(term, text, filename)
+
     def test_asset_compounding_plugin_metadata_mentions_v032_audit_archive(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["version"], "0.3.2")
