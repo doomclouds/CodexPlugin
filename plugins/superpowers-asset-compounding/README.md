@@ -9,7 +9,7 @@ for `v0.3.2` on top of the v0.3.1 managed-guidance refreshes, the
 v0.3.0 milestone/debt navigation improvements, and the earlier hook launcher,
 audit reliability, report diagnostics, and closeout UX updates.
 
-The plugin provides six skills:
+The plugin provides seven skills:
 
 - `using-asset-compounding`: entry gate for deciding when preservation is needed.
 - `compound-development-asset`: router for `none`, `inbox`, `update-existing`, `new-problem`, `archive`, and `both`.

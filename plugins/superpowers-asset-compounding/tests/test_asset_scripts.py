@@ -408,6 +408,8 @@ class AssetScriptTests(unittest.TestCase):
             "The reports do not include raw commands, prompts, diffs, command output, full repository paths, or secrets",
             readme,
         )
+        self.assertNotIn("The plugin provides six skills:", readme)
+        self.assertIn("The plugin provides seven skills:", readme)
 
         guidance = (
             SKILLS / "compound-development-asset" / "references" / "agents-asset-guidance-template.md"

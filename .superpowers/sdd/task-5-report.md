@@ -32,3 +32,27 @@ Task 5 is complete. The README and manifest now reference the UI design package 
 ## Concerns
 
 - `git diff --check` reported LF/CRLF conversion warnings in the three edited files, but no diff check errors.
+
+## Task 5 Fix (README Count Consistency)
+
+### Goal
+
+Resolve reviewer finding that the plugin README contained conflicting skill-count text.
+
+### Change Log
+
+- Updated `plugins/superpowers-asset-compounding/README.md`:
+  - Changed `The plugin provides six skills:` to `The plugin provides seven skills:`.
+- Updated `plugins/superpowers-asset-compounding/tests/test_asset_scripts.py`:
+  - In `test_asset_compounding_plugin_metadata_mentions_v032_audit_archive`, added:
+    - `self.assertNotIn("The plugin provides six skills:", readme)`
+    - `self.assertIn("The plugin provides seven skills:", readme)`
+
+### Validation
+
+- Focused test:
+  - `python -m unittest plugins.superpowers-asset-compounding.tests.test_asset_scripts.AssetScriptTests.test_asset_compounding_plugin_metadata_mentions_v032_audit_archive`
+- Full test suite:
+  - `python -m unittest plugins.superpowers-asset-compounding.tests.test_asset_scripts`
+- Whitespace check:
+  - `git diff --check`
