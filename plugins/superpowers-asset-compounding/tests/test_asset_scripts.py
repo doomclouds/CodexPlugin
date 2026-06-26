@@ -349,6 +349,30 @@ class AssetScriptTests(unittest.TestCase):
         self.assertTrue(summary["approved_source_image"])
         self.assertEqual(summary["screenshot_count"], 2)
 
+    def test_asset_guidance_includes_docs_designs_retrieval(self) -> None:
+        guidance = (
+            SKILLS / "compound-development-asset" / "references" / "agents-asset-guidance-template.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("asset-compounding-guidance:version=0.3.3", guidance)
+        self.assertIn("Design packages: `docs/designs/`", guidance)
+        self.assertIn("START_HERE.md", guidance)
+        self.assertIn("selected-ui-design.png", guidance)
+        self.assertIn("subagent-task-pack.md", guidance)
+        self.assertIn("If a design detail is missing", guidance)
+        self.assertIn("docs/designs", guidance)
+
+    def test_bootstrap_creates_docs_designs_directory(self) -> None:
+        repo = self.temp_root / "bootstrap_design_repo"
+        repo.mkdir()
+
+        result = self.run_json(BOOTSTRAP, repo, "--write", "--json")
+
+        self.assertIn("docs/designs", result["created_dirs"])
+        self.assertTrue((repo / "docs" / "designs").is_dir())
+        agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("Design packages: `docs/designs/`", agents_text)
+
     def test_asset_compounding_plugin_metadata_mentions_v032_audit_archive(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["version"], "0.3.2")
@@ -385,7 +409,7 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("docs/milestones/INDEX.md", guidance)
         self.assertIn("Technical Debt Navigation", guidance)
         self.assertIn("docs/technical-debt/INDEX.md", guidance)
-        self.assertIn("asset-compounding-guidance:version=0.3.1", guidance)
+        self.assertIn("asset-compounding-guidance:version=0.3.3", guidance)
         self.assertIn("Repository Context Guidance", guidance)
         self.assertIn("runtime commands", guidance)
         self.assertIn("current active milestone", guidance)
@@ -1686,6 +1710,7 @@ Extract helper.
             "docs/superpowers/archives",
             "docs/superpowers/problems",
             "docs/superpowers/inbox",
+            "docs/designs",
             "docs/milestones",
             "docs/technical-debt",
         ])
@@ -1695,7 +1720,7 @@ Extract helper.
         self.assertIn("docs/superpowers/inbox/", agents_text)
         self.assertIn("docs/milestones/", agents_text)
         self.assertIn("docs/technical-debt/", agents_text)
-        self.assertIn("asset-compounding-guidance:version=0.3.1", agents_text)
+        self.assertIn("asset-compounding-guidance:version=0.3.3", agents_text)
         self.assertIn("Repository Context Guidance", agents_text)
         self.assertIn("Milestone Navigation", agents_text)
         self.assertIn("docs/milestones/INDEX.md", agents_text)
@@ -1777,7 +1802,7 @@ Extract helper.
         self.assertIn("## TypeScript 工程规则", agents_text)
         self.assertIn("## Milestone 导航", agents_text)
         self.assertIn("## 技术债导航", agents_text)
-        self.assertIn("asset-compounding-guidance:version=0.3.1", agents_text)
+        self.assertIn("asset-compounding-guidance:version=0.3.3", agents_text)
         self.assertIn("Repository Context Guidance", agents_text)
         self.assertIn("Milestone Navigation", agents_text)
         self.assertIn("docs/milestones/INDEX.md", agents_text)
@@ -3177,7 +3202,7 @@ Old managed block.
         self.assertEqual(stdout, "")
         agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("Existing project context.", agents_text)
-        self.assertIn("asset-compounding-guidance:version=0.3.1", agents_text)
+        self.assertIn("asset-compounding-guidance:version=0.3.3", agents_text)
         self.assertTrue((repo / "docs/superpowers").is_dir())
 
         state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
