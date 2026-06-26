@@ -851,11 +851,16 @@ def validation_reason(result: dict[str, Any]) -> str:
 
 
 def sanitize_validation_for_audit(result: dict[str, Any]) -> dict[str, Any]:
+    invalid_entries = []
+    for item in result.get("invalid") or []:
+        value = str(item)
+        field_name = value.split("=", 1)[0].strip()
+        invalid_entries.append(field_name or value)
     sanitized: dict[str, Any] = {
         "valid": bool(result.get("valid")),
         "code": str(result.get("code") or "invalid_asset_gate_output"),
         "missing": [str(item) for item in (result.get("missing") or [])],
-        "invalid": [str(item) for item in (result.get("invalid") or [])],
+        "invalid": invalid_entries,
     }
     return sanitized
 

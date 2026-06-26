@@ -2424,6 +2424,8 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         repo = self.create_repo()
         plugin_data = self.temp_root / "plugin-data"
         fake_secret = "FAKE-SECRET-12345"
+        raw_invalid_event_type = f"event_type={fake_secret}"
+        raw_invalid_route = f"route={fake_secret}"
 
         code, stdout, stderr = self.run_hook(
             {
@@ -2433,13 +2435,14 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 "cwd": str(repo),
                 "last_assistant_message": (
                     "asset_gate:\n"
-                    "  event_type: cleanup-only\n"
-                    "  route: none\n"
+                    f"  event_type: {fake_secret}\n"
+                    f"  route: {fake_secret}\n"
                     f"  reason: leaked {fake_secret}\n"
                     f"  evidence: copied {fake_secret}\n"
                     "  related_assets: none\n"
                     "  asset_candidates: none\n"
                     "  deferred_signals: none\n"
+                    "  next_step: none\n"
                 ),
             },
             plugin_data=plugin_data,
@@ -2450,13 +2453,15 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(payload["decision"], "block")
         events_text = (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8")
         self.assertNotIn(fake_secret, events_text)
+        self.assertNotIn(raw_invalid_event_type, events_text)
+        self.assertNotIn(raw_invalid_route, events_text)
         self.assertNotIn("leaked", events_text)
         self.assertNotIn("copied", events_text)
         events = [json.loads(line) for line in events_text.splitlines()]
         validation = events[-1]["validation"]
         self.assertEqual(validation["code"], "invalid_asset_gate_output")
-        self.assertEqual(validation["missing"], ["next_step"])
-        self.assertEqual(validation["invalid"], [])
+        self.assertEqual(validation["missing"], [])
+        self.assertEqual(validation["invalid"], ["event_type", "route"])
         self.assertNotIn("fields", validation)
 
     def test_stop_allows_merge_only_closeout_without_asset_gate(self) -> None:
