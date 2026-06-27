@@ -157,6 +157,13 @@ Run:
 python <skill>\scripts\design_package.py check . docs/designs/<slug> --json
 ```
 
+Use the asset helper when package assets need deterministic checks:
+
+```powershell
+python <skill>\scripts\design_assets.py check . docs/designs/<slug> --json
+python <skill>\scripts\design_assets.py preview . docs/designs/<slug> --output assets/component-assets/preview/contact-sheet.html --write --json
+```
+
 Fix every error before handoff.
 
 `check` and `summarize` only accept packages that resolve inside `<repo>/docs/designs/`.
