@@ -503,7 +503,62 @@ class AssetScriptTests(unittest.TestCase):
         preview = package / "assets/component-assets/preview/contact-sheet.html"
         self.assertEqual(result["status"], "preview_written")
         self.assertTrue(preview.is_file())
-        self.assertIn("paper", preview.read_text(encoding="utf-8"))
+        html_text = preview.read_text(encoding="utf-8")
+        self.assertIn("paper", html_text)
+        self.assertIn('src="../paper.png"', html_text)
+
+    def test_design_assets_preview_writes_html_even_with_manifest_issues(self) -> None:
+        repo = self.temp_root / "design_assets_preview_issues_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(DESIGN_PACKAGE, "create", repo, "sample-dashboard", "--mode", "new", "--write", "--json")
+        (package / "asset-manifest.json").write_text(
+            json.dumps(
+                {
+                    "design_slug": "sample-dashboard",
+                    "source_image": "assets/source/selected-ui-design.png",
+                    "asset_strategy": "atomic-generated-assets",
+                    "assets": [
+                        {
+                            "id": "missing",
+                            "role": "missing",
+                            "target_region": "AppShell",
+                            "display_intent": "missing file",
+                            "target_size": "1x1",
+                            "final_path": "assets/component-assets/missing.png",
+                            "prototype_path": "prototype/src/assets/generated/missing.png",
+                            "transparent": False,
+                            "validation": "pending",
+                        }
+                    ],
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json(
+            DESIGN_ASSETS,
+            "preview",
+            repo,
+            package,
+            "--output",
+            "assets/component-assets/preview/contact-sheet.html",
+            "--write",
+            "--json",
+        )
+
+        preview = package / "assets/component-assets/preview/contact-sheet.html"
+        html_text = preview.read_text(encoding="utf-8")
+        codes = {issue["code"] for issue in result["issues"]}
+        self.assertEqual(result["status"], "preview_written")
+        self.assertTrue(preview.is_file())
+        self.assertIn("asset_manifest_missing_final_path", codes)
+        self.assertIn("asset_manifest_missing_prototype_path", codes)
+        self.assertIn("missing", html_text)
+        self.assertIn("Missing file", html_text)
+        self.assertIn("Missing file", html_text)
 
     def test_design_package_check_requires_second_screenshot_evidence(self) -> None:
         repo = self.temp_root / "single_screenshot_design_repo"
