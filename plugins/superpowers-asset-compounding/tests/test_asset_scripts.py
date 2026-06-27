@@ -64,13 +64,16 @@ class AssetScriptTests(unittest.TestCase):
 
     def approve_design_package(self, package: Path) -> None:
         visual_source = (package / "visual-source.md").read_text(encoding="utf-8")
+        self.assertIn("Approval status: `Not approved`", visual_source)
         (package / "visual-source.md").write_text(
             visual_source.replace("Approval status: `Not approved`", "Approval status: `Approved`"),
             encoding="utf-8",
             newline="\n",
         )
+        self.assertIn("Approval status: `Approved`", (package / "visual-source.md").read_text(encoding="utf-8"))
 
     def add_basic_design_evidence(self, package: Path) -> None:
+        # Minimal evidence payload for check-path focused RED test cases.
         self.write_png(package / "assets/source/selected-ui-design.png", 1536, 1024)
         self.write_png(package / "assets/generated-options/round-01-option-a.png", 1536, 1024)
         self.write_png(package / "assets/screenshots/implementation-desktop.png", 1536, 1024)
@@ -618,7 +621,11 @@ class AssetScriptTests(unittest.TestCase):
         )
         noisy_readme = package / "prototype/node_modules/debug/README.md"
         noisy_readme.parent.mkdir(parents=True)
-        noisy_readme.write_text("[missing](./examples/node/app.js)\n", encoding="utf-8")
+        noisy_readme.write_text(
+            "# debug\n\nThis dependency package placeholder marker appears only here: TODO\n",
+            encoding="utf-8",
+            newline="\n",
+        )
 
         result = self.run_json(DESIGN_PACKAGE, "check", repo, package, "--json")
 
