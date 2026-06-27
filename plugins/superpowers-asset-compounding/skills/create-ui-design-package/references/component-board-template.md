@@ -16,7 +16,13 @@ Capture selected visual and interaction direction in text-native form so impleme
 
 | Component | Asset | Contract |
 | --- | --- | --- |
-| Primary component | `assets/components/` | `contracts/component-contracts.md` |
+| Primary component | `assets/component-assets/` | `contracts/component-contracts.md` |
+
+## Package-local Runtime Assets
+
+- List any bitmap assets required by `asset-manifest.json`.
+- Keep final paths in sync with `assets/component-assets/` and `prototype/src/assets/generated/`.
+- Use this section to record why each asset exists and which contract it supports.
 
 ## Key component examples
 

@@ -148,6 +148,9 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("Visual Iteration Loop", skill_text)
         self.assertIn("No approved source image, no image-to-code", skill_text)
         self.assertIn("No rendered screenshots, no fidelity claim", skill_text)
+        self.assertIn("For rich bitmap UI, no `asset-manifest.json`, no image-to-code.", skill_text)
+        self.assertIn("Inventory and prepare runtime assets", skill_text)
+        self.assertIn("asset-manifest.json", skill_text)
         self.assertIn("subagent-task-pack.md", skill_text)
         self.assertIn("visual-fidelity-checklist.md", skill_text)
         self.assertIn("design_package.py", skill_text)
@@ -226,6 +229,11 @@ class AssetScriptTests(unittest.TestCase):
                 "Known deviations",
                 "pass/fail",
             ],
+            "asset-manifest-schema.md": [
+                "atomic-generated-assets",
+                "approved source image is visual truth",
+                "Transparent PNG assets must contain an alpha channel",
+            ],
             "traceability-template.md": [
                 "Source Of Truth Order",
                 "Design Graph",
@@ -278,6 +286,7 @@ class AssetScriptTests(unittest.TestCase):
         self.assertTrue((package / "subagent-task-pack.md").is_file())
         self.assertTrue((package / "visual-fidelity-checklist.md").is_file())
         self.assertTrue((package / "design-tokens.json").is_file())
+        self.assertTrue((package / "asset-manifest.json").is_file())
         self.assertTrue((package / "traceability.md").is_file())
         self.assertTrue((package / "component-board.md").is_file())
         self.assertTrue((package / "contracts" / "visual-system.md").is_file())
@@ -285,14 +294,22 @@ class AssetScriptTests(unittest.TestCase):
         self.assertTrue((package / "assets" / "generated-options").is_dir())
         self.assertTrue((package / "assets" / "source").is_dir())
         self.assertTrue((package / "assets" / "screenshots").is_dir())
-        self.assertTrue((package / "assets" / "components").is_dir())
+        self.assertTrue((package / "assets" / "component-assets").is_dir())
+        self.assertTrue((package / "assets" / "component-assets" / "raw").is_dir())
+        self.assertTrue((package / "assets" / "component-assets" / "preview").is_dir())
         self.assertTrue((package / "prototype").is_dir())
+        self.assertTrue((package / "prototype" / "src" / "assets" / "generated").is_dir())
 
         tokens = json.loads((package / "design-tokens.json").read_text(encoding="utf-8"))
         self.assertEqual(
             sorted(tokens),
             ["breakpoints", "colors", "elevation", "motion", "shape", "spacing", "typography"],
         )
+
+        manifest = json.loads((package / "asset-manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["asset_strategy"], "none")
+        self.assertEqual(manifest["source_image"], "assets/source/selected-ui-design.png")
+        self.assertEqual(manifest["assets"], [])
 
     def test_design_package_create_rejects_unsafe_slug_and_does_not_escape_docs_designs(self) -> None:
         repo = self.temp_root / "unsafe_design_repo"

@@ -5,8 +5,9 @@
 1. `assets/source/selected-ui-design.png` owns visual intent.
 2. `contracts/` owns visual semantics, states, and platform constraints.
 3. `design-tokens.json` owns reusable visual values.
-4. `prototype/` and `assets/screenshots/` provide rendered evidence.
-5. Superpowers specs and plans own implementation slice scope.
+4. `asset-manifest.json` owns package-local runtime asset inventory and strategy.
+5. `prototype/` and `assets/screenshots/` provide rendered evidence.
+6. Superpowers specs and plans own implementation slice scope.
 
 ## Design Graph
 
@@ -32,6 +33,7 @@ docs/designs/{{DESIGN_SLUG}}/
 | --- | --- | --- |
 | `assets/source/selected-ui-design.png` | `contracts/visual-system.md` | Visual truth for layout, hierarchy, and spacing. |
 | `design-tokens.json` | `contracts/design-tokens.md` | Reusable values that implementation should consume. |
+| `asset-manifest.json` | `references/asset-manifest-schema.md` | Runtime asset inventory and path gate. |
 | `component-board.md` | `contracts/component-contracts.md` | Selected component patterns and variants. |
 
 ## Implementation touchpoints

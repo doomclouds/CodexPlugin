@@ -7,6 +7,7 @@ You must implement the UI from this design package.
 ## Required inputs
 
 - Source image: `assets/source/selected-ui-design.png`
+- Asset manifest: `asset-manifest.json`
 - Tokens: `design-tokens.json`
 - Component board: `component-board.md`
 - Contracts: `contracts/`
@@ -24,6 +25,8 @@ You must implement the UI from this design package.
 
 - Match the approved source image before adding extra behavior.
 - Use `design-tokens.json` for colors, type, spacing, and shape.
+- Use package-local runtime assets from paths listed in `asset-manifest.json`.
+- The approved source image is visual reference only.
 - Do not invent colors, spacing, typography, layout regions, component density, or interaction states.
 - Do not use framework default colors or spacing when they conflict with the package.
 - If a required visual detail is missing, return:

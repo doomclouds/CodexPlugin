@@ -19,6 +19,7 @@ PACKAGE_FILES = (
     "subagent-task-pack.md",
     "visual-fidelity-checklist.md",
     "design-tokens.json",
+    "asset-manifest.json",
     "traceability.md",
     "component-board.md",
 )
@@ -28,8 +29,11 @@ PACKAGE_DIRS = (
     "assets/generated-options",
     "assets/source",
     "assets/screenshots",
-    "assets/components",
+    "assets/component-assets",
+    "assets/component-assets/raw",
+    "assets/component-assets/preview",
     "prototype",
+    "prototype/src/assets/generated",
 )
 CONTRACT_FILES = (
     "contracts/visual-system.md",
@@ -176,6 +180,22 @@ def create_package(root: Path, slug: str, mode: str, source: str, write: bool) -
             newline="\n",
         )
     created.append(str(tokens_path))
+
+    manifest = {
+        "design_slug": slug,
+        "source_image": "assets/source/selected-ui-design.png",
+        "asset_strategy": "none",
+        "reason": "Set asset_strategy to atomic-generated-assets when the approved source needs bitmap textures, photos, decorations, or other runtime image assets.",
+        "assets": [],
+    }
+    manifest_path = package / "asset-manifest.json"
+    if write:
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    created.append(str(manifest_path))
 
     for relative in CONTRACT_FILES:
         target = package / relative

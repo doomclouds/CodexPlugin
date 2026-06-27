@@ -3,6 +3,7 @@
 - Design slug: `{{DESIGN_SLUG}}`
 
 - Source image opened and inspected: pass/fail
+- Asset manifest reviewed: pass/fail
 - Layout matches source image: pass/fail
 - Color tokens match implementation: pass/fail
 - Typography scale matches spec: pass/fail
