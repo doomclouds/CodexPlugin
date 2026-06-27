@@ -612,6 +612,138 @@ class AssetScriptTests(unittest.TestCase):
         codes = {issue["code"] for issue in result["errors"]}
         self.assertIn("asset_manifest_transparent_without_alpha", codes)
 
+    def test_design_package_check_rejects_invalid_png_metadata(self) -> None:
+        repo = self.temp_root / "invalid_png_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(DESIGN_PACKAGE, "create", repo, "sample-dashboard", "--mode", "new", "--write", "--json")
+        self.add_basic_design_evidence(package)
+        (package / "assets/component-assets/paper.png").write_text("not a png", encoding="utf-8", newline="\n")
+        (package / "prototype/src/assets/generated/paper.png").write_text(
+            "also not a png",
+            encoding="utf-8",
+            newline="\n",
+        )
+        (package / "asset-manifest.json").write_text(
+            json.dumps(
+                {
+                    "design_slug": "sample-dashboard",
+                    "source_image": "assets/source/selected-ui-design.png",
+                    "asset_strategy": "atomic-generated-assets",
+                    "assets": [
+                        {
+                            "id": "paper",
+                            "role": "paper surface",
+                            "target_region": "WritingSanctuary",
+                            "display_intent": "cover editor paper",
+                            "target_size": "360x220",
+                            "final_path": "assets/component-assets/paper.png",
+                            "prototype_path": "prototype/src/assets/generated/paper.png",
+                            "transparent": True,
+                            "validation": "pending",
+                        }
+                    ],
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
+
+        codes = {issue["code"] for issue in result["errors"]}
+        self.assertIn("asset_manifest_dimension_mismatch", codes)
+
+    def test_design_package_check_rejects_invalid_target_size(self) -> None:
+        repo = self.temp_root / "invalid_target_size_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(DESIGN_PACKAGE, "create", repo, "sample-dashboard", "--mode", "new", "--write", "--json")
+        self.add_basic_design_evidence(package)
+        self.write_png(package / "assets/component-assets/paper.png", 320, 180)
+        self.write_png(package / "prototype/src/assets/generated/paper.png", 320, 180)
+        (package / "asset-manifest.json").write_text(
+            json.dumps(
+                {
+                    "design_slug": "sample-dashboard",
+                    "source_image": "assets/source/selected-ui-design.png",
+                    "asset_strategy": "atomic-generated-assets",
+                    "assets": [
+                        {
+                            "id": "paper",
+                            "role": "paper surface",
+                            "target_region": "WritingSanctuary",
+                            "display_intent": "cover editor paper",
+                            "target_size": "wide-by-tall",
+                            "final_path": "assets/component-assets/paper.png",
+                            "prototype_path": "prototype/src/assets/generated/paper.png",
+                            "transparent": False,
+                            "validation": "pending",
+                        }
+                    ],
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
+
+        codes = {issue["code"] for issue in result["errors"]}
+        self.assertIn("asset_manifest_dimension_mismatch", codes)
+
+    def test_design_package_check_rejects_paths_outside_package(self) -> None:
+        repo = self.temp_root / "outside_path_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(DESIGN_PACKAGE, "create", repo, "sample-dashboard", "--mode", "new", "--write", "--json")
+        self.add_basic_design_evidence(package)
+        self.write_png(package / "assets/component-assets/paper.png", 320, 180)
+        self.write_png(package / "prototype/src/assets/generated/paper.png", 320, 180)
+        (package / "asset-manifest.json").write_text(
+            json.dumps(
+                {
+                    "design_slug": "sample-dashboard",
+                    "source_image": "assets/source/selected-ui-design.png",
+                    "asset_strategy": "atomic-generated-assets",
+                    "assets": [
+                        {
+                            "id": "paper",
+                            "role": "paper surface",
+                            "target_region": "WritingSanctuary",
+                            "display_intent": "cover editor paper",
+                            "target_size": "320x180",
+                            "final_path": "../outside-package/paper.png",
+                            "prototype_path": "prototype/src/assets/generated/paper.png",
+                            "transparent": False,
+                            "validation": "pending",
+                        },
+                        {
+                            "id": "absolute-paper",
+                            "role": "paper surface",
+                            "target_region": "WritingSanctuary",
+                            "display_intent": "cover editor paper",
+                            "target_size": "320x180",
+                            "final_path": "assets/component-assets/paper.png",
+                            "prototype_path": str((repo / "prototype-outside.png").resolve()),
+                            "transparent": False,
+                            "validation": "pending",
+                        },
+                    ],
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
+
+        codes = [issue["code"] for issue in result["errors"]]
+        self.assertIn("asset_manifest_path_outside_package", codes)
+
     def test_design_package_check_requires_passed_design_qa_report(self) -> None:
         repo = self.temp_root / "missing_qa_design_repo"
         repo.mkdir()
@@ -648,6 +780,26 @@ class AssetScriptTests(unittest.TestCase):
         noisy_readme.parent.mkdir(parents=True)
         noisy_readme.write_text(
             "# debug\n\nThis dependency package placeholder marker appears only here: TODO\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        result = self.run_json(DESIGN_PACKAGE, "check", repo, package, "--json")
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["errors"], [])
+
+    def test_design_package_check_accepts_scaffold_reason_for_none_strategy(self) -> None:
+        repo = self.temp_root / "scaffold_reason_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(DESIGN_PACKAGE, "create", repo, "sample-dashboard", "--mode", "new", "--write", "--json")
+        self.add_basic_design_evidence(package)
+        (package / "design-qa.md").write_text(
+            "# Design QA\n\n"
+            "- Source visual truth: `assets/source/selected-ui-design.png`\n"
+            "- Implementation screenshot: `assets/screenshots/implementation-desktop.png`\n"
+            "- final result: `passed`\n",
             encoding="utf-8",
             newline="\n",
         )

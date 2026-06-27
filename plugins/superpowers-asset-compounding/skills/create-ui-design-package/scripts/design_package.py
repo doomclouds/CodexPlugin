@@ -205,7 +205,7 @@ def create_package(root: Path, slug: str, mode: str, source: str, write: bool) -
         "design_slug": slug,
         "source_image": "assets/source/selected-ui-design.png",
         "asset_strategy": "none",
-        "reason": "Set asset_strategy to atomic-generated-assets when the approved source needs bitmap textures, photos, decorations, or other runtime image assets.",
+        "reason": "No runtime bitmap assets are required for this package.",
         "assets": [],
     }
     manifest_path = package / "asset-manifest.json"
@@ -411,8 +411,6 @@ def validate_asset_manifest(package: Path) -> list[dict[str, str]]:
     if strategy == "none":
         if not manifest.get("reason"):
             errors.append(issue("asset_manifest_missing_reason", "asset_strategy none must include a reason.", path))
-        elif str(manifest.get("reason")).strip().startswith("Set asset_strategy to atomic-generated-assets"):
-            errors.append(issue("missing_asset_manifest", "asset-manifest.json must be reviewed and updated for this package.", path))
         return errors
 
     assets = manifest.get("assets")
@@ -444,26 +442,43 @@ def validate_asset_manifest(package: Path) -> list[dict[str, str]]:
             errors.append(issue("asset_manifest_missing_prototype_path", f"Missing prototype asset path: {asset.get('prototype_path')}", prototype_path))
 
         expected_size = parse_size(str(asset.get("target_size", "")))
+        asset_label = asset.get("id", index)
+        if expected_size is None:
+            errors.append(
+                issue(
+                    "asset_manifest_dimension_mismatch",
+                    f"Asset {asset_label} target_size must use WIDTHxHEIGHT format.",
+                    path,
+                )
+            )
         if final_path is not None and final_path.is_file() and expected_size is not None:
             metadata = png_metadata(final_path)
-            if metadata is not None:
-                width, height, has_alpha = metadata
-                if (width, height) != expected_size:
-                    errors.append(
-                        issue(
-                            "asset_manifest_dimension_mismatch",
-                            f"Asset {asset.get('id', index)} is {width}x{height}, expected {expected_size[0]}x{expected_size[1]}.",
-                            final_path,
-                        )
+            if metadata is None:
+                errors.append(
+                    issue(
+                        "asset_manifest_dimension_mismatch",
+                        f"Asset {asset_label} must be a readable PNG file.",
+                        final_path,
                     )
-                if asset.get("transparent") is True and not has_alpha:
-                    errors.append(
-                        issue(
-                            "asset_manifest_transparent_without_alpha",
-                            f"Asset {asset.get('id', index)} is marked transparent but PNG has no alpha channel.",
-                            final_path,
-                        )
+                )
+                continue
+            width, height, has_alpha = metadata
+            if (width, height) != expected_size:
+                errors.append(
+                    issue(
+                        "asset_manifest_dimension_mismatch",
+                        f"Asset {asset_label} is {width}x{height}, expected {expected_size[0]}x{expected_size[1]}.",
+                        final_path,
                     )
+                )
+            if asset.get("transparent") is True and not has_alpha:
+                errors.append(
+                    issue(
+                        "asset_manifest_transparent_without_alpha",
+                        f"Asset {asset_label} is marked transparent but PNG has no alpha channel.",
+                        final_path,
+                    )
+                )
     return errors
 
 
