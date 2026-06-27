@@ -43,6 +43,41 @@ class AssetScriptTests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.temp_root, ignore_errors=True)
 
+    def write_png(self, path: Path, width: int = 1, height: int = 1, *, alpha: bool = False) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        color_type = 6 if alpha else 2
+        pixel = (b"\x00\x00\x00\xff" if alpha else b"\x00\x00\x00")
+        raw = b"".join(b"\x00" + pixel * width for _ in range(height))
+        import struct
+        import zlib
+
+        def chunk(kind: bytes, data: bytes) -> bytes:
+            payload = kind + data
+            return struct.pack(">I", len(data)) + payload + struct.pack(">I", zlib.crc32(payload) & 0xFFFFFFFF)
+
+        path.write_bytes(
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw))
+            + chunk(b"IEND", b"")
+        )
+
+    def approve_design_package(self, package: Path) -> None:
+        visual_source = (package / "visual-source.md").read_text(encoding="utf-8")
+        (package / "visual-source.md").write_text(
+            visual_source.replace("Approval status: `Not approved`", "Approval status: `Approved`"),
+            encoding="utf-8",
+            newline="\n",
+        )
+
+    def add_basic_design_evidence(self, package: Path) -> None:
+        self.write_png(package / "assets/source/selected-ui-design.png", 1536, 1024)
+        self.write_png(package / "assets/generated-options/round-01-option-a.png", 1536, 1024)
+        self.write_png(package / "assets/screenshots/implementation-desktop.png", 1536, 1024)
+        self.write_png(package / "assets/screenshots/implementation-mobile.png", 390, 844)
+        self.write_png(package / "assets/screenshots/qa-comparison-desktop.png", 3072, 1024)
+        self.approve_design_package(package)
+
     def test_v030_skills_exist_with_required_metadata(self) -> None:
         milestone_skill = SKILLS / "manage-superpowers-milestone" / "SKILL.md"
         debt_skill = SKILLS / "manage-technical-debt" / "SKILL.md"
@@ -428,6 +463,167 @@ class AssetScriptTests(unittest.TestCase):
         result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
         codes = {issue["code"] for issue in result["errors"]}
         self.assertIn("missing_generated_options", codes)
+
+    def test_design_package_check_requires_manifest_for_rich_assets(self) -> None:
+        repo = self.temp_root / "missing_manifest_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(DESIGN_PACKAGE, "create", repo, "sample-dashboard", "--mode", "new", "--write", "--json")
+        self.add_basic_design_evidence(package)
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
+
+        codes = {issue["code"] for issue in result["errors"]}
+        self.assertIn("missing_asset_manifest", codes)
+
+    def test_design_package_check_validates_manifest_paths_and_dimensions(self) -> None:
+        repo = self.temp_root / "bad_manifest_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(DESIGN_PACKAGE, "create", repo, "sample-dashboard", "--mode", "new", "--write", "--json")
+        self.add_basic_design_evidence(package)
+        self.write_png(package / "assets/component-assets/paper.png", 320, 180)
+        self.write_png(package / "prototype/src/assets/generated/paper.png", 320, 180)
+        (package / "asset-manifest.json").write_text(
+            json.dumps(
+                {
+                    "design_slug": "sample-dashboard",
+                    "source_image": "assets/source/selected-ui-design.png",
+                    "asset_strategy": "atomic-generated-assets",
+                    "assets": [
+                        {
+                            "id": "paper",
+                            "role": "paper surface",
+                            "target_region": "WritingSanctuary",
+                            "display_intent": "cover editor paper",
+                            "target_size": "360x220",
+                            "final_path": "assets/component-assets/paper.png",
+                            "prototype_path": "prototype/src/assets/generated/paper.png",
+                            "transparent": False,
+                            "validation": "pending",
+                        },
+                        {
+                            "id": "missing",
+                            "role": "missing asset",
+                            "target_region": "AppShell",
+                            "display_intent": "must exist",
+                            "target_size": "1x1",
+                            "final_path": "assets/component-assets/missing.png",
+                            "prototype_path": "prototype/src/assets/generated/missing.png",
+                            "transparent": False,
+                            "validation": "pending",
+                        },
+                    ],
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
+
+        codes = {issue["code"] for issue in result["errors"]}
+        self.assertIn("asset_manifest_dimension_mismatch", codes)
+        self.assertIn("asset_manifest_missing_final_path", codes)
+        self.assertIn("asset_manifest_missing_prototype_path", codes)
+
+    def test_design_package_check_requires_alpha_for_transparent_assets(self) -> None:
+        repo = self.temp_root / "alpha_manifest_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(DESIGN_PACKAGE, "create", repo, "sample-dashboard", "--mode", "new", "--write", "--json")
+        self.add_basic_design_evidence(package)
+        self.write_png(package / "assets/component-assets/flower.png", 512, 512, alpha=False)
+        self.write_png(package / "prototype/src/assets/generated/flower.png", 512, 512, alpha=False)
+        (package / "asset-manifest.json").write_text(
+            json.dumps(
+                {
+                    "design_slug": "sample-dashboard",
+                    "source_image": "assets/source/selected-ui-design.png",
+                    "asset_strategy": "atomic-generated-assets",
+                    "assets": [
+                        {
+                            "id": "flower",
+                            "role": "transparent decoration",
+                            "target_region": "RhythmPanel",
+                            "display_intent": "absolute positioned decoration",
+                            "target_size": "512x512",
+                            "final_path": "assets/component-assets/flower.png",
+                            "prototype_path": "prototype/src/assets/generated/flower.png",
+                            "transparent": True,
+                            "validation": "pending",
+                        }
+                    ],
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
+
+        codes = {issue["code"] for issue in result["errors"]}
+        self.assertIn("asset_manifest_transparent_without_alpha", codes)
+
+    def test_design_package_check_requires_passed_design_qa_report(self) -> None:
+        repo = self.temp_root / "missing_qa_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(DESIGN_PACKAGE, "create", repo, "sample-dashboard", "--mode", "new", "--write", "--json")
+        self.add_basic_design_evidence(package)
+        (package / "asset-manifest.json").write_text(
+            json.dumps(
+                {
+                    "design_slug": "sample-dashboard",
+                    "source_image": "assets/source/selected-ui-design.png",
+                    "asset_strategy": "none",
+                    "reason": "UI uses standard controls and icon library only.",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
+
+        codes = {issue["code"] for issue in result["errors"]}
+        self.assertIn("missing_design_qa_report", codes)
+
+    def test_design_package_check_ignores_generated_frontend_dependency_dirs(self) -> None:
+        repo = self.temp_root / "dependency_noise_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(DESIGN_PACKAGE, "create", repo, "sample-dashboard", "--mode", "new", "--write", "--json")
+        self.add_basic_design_evidence(package)
+        (package / "asset-manifest.json").write_text(
+            json.dumps(
+                {
+                    "design_slug": "sample-dashboard",
+                    "source_image": "assets/source/selected-ui-design.png",
+                    "asset_strategy": "none",
+                    "reason": "UI uses standard controls and icon library only.",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (package / "design-qa.md").write_text(
+            "# Design QA\n\n- final result: `passed`\n\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        noisy_readme = package / "prototype/node_modules/debug/README.md"
+        noisy_readme.parent.mkdir(parents=True)
+        noisy_readme.write_text("[missing](./examples/node/app.js)\n", encoding="utf-8")
+
+        result = self.run_json(DESIGN_PACKAGE, "check", repo, package, "--json")
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["errors"], [])
 
     def test_design_package_check_and_summarize_resolve_relative_package_under_repo_root(self) -> None:
         repo = self.temp_root / "relative_design_repo"
