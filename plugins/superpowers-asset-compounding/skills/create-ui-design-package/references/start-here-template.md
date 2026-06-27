@@ -36,4 +36,3 @@ Run:
 ```powershell
 python <skill>\scripts\design_package.py check . docs/designs/{{DESIGN_SLUG}} --json
 ```
-

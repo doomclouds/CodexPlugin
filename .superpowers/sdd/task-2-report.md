@@ -50,7 +50,7 @@
 - 未引入额外脚本或外部依赖。
 
 ## Commit
-- `204dbd7`  
+- `204dbd7`
   Message: `feat(asset-compounding): add ui design package templates`
 
 ## Concerns
