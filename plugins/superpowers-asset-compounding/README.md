@@ -2,12 +2,12 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.3.2` combines seven skills with plugin-bundled Codex lifecycle hooks.
-This release adds structured `asset_gate` validation, `merge_only_closeout`
-auto-allow handling, report filters, session summaries, and audit log archiving
-for `v0.3.2` on top of the v0.3.1 managed-guidance refreshes, the
-v0.3.0 milestone/debt navigation improvements, and the earlier hook launcher,
-audit reliability, report diagnostics, and closeout UX updates.
+Version `0.4.0` combines seven skills with plugin-bundled Codex lifecycle hooks.
+This release adds the visual-first UI design package workflow for creating
+approved image references, design contracts, implementation guidance, and
+subagent task packs under `docs/designs/`. It builds on the v0.3.2
+structured `asset_gate` validation, `merge_only_closeout` auto-allow handling,
+report filters, session summaries, and audit log archiving.
 
 The plugin provides seven skills:
 

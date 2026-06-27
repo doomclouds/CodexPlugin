@@ -507,14 +507,16 @@ class AssetScriptTests(unittest.TestCase):
         agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("Design packages: `docs/designs/`", agents_text)
 
-    def test_asset_compounding_plugin_metadata_mentions_v032_audit_archive(self) -> None:
+    def test_asset_compounding_plugin_metadata_mentions_v040_design_packages(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["version"], "0.3.2")
+        self.assertEqual(manifest["version"], "0.4.0")
         self.assertIn("milestones", manifest["interface"]["longDescription"])
         self.assertIn("technical debt", manifest["interface"]["longDescription"].lower())
+        self.assertIn("visual-first UI design package", manifest["interface"]["longDescription"])
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("v0.3.2", readme)
+        self.assertIn("Version `0.4.0`", readme)
+        self.assertIn("docs/designs/", readme)
         self.assertIn("manage-superpowers-milestone", readme)
         self.assertIn("manage-technical-debt", readme)
         self.assertIn("structured `asset_gate` validation", readme)
