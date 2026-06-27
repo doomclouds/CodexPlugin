@@ -54,15 +54,16 @@ resulting docs/assets in the isolated worktree.
 - `check_completion_gate.py ... --completed-topic create-ui-design-package-workflow-hardening --json`
   returned `"status": "pass"`.
 
-### Failed / Concern
+### Failed / Concern (pre-fix, historical)
 
-- `check_indexes.py .` failed with:
+- Initial `check_indexes.py .` check failed with:
   - `ERROR [inbox/missing_index]: Missing ...\docs\superpowers\inbox\INDEX.md`
 - This appears to be a pre-existing repository/documentation gap in the synced
   task assets, not a regression from Task 5 edits. The missing inbox index is
   outside the task's allowed write scope, so I did not create it.
 - `git diff --check` returned only a line-ending warning for
   `docs/superpowers/archives/INDEX.md` and no whitespace error.
+- After the fix follow-up, `check_indexes.py .` no longer reports this error.
 
 ## Fix Follow-up
 
@@ -81,6 +82,8 @@ resulting docs/assets in the isolated worktree.
 - Updated `docs/designs/morning-journal-note-ui/asset-manifest.json`
   - migrated all `final_path` entries from
     `assets/components/asset-samples/...` to `assets/component-assets/...`
+- Added `docs/superpowers/inbox/INDEX.md`
+  - linked to archived inbox entries and now included in index validation scope
 - Added compatibility asset directories and preview artifact under
   `docs/designs/morning-journal-note-ui/assets/component-assets/`
   - copied existing PNG assets from legacy `asset-samples/`
@@ -100,5 +103,5 @@ resulting docs/assets in the isolated worktree.
 - Did not delete or revert the untracked design/spec/plan/inbox assets that were synced into the worktree.
 - Morning journal package now validates against the hardened workflow and has a package-local preview artifact.
 - Archive and archive index are consistent.
-- Remaining concern is limited to the missing `docs/superpowers/inbox/INDEX.md`,
-  which prevented a full green `check_indexes.py .` pass.
+- `check_indexes.py .` passes (`OK: indexes are valid`) after adding the inbox index.
+- No remaining Task 5 concern remains.
