@@ -17,6 +17,7 @@ ASSET_DIRS = [
     "docs/superpowers/archives",
     "docs/superpowers/problems",
     "docs/superpowers/inbox",
+    "docs/designs",
     "docs/milestones",
     "docs/technical-debt",
 ]

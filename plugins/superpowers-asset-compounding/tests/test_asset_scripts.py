@@ -33,6 +33,7 @@ HOOK_SCRIPT = ROOT / "hooks" / "asset_hook.py"
 HOOK_REPORT = ROOT / "hooks" / "asset_hook_report.py"
 HOOK_LAUNCHER = ROOT / "hooks" / "run_asset_hook.cmd"
 HOOK_BASH_LAUNCHER = ROOT / "hooks" / "run_asset_hook.sh"
+DESIGN_PACKAGE = SKILLS / "create-ui-design-package" / "scripts" / "design_package.py"
 
 
 class AssetScriptTests(unittest.TestCase):
@@ -92,6 +93,420 @@ class AssetScriptTests(unittest.TestCase):
             debt_agent_text,
         )
 
+    def test_ui_design_package_skill_exists_with_required_metadata(self) -> None:
+        skill_root = SKILLS / "create-ui-design-package"
+        skill = skill_root / "SKILL.md"
+        agent = skill_root / "agents" / "openai.yaml"
+
+        self.assertTrue(skill.is_file())
+        self.assertTrue(agent.is_file())
+
+        skill_text = skill.read_text(encoding="utf-8")
+        agent_text = agent.read_text(encoding="utf-8")
+
+        self.assertIn("name: create-ui-design-package", skill_text)
+        self.assertIn("description:", skill_text)
+        self.assertIn("docs/designs/<slug>/", skill_text)
+        self.assertIn("Visual Iteration Loop", skill_text)
+        self.assertIn("No approved source image, no image-to-code", skill_text)
+        self.assertIn("No rendered screenshots, no fidelity claim", skill_text)
+        self.assertIn("subagent-task-pack.md", skill_text)
+        self.assertIn("visual-fidelity-checklist.md", skill_text)
+        self.assertIn("design_package.py", skill_text)
+        self.assertIn("Superpowers Workflow Compatibility", skill_text)
+        self.assertIn("Product Design", skill_text)
+        self.assertIn("ImageGen", skill_text)
+
+        self.assertIn('interface:\n  display_name: "Create UI Design Package"', agent_text)
+        self.assertIn('  short_description: "Create visual-first UI design packages."', agent_text)
+        self.assertIn(
+            '  default_prompt: "Use $create-ui-design-package to create a visual-first docs/designs UI package for subagent implementation."',
+            agent_text,
+        )
+        self.assertIn(
+            "python <skill>\\scripts\\design_package.py create . <slug> --mode new --write",
+            skill_text,
+        )
+        self.assertIn(
+            "python <skill>\\scripts\\design_package.py create . <slug> --mode extend --source docs/designs/<source> --write",
+            skill_text,
+        )
+
+    def test_plugin_metadata_mentions_ui_design_package_skill(self) -> None:
+        manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("design-packages", manifest["keywords"])
+        self.assertIn("UI design packages", manifest["interface"]["longDescription"])
+        self.assertIn("Create a visual-first UI design package.", manifest["interface"]["defaultPrompt"])
+
+        self.assertIn("create-ui-design-package", readme)
+        self.assertIn("docs/designs/<slug>/", readme)
+        self.assertIn("visual iteration", readme.lower())
+        self.assertIn("selected-ui-design.png", readme)
+        self.assertIn("subagent-task-pack.md", readme)
+        self.assertIn("visual-fidelity-checklist.md", readme)
+        self.assertIn("core Superpowers assets live under `docs/superpowers/`", readme)
+        self.assertIn("UI design packages live under `docs/designs/`", readme)
+        self.assertNotIn("The intended project-local asset layout is `docs/superpowers/`.", readme)
+
+    def test_ui_design_package_templates_define_required_handoff_contracts(self) -> None:
+        reference_root = SKILLS / "create-ui-design-package" / "references"
+        required = {
+            "start-here-template.md": [
+                "selected-ui-design.png",
+                "subagent-task-pack.md",
+                "visual-fidelity-checklist.md",
+            ],
+            "design-brief-template.md": ["Prototype mode", "Visual references", "Interaction level"],
+            "visual-source-template.md": [
+                "Approved source image",
+                "Allowed Deviations",
+                "Forbidden Deviations",
+                "Approval notes",
+            ],
+            "visual-decision-log-template.md": [
+                "Round 1",
+                "Generated",
+                "User feedback",
+                "Decision",
+                "Retained decisions",
+                "Rejected decisions",
+                "Next revision direction",
+            ],
+            "prototype-implementation-template.md": [
+                "Implementation mode",
+                "Run command",
+                "Rendered screenshots",
+                "Screenshot capture instructions",
+                "Deviations approved",
+                "Blocked",
+            ],
+            "subagent-task-pack-template.md": ["Do not invent colors", "BLOCKED: design detail missing", "DONE requires"],
+            "visual-fidelity-checklist-template.md": [
+                "Desktop screenshot",
+                "Known deviations",
+                "pass/fail",
+            ],
+            "traceability-template.md": [
+                "Source Of Truth Order",
+                "Design Graph",
+                "AI Reading Recipes",
+                "Asset-to-contract mapping",
+                "Implementation touchpoints",
+                "Open questions",
+            ],
+            "component-board-template.md": [
+                "Rendered Scenes",
+                "Rendered Components",
+                "Design Decisions",
+                "Key component examples",
+                "State and variant examples",
+            ],
+            "design-tokens-schema.md": ['"colors"', '"typography"', '"spacing"', '"motion"'],
+        }
+
+        for filename, expected_terms in required.items():
+            path = reference_root / filename
+            self.assertTrue(path.is_file(), filename)
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("{{DESIGN_SLUG}}", text, filename)
+            for term in expected_terms:
+                self.assertIn(term, text, filename)
+
+    def test_design_package_create_scaffolds_docs_design_package(self) -> None:
+        repo = self.temp_root / "design_repo"
+        repo.mkdir()
+
+        result = self.run_json(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "sample-dashboard",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.assertEqual(result["status"], "created")
+        self.assertEqual(result["package"], str(package))
+        self.assertTrue((package / "START_HERE.md").is_file())
+        self.assertTrue((package / "design-brief.md").is_file())
+        self.assertTrue((package / "visual-source.md").is_file())
+        self.assertTrue((package / "visual-decision-log.md").is_file())
+        self.assertTrue((package / "prototype-implementation.md").is_file())
+        self.assertTrue((package / "subagent-task-pack.md").is_file())
+        self.assertTrue((package / "visual-fidelity-checklist.md").is_file())
+        self.assertTrue((package / "design-tokens.json").is_file())
+        self.assertTrue((package / "traceability.md").is_file())
+        self.assertTrue((package / "component-board.md").is_file())
+        self.assertTrue((package / "contracts" / "visual-system.md").is_file())
+        self.assertTrue((package / "guides" / "implementation-readiness.md").is_file())
+        self.assertTrue((package / "assets" / "generated-options").is_dir())
+        self.assertTrue((package / "assets" / "source").is_dir())
+        self.assertTrue((package / "assets" / "screenshots").is_dir())
+        self.assertTrue((package / "assets" / "components").is_dir())
+        self.assertTrue((package / "prototype").is_dir())
+
+        tokens = json.loads((package / "design-tokens.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            sorted(tokens),
+            ["breakpoints", "colors", "elevation", "motion", "shape", "spacing", "typography"],
+        )
+
+    def test_design_package_create_rejects_unsafe_slug_and_does_not_escape_docs_designs(self) -> None:
+        repo = self.temp_root / "unsafe_design_repo"
+        repo.mkdir()
+
+        result = self.run_json_fail(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "../superpowers/x",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["errors"][0]["code"], "invalid_design_slug")
+        self.assertFalse((repo / "docs" / "superpowers" / "x").exists())
+        self.assertFalse((repo / "docs" / "superpowers").exists())
+
+    def test_design_package_check_reports_missing_source_image_and_screenshots(self) -> None:
+        repo = self.temp_root / "invalid_design_repo"
+        repo.mkdir()
+        self.run_json(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "sample-dashboard",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        result = self.run_json_fail(
+            DESIGN_PACKAGE,
+            "check",
+            repo,
+            repo / "docs" / "designs" / "sample-dashboard",
+            "--json",
+        )
+
+        codes = {issue["code"] for issue in result["errors"]}
+        self.assertIn("missing_approved_source_image", codes)
+        self.assertIn("missing_rendered_screenshot", codes)
+        self.assertIn("visual_source_not_approved", codes)
+
+    def test_design_package_check_passes_for_complete_reference_package(self) -> None:
+        repo = self.temp_root / "valid_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "sample-dashboard",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        (package / "assets/source/selected-ui-design.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-desktop.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-mobile.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/generated-options/round-01-option-a.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        visual_source = (package / "visual-source.md").read_text(encoding="utf-8")
+        (package / "visual-source.md").write_text(
+            visual_source.replace("Approval status: `Not approved`", "Approval status: `Approved`"),
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        result = self.run_json(DESIGN_PACKAGE, "check", repo, package, "--json")
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["errors"], [])
+
+        summary = self.run_json(DESIGN_PACKAGE, "summarize", repo, package, "--json")
+        self.assertEqual(summary["status"], "implementation-ready")
+        self.assertTrue(summary["approved_source_image"])
+        self.assertEqual(summary["screenshot_count"], 2)
+
+    def test_design_package_check_requires_second_screenshot_evidence(self) -> None:
+        repo = self.temp_root / "single_screenshot_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "sample-dashboard",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        (package / "assets/source/selected-ui-design.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-desktop.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/generated-options/round-01-option-a.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        visual_source = (package / "visual-source.md").read_text(encoding="utf-8")
+        (package / "visual-source.md").write_text(
+            visual_source.replace("Approval status: `Not approved`", "Approval status: `Approved`"),
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
+        codes = {issue["code"] for issue in result["errors"]}
+        self.assertIn("missing_secondary_screenshot_evidence", codes)
+
+    def test_design_package_check_rejects_single_mixed_screenshot_file(self) -> None:
+        repo = self.temp_root / "mixed_screenshot_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "sample-dashboard",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        (package / "assets/source/selected-ui-design.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-desktop-mobile.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/generated-options/round-01-option-a.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        visual_source = (package / "visual-source.md").read_text(encoding="utf-8")
+        (package / "visual-source.md").write_text(
+            visual_source.replace("Approval status: `Not approved`", "Approval status: `Approved`"),
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
+        codes = {issue["code"] for issue in result["errors"]}
+        self.assertIn("screenshot_evidence_requires_distinct_files", codes)
+
+    def test_design_package_check_requires_generated_options(self) -> None:
+        repo = self.temp_root / "missing_options_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "sample-dashboard",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        (package / "assets/source/selected-ui-design.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-desktop.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-mobile.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        visual_source = (package / "visual-source.md").read_text(encoding="utf-8")
+        (package / "visual-source.md").write_text(
+            visual_source.replace("Approval status: `Not approved`", "Approval status: `Approved`"),
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
+        codes = {issue["code"] for issue in result["errors"]}
+        self.assertIn("missing_generated_options", codes)
+
+    def test_design_package_check_and_summarize_resolve_relative_package_under_repo_root(self) -> None:
+        repo = self.temp_root / "relative_design_repo"
+        repo.mkdir()
+        package = repo / "docs" / "designs" / "sample-dashboard"
+        self.run_json(
+            DESIGN_PACKAGE,
+            "create",
+            repo,
+            "sample-dashboard",
+            "--mode",
+            "new",
+            "--write",
+            "--json",
+        )
+
+        (package / "assets/source/selected-ui-design.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-desktop.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/screenshots/implementation-mobile.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (package / "assets/generated-options/round-01-option-a.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        visual_source = (package / "visual-source.md").read_text(encoding="utf-8")
+        (package / "visual-source.md").write_text(
+            visual_source.replace("Approval status: `Not approved`", "Approval status: `Approved`"),
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        result = self.run_json(DESIGN_PACKAGE, "check", repo, "docs/designs/sample-dashboard", "--json")
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["errors"], [])
+
+        summary = self.run_json(DESIGN_PACKAGE, "summarize", repo, "docs/designs/sample-dashboard", "--json")
+        self.assertEqual(summary["status"], "implementation-ready")
+        self.assertTrue(summary["approved_source_image"])
+        self.assertEqual(summary["screenshot_count"], 2)
+
+    def test_design_package_check_rejects_absolute_package_path_outside_docs_designs(self) -> None:
+        repo = self.temp_root / "outside_design_repo"
+        repo.mkdir()
+        outside = self.temp_root / "outside-package"
+        outside.mkdir()
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, outside.resolve(), "--json")
+        self.assertEqual(result["errors"][0]["code"], "design_package_outside_docs_designs")
+
+    def test_design_package_summarize_rejects_absolute_package_path_outside_docs_designs(self) -> None:
+        repo = self.temp_root / "outside_design_summary_repo"
+        repo.mkdir()
+        outside = self.temp_root / "outside-summary-package"
+        outside.mkdir()
+
+        result = self.run_json_fail(DESIGN_PACKAGE, "summarize", repo, outside.resolve(), "--json")
+        self.assertEqual(result["errors"][0]["code"], "design_package_outside_docs_designs")
+
+    def test_asset_guidance_includes_docs_designs_retrieval(self) -> None:
+        guidance = (
+            SKILLS / "compound-development-asset" / "references" / "agents-asset-guidance-template.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("asset-compounding-guidance:version=0.3.3", guidance)
+        self.assertIn("Design packages: `docs/designs/`", guidance)
+        self.assertIn("START_HERE.md", guidance)
+        self.assertIn("selected-ui-design.png", guidance)
+        self.assertIn("subagent-task-pack.md", guidance)
+        self.assertIn("If a design detail is missing", guidance)
+        self.assertIn("docs/designs", guidance)
+
+    def test_bootstrap_creates_docs_designs_directory(self) -> None:
+        repo = self.temp_root / "bootstrap_design_repo"
+        repo.mkdir()
+
+        result = self.run_json(BOOTSTRAP, repo, "--write", "--json")
+
+        self.assertIn("docs/designs", result["created_dirs"])
+        self.assertTrue((repo / "docs" / "designs").is_dir())
+        agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("Design packages: `docs/designs/`", agents_text)
+
     def test_asset_compounding_plugin_metadata_mentions_v032_audit_archive(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["version"], "0.3.2")
@@ -112,6 +527,8 @@ class AssetScriptTests(unittest.TestCase):
             "The reports do not include raw commands, prompts, diffs, command output, full repository paths, or secrets",
             readme,
         )
+        self.assertNotIn("The plugin provides six skills:", readme)
+        self.assertIn("The plugin provides seven skills:", readme)
 
         guidance = (
             SKILLS / "compound-development-asset" / "references" / "agents-asset-guidance-template.md"
@@ -128,7 +545,7 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("docs/milestones/INDEX.md", guidance)
         self.assertIn("Technical Debt Navigation", guidance)
         self.assertIn("docs/technical-debt/INDEX.md", guidance)
-        self.assertIn("asset-compounding-guidance:version=0.3.1", guidance)
+        self.assertIn("asset-compounding-guidance:version=0.3.3", guidance)
         self.assertIn("Repository Context Guidance", guidance)
         self.assertIn("runtime commands", guidance)
         self.assertIn("current active milestone", guidance)
@@ -1429,6 +1846,7 @@ Extract helper.
             "docs/superpowers/archives",
             "docs/superpowers/problems",
             "docs/superpowers/inbox",
+            "docs/designs",
             "docs/milestones",
             "docs/technical-debt",
         ])
@@ -1438,7 +1856,7 @@ Extract helper.
         self.assertIn("docs/superpowers/inbox/", agents_text)
         self.assertIn("docs/milestones/", agents_text)
         self.assertIn("docs/technical-debt/", agents_text)
-        self.assertIn("asset-compounding-guidance:version=0.3.1", agents_text)
+        self.assertIn("asset-compounding-guidance:version=0.3.3", agents_text)
         self.assertIn("Repository Context Guidance", agents_text)
         self.assertIn("Milestone Navigation", agents_text)
         self.assertIn("docs/milestones/INDEX.md", agents_text)
@@ -1520,7 +1938,7 @@ Extract helper.
         self.assertIn("## TypeScript 工程规则", agents_text)
         self.assertIn("## Milestone 导航", agents_text)
         self.assertIn("## 技术债导航", agents_text)
-        self.assertIn("asset-compounding-guidance:version=0.3.1", agents_text)
+        self.assertIn("asset-compounding-guidance:version=0.3.3", agents_text)
         self.assertIn("Repository Context Guidance", agents_text)
         self.assertIn("Milestone Navigation", agents_text)
         self.assertIn("docs/milestones/INDEX.md", agents_text)
@@ -2920,7 +3338,7 @@ Old managed block.
         self.assertEqual(stdout, "")
         agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("Existing project context.", agents_text)
-        self.assertIn("asset-compounding-guidance:version=0.3.1", agents_text)
+        self.assertIn("asset-compounding-guidance:version=0.3.3", agents_text)
         self.assertTrue((repo / "docs/superpowers").is_dir())
 
         state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
