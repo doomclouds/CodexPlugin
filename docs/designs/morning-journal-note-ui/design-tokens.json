@@ -1,0 +1,98 @@
+{
+  "colors": {
+    "canvas": "#f4eadc",
+    "canvasWarm": "#f8f1e7",
+    "paper": "#fff7ea",
+    "paperDeep": "#f3e4cf",
+    "ink": "#2f2a23",
+    "inkMuted": "#6f6559",
+    "inkSoft": "#9a8c7a",
+    "sage": "#7b8b61",
+    "sageDeep": "#5f7049",
+    "sageSoft": "#dfe6d2",
+    "sunrise": "#f0a85f",
+    "gold": "#d8b45f",
+    "coral": "#db735d",
+    "rose": "#d9a3aa",
+    "cyan": "#a9cdd0",
+    "lavender": "#b7a4d6",
+    "line": "rgba(92, 74, 52, 0.18)",
+    "lineStrong": "rgba(76, 58, 38, 0.28)",
+    "overlay": "rgba(255, 248, 236, 0.76)",
+    "shadowWarm": "rgba(88, 57, 24, 0.18)"
+  },
+  "typography": {
+    "displayFamily": "\"Cormorant Garamond\", \"Georgia\", serif",
+    "uiFamily": "\"Inter\", \"Segoe UI\", sans-serif",
+    "bodyFamily": "\"Inter\", \"Segoe UI\", sans-serif",
+    "display": {
+      "fontSize": "30px",
+      "lineHeight": "1.05",
+      "fontWeight": 600,
+      "letterSpacing": "0"
+    },
+    "sectionTitle": {
+      "fontSize": "22px",
+      "lineHeight": "1.18",
+      "fontWeight": 500,
+      "letterSpacing": "0"
+    },
+    "body": {
+      "fontSize": "15px",
+      "lineHeight": "1.55",
+      "fontWeight": 400,
+      "letterSpacing": "0"
+    },
+    "small": {
+      "fontSize": "12px",
+      "lineHeight": "1.35",
+      "fontWeight": 500,
+      "letterSpacing": "0"
+    },
+    "label": {
+      "fontSize": "12px",
+      "lineHeight": "1.2",
+      "fontWeight": 600,
+      "letterSpacing": "0.02em"
+    }
+  },
+  "spacing": {
+    "xs": "4px",
+    "sm": "8px",
+    "md": "12px",
+    "lg": "16px",
+    "xl": "24px",
+    "xxl": "32px",
+    "appGap": "20px",
+    "panelPadding": "22px",
+    "editorPaddingX": "42px",
+    "editorPaddingY": "32px"
+  },
+  "shape": {
+    "radiusXs": "4px",
+    "radiusSm": "6px",
+    "radiusPanel": "8px",
+    "radiusPill": "999px"
+  },
+  "elevation": {
+    "paper": "0 18px 42px rgba(88, 57, 24, 0.16), 0 2px 0 rgba(255,255,255,0.7) inset",
+    "panel": "0 14px 32px rgba(88, 57, 24, 0.12)",
+    "soft": "0 8px 18px rgba(88, 57, 24, 0.10)"
+  },
+  "breakpoints": {
+    "desktopSource": "1536px",
+    "wide": "1280px",
+    "narrow": "900px",
+    "mobile": "640px"
+  },
+  "motion": {
+    "durationFast": "140ms",
+    "durationBase": "220ms",
+    "easing": "cubic-bezier(.2,.8,.2,1)"
+  },
+  "assets": {
+    "manifest": "asset-manifest.json",
+    "source": "assets/source/selected-ui-design.png",
+    "prototypeAssetRoot": "prototype/src/assets/generated/"
+  }
+}

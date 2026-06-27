@@ -1,0 +1,172 @@
+{
+  "design_slug": "morning-journal-note-ui",
+  "source_image": "assets/source/selected-ui-design.png",
+  "asset_strategy": "atomic-generated-assets",
+  "notes": [
+    "The approved full-screen source image is visual truth, not a sprite sheet.",
+    "Final implementation assets are generated independently, then locally normalized to engineering dimensions.",
+    "Prototype copies live under prototype/src/assets/generated/."
+  ],
+  "assets": [
+    {
+      "id": "sunlit-desk-bg",
+      "role": "full-screen app background",
+      "target_region": "AppShell",
+      "display_intent": "cover 1536x1024 desktop viewport",
+      "target_size": "1536x1024",
+      "final_path": "assets/component-assets/sunlit-desk-bg-1536x1024.png",
+      "prototype_path": "prototype/src/assets/generated/sunlit-desk-bg-1536x1024.png",
+      "transparent": false
+    },
+    {
+      "id": "paper-texture-warm-ivory",
+      "role": "paper grain material",
+      "target_region": "WritingSanctuary, note slips",
+      "display_intent": "repeat or cover as subtle paper texture",
+      "target_size": "1024x1024",
+      "final_path": "assets/component-assets/paper-texture-warm-ivory-1024.png",
+      "prototype_path": "prototype/src/assets/generated/paper-texture-warm-ivory-1024.png",
+      "transparent": false
+    },
+    {
+      "id": "note-slip-standard",
+      "role": "blank paper slip",
+      "target_region": "RhythmPanel intention note",
+      "display_intent": "background behind editable UI text",
+      "target_size": "360x220",
+      "final_path": "assets/component-assets/note-slip-360x220.png",
+      "prototype_path": "prototype/src/assets/generated/note-slip-360x220.png",
+      "transparent": false
+    },
+    {
+      "id": "note-slip-small",
+      "role": "compact blank paper slip",
+      "target_region": "RhythmPanel mood and energy sections",
+      "display_intent": "background behind compact controls",
+      "target_size": "360x180",
+      "final_path": "assets/component-assets/note-slip-small-360x180.png",
+      "prototype_path": "prototype/src/assets/generated/note-slip-small-360x180.png",
+      "transparent": false
+    },
+    {
+      "id": "note-slip-tall",
+      "role": "tall blank paper slip",
+      "target_region": "RhythmPanel gratitude and focus sections",
+      "display_intent": "background behind list-style ritual content",
+      "target_size": "360x260",
+      "final_path": "assets/component-assets/note-slip-tall-360x260.png",
+      "prototype_path": "prototype/src/assets/generated/note-slip-tall-360x260.png",
+      "transparent": false
+    },
+    {
+      "id": "memory-morning",
+      "role": "memory thumbnail",
+      "target_region": "MemoryTrail selected today entry",
+      "display_intent": "shown around 104x68",
+      "target_size": "320x220",
+      "final_path": "assets/component-assets/memory-morning-320x220.png",
+      "prototype_path": "prototype/src/assets/generated/memory-morning-320x220.png",
+      "transparent": false
+    },
+    {
+      "id": "memory-grateful-heart",
+      "role": "memory thumbnail",
+      "target_region": "MemoryTrail previous entry",
+      "display_intent": "shown around 104x68",
+      "target_size": "320x220",
+      "final_path": "assets/component-assets/memory-grateful-heart-320x220.png",
+      "prototype_path": "prototype/src/assets/generated/memory-grateful-heart-320x220.png",
+      "transparent": false
+    },
+    {
+      "id": "memory-small-wins",
+      "role": "memory thumbnail",
+      "target_region": "MemoryTrail previous entry",
+      "display_intent": "shown around 104x68",
+      "target_size": "320x220",
+      "final_path": "assets/component-assets/memory-small-wins-320x220.png",
+      "prototype_path": "prototype/src/assets/generated/memory-small-wins-320x220.png",
+      "transparent": false
+    },
+    {
+      "id": "memory-reset-realign",
+      "role": "memory thumbnail",
+      "target_region": "MemoryTrail previous entry",
+      "display_intent": "shown around 104x68",
+      "target_size": "320x220",
+      "final_path": "assets/component-assets/memory-reset-realign-320x220.png",
+      "prototype_path": "prototype/src/assets/generated/memory-reset-realign-320x220.png",
+      "transparent": false
+    },
+    {
+      "id": "memory-slow-smooth",
+      "role": "memory thumbnail",
+      "target_region": "MemoryTrail previous entry",
+      "display_intent": "shown around 104x68",
+      "target_size": "320x220",
+      "final_path": "assets/component-assets/memory-slow-smooth-320x220.png",
+      "prototype_path": "prototype/src/assets/generated/memory-slow-smooth-320x220.png",
+      "transparent": false
+    },
+    {
+      "id": "memory-new-perspective",
+      "role": "memory thumbnail",
+      "target_region": "MemoryTrail previous entry",
+      "display_intent": "shown around 104x68",
+      "target_size": "320x220",
+      "final_path": "assets/component-assets/memory-new-perspective-320x220.png",
+      "prototype_path": "prototype/src/assets/generated/memory-new-perspective-320x220.png",
+      "transparent": false
+    },
+    {
+      "id": "pressed-flower-tape",
+      "role": "transparent paper decoration",
+      "target_region": "RhythmPanel note corners",
+      "display_intent": "absolute positioned decoration",
+      "target_size": "512x512",
+      "final_path": "assets/component-assets/pressed-flower-tape-512.png",
+      "prototype_path": "prototype/src/assets/generated/pressed-flower-tape-512.png",
+      "transparent": true
+    },
+    {
+      "id": "washi-tape-set",
+      "role": "transparent tape decorations",
+      "target_region": "Paper edges and note corners",
+      "display_intent": "absolute positioned decoration",
+      "target_size": "512x512",
+      "final_path": "assets/component-assets/washi-tape-set-512.png",
+      "prototype_path": "prototype/src/assets/generated/washi-tape-set-512.png",
+      "transparent": true
+    },
+    {
+      "id": "paperclip-set",
+      "role": "transparent stationery decoration",
+      "target_region": "RhythmPanel and note corners",
+      "display_intent": "absolute positioned decoration",
+      "target_size": "512x512",
+      "final_path": "assets/component-assets/paperclip-set-512.png",
+      "prototype_path": "prototype/src/assets/generated/paperclip-set-512.png",
+      "transparent": true
+    },
+    {
+      "id": "botanical-corner",
+      "role": "transparent botanical decoration",
+      "target_region": "AppShell corners and paper panels",
+      "display_intent": "large low-opacity corner decoration",
+      "target_size": "512x512",
+      "final_path": "assets/component-assets/botanical-corner-512.png",
+      "prototype_path": "prototype/src/assets/generated/botanical-corner-512.png",
+      "transparent": true
+    },
+    {
+      "id": "avatar-warm",
+      "role": "profile avatar",
+      "target_region": "TopBar saved/profile cluster",
+      "display_intent": "shown around 44x44",
+      "target_size": "160x160",
+      "final_path": "assets/component-assets/avatar-warm-160.png",
+      "prototype_path": "prototype/src/assets/generated/avatar-warm-160.png",
+      "transparent": false
+    }
+  ]
+}
