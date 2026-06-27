@@ -13,7 +13,7 @@ component details from pixels alone.
 | Scene | Asset | Contract | Purpose |
 | --- | --- | --- | --- |
 | Approved desktop source | `assets/source/selected-ui-design.png` | `contracts/visual-system.md` | Visual source of truth for layout, hierarchy, density, and mood. |
-| Generated asset board | `assets/components/asset-samples/asset-samples-preview.png` | `asset-manifest.json` | Shows the bitmap assets available for implementation. |
+| Generated asset board | `assets/component-assets/asset-samples-preview.png` | `asset-manifest.json` | Shows the bitmap assets available for implementation. |
 
 ## Rendered Components
 

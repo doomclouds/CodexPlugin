@@ -59,7 +59,7 @@ React Web 桌面优先界面，后续需要有窄屏响应式参考。
 - Approved source image:
   `assets/source/selected-ui-design.png`.
 - Generated implementation assets:
-  `asset-manifest.json` and `assets/components/asset-samples/`.
+  `asset-manifest.json` and `assets/component-assets/`.
 
 ## Interaction level
 

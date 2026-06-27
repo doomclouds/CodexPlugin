@@ -500,4 +500,3 @@ Compatibility path:
 5. **Morning Journal Compatibility Check**
    - validate current `docs/designs/morning-journal-note-ui`
    - update docs if migration is needed
-
