@@ -36,13 +36,13 @@ docs/designs/morning-journal-note-ui/
 | Asset or package | Contract source | Notes |
 | --- | --- | --- |
 | `assets/source/selected-ui-design.png` | `contracts/visual-system.md` | Visual truth for layout, hierarchy, and spacing. |
-| `assets/components/asset-samples/asset-samples-preview.png` | `component-board.md` | Human-readable preview of generated runtime assets. |
-| `assets/components/asset-samples/sunlit-desk-bg-1536x1024.png` | `contracts/layout-and-regions.md` | Runtime background material. |
-| `assets/components/asset-samples/paper-texture-warm-ivory-1024.png` | `contracts/component-contracts.md` | Center editor and paper surface material. |
-| `assets/components/asset-samples/note-slip-*.png` | `contracts/component-contracts.md` | Rhythm panel note surfaces. |
-| `assets/components/asset-samples/memory-*.png` | `contracts/component-contracts.md` | Memory rail thumbnails. |
-| `assets/components/asset-samples/*-512.png` | `contracts/visual-system.md` | Transparent stationery and botanical accents. |
-| `assets/components/asset-samples/avatar-warm-160.png` | `contracts/component-contracts.md` | TopBar profile avatar. |
+| `assets/component-assets/preview/contact-sheet.html` | `component-board.md` | Human-readable preview of generated runtime assets. |
+| `assets/component-assets/sunlit-desk-bg-1536x1024.png` | `contracts/layout-and-regions.md` | Runtime background material. |
+| `assets/component-assets/paper-texture-warm-ivory-1024.png` | `contracts/component-contracts.md` | Center editor and paper surface material. |
+| `assets/component-assets/note-slip-*.png` | `contracts/component-contracts.md` | Rhythm panel note surfaces. |
+| `assets/component-assets/memory-*.png` | `contracts/component-contracts.md` | Memory rail thumbnails. |
+| `assets/component-assets/*-512.png` | `contracts/visual-system.md` | Transparent stationery and botanical accents. |
+| `assets/component-assets/avatar-warm-160.png` | `contracts/component-contracts.md` | TopBar profile avatar. |
 | `design-tokens.json` | `contracts/design-tokens.md` | Reusable values that implementation should consume. |
 | `component-board.md` | `contracts/component-contracts.md` | Selected component patterns and variants. |
 

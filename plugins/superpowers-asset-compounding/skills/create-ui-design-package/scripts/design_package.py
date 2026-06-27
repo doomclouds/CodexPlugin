@@ -62,6 +62,7 @@ IGNORED_MARKDOWN_DIR_PARTS = {
     "__pycache__",
 }
 ASSET_STRATEGIES = {"none", "atomic-generated-assets"}
+BITMAP_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".avif"}
 ASSET_REQUIRED_KEYS = (
     "id",
     "role",
@@ -276,6 +277,59 @@ def parse_size(value: str) -> tuple[int, int] | None:
     return int(match.group(1)), int(match.group(2))
 
 
+def bitmap_asset_paths(package: Path) -> list[Path]:
+    matches: list[Path] = []
+    for relative_dir in ("assets/component-assets", "prototype/src/assets/generated"):
+        root = package / relative_dir
+        if not root.is_dir():
+            continue
+        matches.extend(
+            path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in BITMAP_SUFFIXES
+        )
+    return sorted(matches)
+
+
+def validate_manifest_png_asset(
+    asset_path: Path,
+    *,
+    expected_size: tuple[int, int] | None,
+    asset_label: object,
+    transparent: bool,
+    variant_label: str,
+) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+    if expected_size is None:
+        return errors
+    metadata = png_metadata(asset_path)
+    if metadata is None:
+        errors.append(
+            issue(
+                "asset_manifest_dimension_mismatch",
+                f"Asset {asset_label} {variant_label} must be a readable PNG file.",
+                asset_path,
+            )
+        )
+        return errors
+    width, height, has_alpha = metadata
+    if (width, height) != expected_size:
+        errors.append(
+            issue(
+                "asset_manifest_dimension_mismatch",
+                f"Asset {asset_label} {variant_label} is {width}x{height}, expected {expected_size[0]}x{expected_size[1]}.",
+                asset_path,
+            )
+        )
+    if transparent and not has_alpha:
+        errors.append(
+            issue(
+                "asset_manifest_transparent_without_alpha",
+                f"Asset {asset_label} {variant_label} is marked transparent but PNG has no alpha channel.",
+                asset_path,
+            )
+        )
+    return errors
+
+
 def has_approved_source(package: Path) -> bool:
     source_text = read_text(package / "visual-source.md").lower()
     return "approval status: `approved`" in source_text or "approval status: approved" in source_text
@@ -411,6 +465,17 @@ def validate_asset_manifest(package: Path) -> list[dict[str, str]]:
     if strategy == "none":
         if not manifest.get("reason"):
             errors.append(issue("asset_manifest_missing_reason", "asset_strategy none must include a reason.", path))
+        bitmap_paths = bitmap_asset_paths(package)
+        if bitmap_paths:
+            listed = ", ".join(asset_path.relative_to(package).as_posix() for asset_path in bitmap_paths)
+            errors.append(
+                issue(
+                    "asset_manifest_strategy_mismatch",
+                    "asset_strategy none cannot be used when runtime bitmap assets exist. "
+                    f"Switch to atomic-generated-assets and list them in the manifest: {listed}",
+                    path,
+                )
+            )
         return errors
 
     assets = manifest.get("assets")
@@ -451,34 +516,26 @@ def validate_asset_manifest(package: Path) -> list[dict[str, str]]:
                     path,
                 )
             )
-        if final_path is not None and final_path.is_file() and expected_size is not None:
-            metadata = png_metadata(final_path)
-            if metadata is None:
-                errors.append(
-                    issue(
-                        "asset_manifest_dimension_mismatch",
-                        f"Asset {asset_label} must be a readable PNG file.",
-                        final_path,
-                    )
+        if final_path is not None and final_path.is_file():
+            errors.extend(
+                validate_manifest_png_asset(
+                    final_path,
+                    expected_size=expected_size,
+                    asset_label=asset_label,
+                    transparent=asset.get("transparent") is True,
+                    variant_label="final asset",
                 )
-                continue
-            width, height, has_alpha = metadata
-            if (width, height) != expected_size:
-                errors.append(
-                    issue(
-                        "asset_manifest_dimension_mismatch",
-                        f"Asset {asset_label} is {width}x{height}, expected {expected_size[0]}x{expected_size[1]}.",
-                        final_path,
-                    )
+            )
+        if prototype_path is not None and prototype_path.is_file():
+            errors.extend(
+                validate_manifest_png_asset(
+                    prototype_path,
+                    expected_size=expected_size,
+                    asset_label=asset_label,
+                    transparent=asset.get("transparent") is True,
+                    variant_label="prototype asset",
                 )
-            if asset.get("transparent") is True and not has_alpha:
-                errors.append(
-                    issue(
-                        "asset_manifest_transparent_without_alpha",
-                        f"Asset {asset_label} is marked transparent but PNG has no alpha channel.",
-                        final_path,
-                    )
-                )
+            )
     return errors
 
 

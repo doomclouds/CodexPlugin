@@ -24,7 +24,7 @@ background with fake interaction.
 - Asset manifest:
   - `asset-manifest.json`
 - Asset preview:
-  - `assets/components/asset-samples/asset-samples-preview.png`
+  - `assets/component-assets/preview/contact-sheet.html`
 
 ## Required Reading Order
 
