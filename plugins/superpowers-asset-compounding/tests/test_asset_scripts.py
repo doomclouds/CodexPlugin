@@ -81,6 +81,29 @@ class AssetScriptTests(unittest.TestCase):
         self.write_png(package / "assets/screenshots/qa-comparison-desktop.png", 3072, 1024)
         self.approve_design_package(package)
 
+    def write_standard_manifest_and_qa(self, package: Path) -> None:
+        (package / "asset-manifest.json").write_text(
+            json.dumps(
+                {
+                    "design_slug": "sample-dashboard",
+                    "source_image": "assets/source/selected-ui-design.png",
+                    "asset_strategy": "none",
+                    "reason": "UI uses standard controls and icon library only.",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (package / "design-qa.md").write_text(
+            "# Design QA\n\n"
+            "- Source visual truth: `assets/source/selected-ui-design.png`\n"
+            "- Implementation screenshot: `assets/screenshots/implementation-desktop.png`\n"
+            "- final result: `passed`\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+
     def test_v030_skills_exist_with_required_metadata(self) -> None:
         milestone_skill = SKILLS / "manage-superpowers-milestone" / "SKILL.md"
         debt_skill = SKILLS / "manage-technical-debt" / "SKILL.md"
@@ -384,6 +407,7 @@ class AssetScriptTests(unittest.TestCase):
             encoding="utf-8",
             newline="\n",
         )
+        self.write_standard_manifest_and_qa(package)
 
         result = self.run_json(DESIGN_PACKAGE, "check", repo, package, "--json")
         self.assertEqual(result["status"], "pass")
@@ -490,6 +514,7 @@ class AssetScriptTests(unittest.TestCase):
         package = repo / "docs" / "designs" / "sample-dashboard"
         self.run_json(DESIGN_PACKAGE, "create", repo, "sample-dashboard", "--mode", "new", "--write", "--json")
         self.add_basic_design_evidence(package)
+        (package / "asset-manifest.json").unlink()
 
         result = self.run_json_fail(DESIGN_PACKAGE, "check", repo, package, "--json")
 
@@ -618,24 +643,7 @@ class AssetScriptTests(unittest.TestCase):
         package = repo / "docs" / "designs" / "sample-dashboard"
         self.run_json(DESIGN_PACKAGE, "create", repo, "sample-dashboard", "--mode", "new", "--write", "--json")
         self.add_basic_design_evidence(package)
-        (package / "asset-manifest.json").write_text(
-            json.dumps(
-                {
-                    "design_slug": "sample-dashboard",
-                    "source_image": "assets/source/selected-ui-design.png",
-                    "asset_strategy": "none",
-                    "reason": "UI uses standard controls and icon library only.",
-                },
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        (package / "design-qa.md").write_text(
-            "# Design QA\n\n- final result: `passed`\n\n",
-            encoding="utf-8",
-            newline="\n",
-        )
+        self.write_standard_manifest_and_qa(package)
         noisy_readme = package / "prototype/node_modules/debug/README.md"
         noisy_readme.parent.mkdir(parents=True)
         noisy_readme.write_text(
@@ -675,6 +683,7 @@ class AssetScriptTests(unittest.TestCase):
             encoding="utf-8",
             newline="\n",
         )
+        self.write_standard_manifest_and_qa(package)
 
         result = self.run_json(DESIGN_PACKAGE, "check", repo, "docs/designs/sample-dashboard", "--json")
         self.assertEqual(result["status"], "pass")
