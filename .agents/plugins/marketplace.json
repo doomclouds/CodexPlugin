@@ -5,10 +5,10 @@
   },
   "plugins": [
     {
-      "name": "drawio",
+      "name": "git-workflow",
       "source": {
         "source": "local",
-        "path": "./plugins/drawio"
+        "path": "./plugins/git-workflow"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -17,10 +17,10 @@
       "category": "Productivity"
     },
     {
-      "name": "git-workflow",
+      "name": "figure",
       "source": {
         "source": "local",
-        "path": "./plugins/git-workflow"
+        "path": "./plugins/figure"
       },
       "policy": {
         "installation": "AVAILABLE",

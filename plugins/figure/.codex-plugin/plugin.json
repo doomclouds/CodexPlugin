@@ -1,0 +1,37 @@
+{
+  "name": "figure",
+  "version": "0.1.0",
+  "description": "Local figure plugin for reconstructing diagram images into editable Visio deliverables.",
+  "author": {
+    "name": "doomclouds",
+    "url": "https://github.com/doomclouds"
+  },
+  "homepage": "https://github.com/doomclouds/CodexPlugin/tree/main/plugins/figure",
+  "repository": "https://github.com/doomclouds/CodexPlugin",
+  "license": "MIT",
+  "keywords": [
+    "figure",
+    "visio",
+    "diagram",
+    "reconstruction",
+    "editable"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Figure",
+    "shortDescription": "Rebuild diagram images as editable Visio figures.",
+    "longDescription": "Bundle local figure reconstruction skills for turning flowcharts, architecture diagrams, and paper-style module figures into editable Visio .vsdx files with exported SVG and PNG review assets.",
+    "developerName": "doomclouds",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Rebuild this diagram image as an editable Visio figure.",
+      "Convert this paper module figure into scene.json and .vsdx outputs.",
+      "Validate and render this Visio reconstruction scene."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

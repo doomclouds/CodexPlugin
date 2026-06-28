@@ -4,9 +4,11 @@
 
 当前包含：
 
-- `drawio`: 使用 draw.io 内置模板库和形状库生成图表的 Codex 插件。
+- `figure`: 将图像类图表重建为可编辑 Visio 图形的 Codex 插件。
 - `git-workflow`: 清理 stale branches、创建提交、推送并创建 PR 的 Git 工作流插件。
 - `superpowers-asset-compounding`: 将完成的需求、调试经验和复用线索沉淀为仓库内 Superpowers 资产的 Codex 插件。
+
+暂时不用的插件放在 `deprecated-plugins/`，不会出现在当前 marketplace 中。
 
 ## 安装商城
 
@@ -18,7 +20,7 @@ codex plugin marketplace list
 安装插件：
 
 ```powershell
-codex plugin add drawio@codex-plugin
+codex plugin add figure@codex-plugin
 codex plugin add git-workflow@codex-plugin
 codex plugin add superpowers-asset-compounding@codex-plugin
 ```
@@ -31,7 +33,7 @@ codex plugin add superpowers-asset-compounding@codex-plugin
 
 ```powershell
 codex plugin marketplace upgrade codex-plugin
-codex plugin add drawio@codex-plugin
+codex plugin add figure@codex-plugin
 codex plugin add git-workflow@codex-plugin
 codex plugin add superpowers-asset-compounding@codex-plugin
 ```
@@ -51,8 +53,10 @@ docs/
     plans/
     problems/
     specs/
-plugins/
+deprecated-plugins/
   drawio/
+plugins/
+  figure/
     .codex-plugin/
       plugin.json
     skills/
