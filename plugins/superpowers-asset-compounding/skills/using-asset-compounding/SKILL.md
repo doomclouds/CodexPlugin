@@ -44,6 +44,7 @@ First classify the asset event. Use the closest one:
 - `user-validation-feedback`: the user validated a build and reported a gap, correction, or missed behavior.
 - `ci-release-feedback`: CI, installer, release, tag, artifact, or hosted automation produced a warning, failure, or follow-up signal.
 - `post-release-warning`: a release completed but emitted warnings that may affect future releases.
+- `artifact-generation`: a meaningful artifact was generated, transformed, or exported and may need reusable evidence.
 - `cleanup-only`: purely mechanical cleanup with no reusable behavior or lesson.
 
 Ask these in order:
@@ -168,9 +169,17 @@ Use writer skills only after the route is clear:
 
 For the route decision, keep the output compact and auditable:
 
+Prefer the deterministic emitter when the script is available:
+
+```bash
+python <compound-development-asset>/scripts/emit_asset_gate.py --event-type implementation-boundary --route none --reason "<one concrete sentence>" --evidence "<tests, command, user feedback, or manual validation>"
+```
+
+Otherwise use this canonical flat shape:
+
 ```text
 asset_gate:
-  event_type: implementation-boundary | requirement-archive | bugfix-root-cause | user-validation-feedback | ci-release-feedback | post-release-warning | cleanup-only
+  event_type: implementation-boundary | requirement-archive | bugfix-root-cause | user-validation-feedback | ci-release-feedback | post-release-warning | artifact-generation | cleanup-only
   route: none | inbox | update-existing | archive | new-problem | both
 reason: <one concrete sentence>
 evidence: <tests, manual validation, CI/release result, or user feedback used>
@@ -179,6 +188,11 @@ asset_candidates: <none | extracted reviewer/subagent/tool/check script candidat
 deferred_signals: <none | weak signals to revisit later>
 next_step: <none | compound-development-asset | writer skill>
 ```
+
+The validator tolerates common YAML-like nested fields and list values, plus
+the legacy `artifact_generation` alias. Still prefer the emitter or canonical
+flat shape above so hook retry prompts, audit logs, and completion-gate checks
+all see the same field names.
 
 Even when the route is `none`, include the event type and concrete reason when
 the work was non-trivial. This makes skipped gates reviewable later.

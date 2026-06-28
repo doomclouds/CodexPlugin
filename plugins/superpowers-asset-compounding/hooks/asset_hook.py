@@ -224,7 +224,8 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
     message = str(event.get("last_assistant_message") or "")
     if "asset_gate:" in message:
         state = load_state(event)
-        validation = import_handoff_checks_module().validate_asset_gate_text(message)
+        handoff_checks = import_handoff_checks_module()
+        validation = handoff_checks.validate_asset_gate_text(message)
         if not validation.get("valid"):
             sanitized_validation = sanitize_validation_for_audit(validation)
             append_usage_event(
@@ -240,7 +241,11 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
             )
             return {
                 "decision": "block",
-                "reason": f"invalid asset_gate block: {validation_reason(validation)}",
+                "reason": (
+                    f"invalid asset_gate block: {validation_reason(validation)}\n"
+                    "Use this flat template:\n"
+                    f"{handoff_checks.asset_gate_template()}"
+                ),
             }
         append_usage_event(
             event,

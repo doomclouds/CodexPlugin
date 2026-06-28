@@ -19,6 +19,7 @@ ROUTER = SKILLS / "compound-development-asset" / "scripts" / "suggest_asset_rout
 FINDER = SKILLS / "compound-development-asset" / "scripts" / "find_related_assets.py"
 CHECKER = SKILLS / "compound-development-asset" / "scripts" / "check_indexes.py"
 COMPLETION_GATE = SKILLS / "compound-development-asset" / "scripts" / "check_completion_gate.py"
+EMIT_ASSET_GATE = SKILLS / "compound-development-asset" / "scripts" / "emit_asset_gate.py"
 ASSET_STATUS = SKILLS / "compound-development-asset" / "scripts" / "asset_status.py"
 ASSET_CLOSEOUT = SKILLS / "compound-development-asset" / "scripts" / "asset_closeout.py"
 MILESTONE_ASSETS = SKILLS / "compound-development-asset" / "scripts" / "milestone_assets.py"
@@ -94,12 +95,12 @@ class AssetScriptTests(unittest.TestCase):
 
     def test_asset_compounding_plugin_metadata_mentions_v032_audit_archive(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["version"], "0.3.2")
+        self.assertEqual(manifest["version"], "0.3.3")
         self.assertIn("milestones", manifest["interface"]["longDescription"])
         self.assertIn("technical debt", manifest["interface"]["longDescription"].lower())
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("v0.3.2", readme)
+        self.assertIn("v0.3.3", readme)
         self.assertIn("manage-superpowers-milestone", readme)
         self.assertIn("manage-technical-debt", readme)
         self.assertIn("structured `asset_gate` validation", readme)
@@ -2006,6 +2007,109 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["issues"], [])
 
+    def test_completion_gate_accepts_yaml_asset_gate_lists(self) -> None:
+        repo = self.temp_root / "yaml_gate_repo"
+        repo.mkdir()
+
+        result = self.run_json(
+            COMPLETION_GATE,
+            repo,
+            "--skip-structure-checks",
+            "--require-asset-gate",
+            "--handoff-text",
+            (
+                "```yaml\n"
+                "asset_gate:\n"
+                "  event_type: artifact-generation\n"
+                "  route: none\n"
+                "  reason: Generated an external Visio artifact without repo changes.\n"
+                "  evidence:\n"
+                "    - strict scene validation passed\n"
+                "    - exported c01_method_flow.vsdx\n"
+                "  related_assets: []\n"
+                "  asset_candidates: []\n"
+                "  deferred_signals: []\n"
+                "  next_step: none\n"
+                "```"
+            ),
+            "--json",
+        )
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["issues"], [])
+
+    def test_completion_gate_normalizes_asset_gate_aliases(self) -> None:
+        repo = self.temp_root / "alias_gate_repo"
+        repo.mkdir()
+
+        result = self.run_json(
+            COMPLETION_GATE,
+            repo,
+            "--skip-structure-checks",
+            "--require-asset-gate",
+            "--handoff-text",
+            (
+                "asset_gate:\n"
+                "  event_type: artifact_generation\n"
+                "  route: none\n"
+                "  reason: Generated external artifact.\n"
+                "  evidence: exported file\n"
+                "  related_assets: none\n"
+                "  asset_candidates: none\n"
+                "  deferred_signals: none\n"
+                "  next_step: none"
+            ),
+            "--json",
+        )
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["issues"], [])
+
+    def test_emit_asset_gate_outputs_valid_canonical_block(self) -> None:
+        repo = self.temp_root / "emit_gate_repo"
+        repo.mkdir()
+
+        emitted = subprocess.run(
+            [
+                sys.executable,
+                str(EMIT_ASSET_GATE),
+                "--event-type",
+                "artifact-generation",
+                "--route",
+                "none",
+                "--reason",
+                "Generated external Visio artifact.",
+                "--evidence",
+                "strict validation passed",
+                "--evidence",
+                "exported vsdx",
+                "--related-assets",
+                "none",
+                "--asset-candidates",
+                "none",
+                "--deferred-signals",
+                "none",
+                "--next-step",
+                "none",
+            ],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertIn("asset_gate:", emitted.stdout)
+        self.assertIn("event_type: artifact-generation", emitted.stdout)
+        result = self.run_json(
+            COMPLETION_GATE,
+            repo,
+            "--skip-structure-checks",
+            "--require-asset-gate",
+            "--handoff-text",
+            emitted.stdout,
+            "--json",
+        )
+        self.assertEqual(result["status"], "pass")
+
     def test_completion_gate_accepts_asset_candidates_and_asset_gate(self) -> None:
         repo = self.temp_root / "candidate_repo"
         repo.mkdir()
@@ -2412,6 +2516,9 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         payload = json.loads(stdout)
         self.assertEqual(payload["decision"], "block")
         self.assertIn("invalid asset_gate", payload["reason"])
+        self.assertIn("asset_gate:", payload["reason"])
+        self.assertIn("event_type: implementation-boundary", payload["reason"])
+        self.assertIn("evidence: <", payload["reason"])
         events = [
             json.loads(line)
             for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()

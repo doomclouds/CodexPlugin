@@ -2,10 +2,13 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.3.2` combines six skills with plugin-bundled Codex lifecycle hooks.
-This release adds structured `asset_gate` validation, `merge_only_closeout`
-auto-allow handling, report filters, session summaries, and audit log archiving
-for `v0.3.2` on top of the v0.3.1 managed-guidance refreshes, the
+Version `0.3.3` combines six skills with plugin-bundled Codex lifecycle hooks.
+This v0.3.3 release hardens structured `asset_gate` validation and output with
+a deterministic emitter, tolerant YAML-like list parsing, an
+`artifact-generation` event type, and retry templates for invalid gates. It
+builds on the v0.3.2 structured validation,
+`merge_only_closeout` auto-allow handling, report filters, session summaries,
+and audit log archiving, plus the v0.3.1 managed-guidance refreshes, the
 v0.3.0 milestone/debt navigation improvements, and the earlier hook launcher,
 audit reliability, report diagnostics, and closeout UX updates.
 
@@ -26,7 +29,10 @@ The plugin also bundles hooks under `hooks/hooks.json`:
 - `PreCompact` / `PostCompact`: preserve and restore compact pending asset state across compaction.
 
 The `Stop` hook validates structured `asset_gate` blocks before clearing
-closeout state. It intentionally auto-allows three low-value closeout cases:
+closeout state. It accepts the canonical flat shape, common YAML-like nested
+fields and list values, and the legacy `artifact_generation` alias while keeping
+the route enum strict. Invalid-gate prompts include a ready-to-fill template.
+It intentionally auto-allows three low-value closeout cases:
 push-only synchronization after work has already been closed out,
 `merge_only_closeout` sessions that only record a merge sync with no edits or
 verification, and explicit cleanup-only abandonment messages such as deleting
@@ -64,6 +70,12 @@ Before final handoff, merge, PR, or cleanup, run:
 
 ```powershell
 python <plugin>\skills\compound-development-asset\scripts\check_completion_gate.py . --json
+```
+
+To generate a validated closeout block instead of hand-writing field names, run:
+
+```powershell
+python <plugin>\skills\compound-development-asset\scripts\emit_asset_gate.py --event-type implementation-boundary --route none --reason "No reusable asset is needed for this boundary." --evidence "Focused tests passed."
 ```
 
 For completed requirement work, include the topic so spec+plan without archive
