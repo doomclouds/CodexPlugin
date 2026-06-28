@@ -23,6 +23,10 @@ The package must let a future Superpowers implementation subagent match the appr
 - No approved source image, no image-to-code.
 - No approved source image, no final design package.
 - No rendered screenshots, no fidelity claim.
+- For rich bitmap UI, no `asset-manifest.json`, no image-to-code.
+- No package-local runtime assets for manifest entries, no final design package.
+- No source-vs-implementation comparison and `design-qa.md`, no fidelity pass.
+- No dependency hygiene, no package validation.
 - No `subagent-task-pack.md`, no subagent handoff.
 - No `design-tokens.json`, no implementation-ready package.
 - No `visual-fidelity-checklist.md`, no completed design package.
@@ -92,7 +96,15 @@ docs/designs/<slug>/assets/source/selected-ui-design.png
 
 This image is the visual source of truth for image-to-code, contracts, tokens, and subagent implementation.
 
-### 6. Convert image to code
+### 6. Inventory and prepare runtime assets
+
+Catalog every image asset implied by the approved source image before image-to-code.
+
+If the UI depends on bitmap textures, photos, avatars, decorations, note surfaces, hero images, thumbnails, or non-standard visual assets, set `asset_strategy` to `atomic-generated-assets` in `asset-manifest.json`.
+
+The approved source image is visual truth, not a sprite sheet. Do not crop final runtime assets from the full-screen mock.
+
+### 7. Convert image to code
 
 Use Product Design image-to-code or an equivalent local frontend workflow.
 
@@ -104,7 +116,7 @@ docs/designs/<slug>/prototype/
 
 Only modify production application code when the user explicitly asks for production mode.
 
-### 7. Capture rendered QA evidence
+### 8. Capture rendered QA evidence
 
 Run the prototype or product UI and capture screenshots:
 
@@ -117,7 +129,7 @@ Store screenshots under:
 docs/designs/<slug>/assets/screenshots/
 ```
 
-### 8. Complete contracts and subagent pack
+### 9. Complete contracts and subagent pack
 
 Use the templates in `references/` to complete:
 
@@ -133,15 +145,23 @@ Use the templates in `references/` to complete:
 - `component-board.md`
 - `contracts/`
 - `guides/`
+- `asset-manifest.json`
 
 Docs must summarize confirmed visual and rendered evidence. Do not invent unapproved design rules.
 
-### 9. Validate the package
+### 10. Validate the package
 
 Run:
 
 ```powershell
 python <skill>\scripts\design_package.py check . docs/designs/<slug> --json
+```
+
+Use the asset helper when package assets need deterministic checks:
+
+```powershell
+python <skill>\scripts\design_assets.py check . docs/designs/<slug> --json
+python <skill>\scripts\design_assets.py preview . docs/designs/<slug> --output assets/component-assets/preview/contact-sheet.html --write --json
 ```
 
 Fix every error before handoff.
@@ -191,4 +211,5 @@ Load these only when needed:
 - `references/visual-fidelity-checklist-template.md`
 - `references/traceability-template.md`
 - `references/component-board-template.md`
+- `references/asset-manifest-schema.md`
 - `references/design-tokens-schema.md`

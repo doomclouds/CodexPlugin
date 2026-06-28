@@ -2,6 +2,7 @@
 
 ## 2026-06
 
+- [2026-06-27-create-ui-design-package-workflow-hardening-archives.md](./2026-06/2026-06-27-create-ui-design-package-workflow-hardening-archives.md): 归档 create-ui-design-package 工作流加固，新增资产 manifest、atomic asset 校验、依赖目录忽略、rendered QA 证据和 morning journal 兼容验证。
 - [2026-06-26-asset-compounding-audit-closeout-v0.3.2-archives.md](./2026-06/2026-06-26-asset-compounding-audit-closeout-v0.3.2-archives.md): 归档 superpowers-asset-compounding v0.3.2，补齐结构化 asset_gate 校验、merge-only 收尾放行、过滤化审计报表与审计日志归档能力。
 - [UI Design Package Skill](./2026-06/2026-06-26-ui-design-package-skill-archives.md): Adds a visual-first `docs/designs/<slug>/` package workflow with approved source images, reference prototypes, screenshots, tokens, contracts, and subagent task packs for Superpowers-compatible UI implementation.
 - [2026-06-13-asset-compounding-v0.3.0-milestones-and-debt-archives.md](./2026-06/2026-06-13-asset-compounding-v0.3.0-milestones-and-debt-archives.md): 归档 superpowers-asset-compounding v0.3.0/v0.3.1，新增 milestone 与 technical-debt 管理技能，并让版本化 AGENTS 导航覆盖项目上下文、状态回填和自动刷新边界。

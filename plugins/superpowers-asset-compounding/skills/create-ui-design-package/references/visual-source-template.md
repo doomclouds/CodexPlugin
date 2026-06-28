@@ -3,6 +3,7 @@
 - Design slug: `{{DESIGN_SLUG}}`
 - Approved source image: `assets/source/selected-ui-design.png`
 - Approval status: `Not approved`
+- Approval scope: `Not set`
 - Date: `{{DATE}}`
 
 ## Approval notes

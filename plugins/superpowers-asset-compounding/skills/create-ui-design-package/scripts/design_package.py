@@ -19,6 +19,7 @@ PACKAGE_FILES = (
     "subagent-task-pack.md",
     "visual-fidelity-checklist.md",
     "design-tokens.json",
+    "asset-manifest.json",
     "traceability.md",
     "component-board.md",
 )
@@ -28,8 +29,11 @@ PACKAGE_DIRS = (
     "assets/generated-options",
     "assets/source",
     "assets/screenshots",
-    "assets/components",
+    "assets/component-assets",
+    "assets/component-assets/raw",
+    "assets/component-assets/preview",
     "prototype",
+    "prototype/src/assets/generated",
 )
 CONTRACT_FILES = (
     "contracts/visual-system.md",
@@ -49,6 +53,27 @@ PLACEHOLDER_MARKERS = ("TODO", "TBD")
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 SAFE_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SECONDARY_SCREENSHOT_MARKERS = ("mobile", "narrow", "no-color", "no_color", "nocolor")
+IGNORED_MARKDOWN_DIR_PARTS = {
+    "node_modules",
+    ".npm-cache",
+    "dist",
+    ".vite",
+    "coverage",
+    "__pycache__",
+}
+ASSET_STRATEGIES = {"none", "atomic-generated-assets"}
+BITMAP_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".avif"}
+ASSET_REQUIRED_KEYS = (
+    "id",
+    "role",
+    "target_region",
+    "display_intent",
+    "target_size",
+    "final_path",
+    "prototype_path",
+    "transparent",
+)
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 def skill_root() -> Path:
@@ -177,6 +202,22 @@ def create_package(root: Path, slug: str, mode: str, source: str, write: bool) -
         )
     created.append(str(tokens_path))
 
+    manifest = {
+        "design_slug": slug,
+        "source_image": "assets/source/selected-ui-design.png",
+        "asset_strategy": "none",
+        "reason": "No runtime bitmap assets are required for this package.",
+        "assets": [],
+    }
+    manifest_path = package / "asset-manifest.json"
+    if write:
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    created.append(str(manifest_path))
+
     for relative in CONTRACT_FILES:
         target = package / relative
         content = (
@@ -213,6 +254,82 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
+def png_metadata(path: Path) -> tuple[int, int, bool] | None:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if len(data) < 33 or not data.startswith(PNG_SIGNATURE):
+        return None
+    if data[12:16] != b"IHDR":
+        return None
+    width = int.from_bytes(data[16:20], "big")
+    height = int.from_bytes(data[20:24], "big")
+    color_type = data[25]
+    has_alpha = color_type in {4, 6}
+    return width, height, has_alpha
+
+
+def parse_size(value: str) -> tuple[int, int] | None:
+    match = re.fullmatch(r"(\d+)x(\d+)", str(value).strip())
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def bitmap_asset_paths(package: Path) -> list[Path]:
+    matches: list[Path] = []
+    for relative_dir in ("assets/component-assets", "prototype/src/assets/generated"):
+        root = package / relative_dir
+        if not root.is_dir():
+            continue
+        matches.extend(
+            path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in BITMAP_SUFFIXES
+        )
+    return sorted(matches)
+
+
+def validate_manifest_png_asset(
+    asset_path: Path,
+    *,
+    expected_size: tuple[int, int] | None,
+    asset_label: object,
+    transparent: bool,
+    variant_label: str,
+) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+    if expected_size is None:
+        return errors
+    metadata = png_metadata(asset_path)
+    if metadata is None:
+        errors.append(
+            issue(
+                "asset_manifest_dimension_mismatch",
+                f"Asset {asset_label} {variant_label} must be a readable PNG file.",
+                asset_path,
+            )
+        )
+        return errors
+    width, height, has_alpha = metadata
+    if (width, height) != expected_size:
+        errors.append(
+            issue(
+                "asset_manifest_dimension_mismatch",
+                f"Asset {asset_label} {variant_label} is {width}x{height}, expected {expected_size[0]}x{expected_size[1]}.",
+                asset_path,
+            )
+        )
+    if transparent and not has_alpha:
+        errors.append(
+            issue(
+                "asset_manifest_transparent_without_alpha",
+                f"Asset {asset_label} {variant_label} is marked transparent but PNG has no alpha channel.",
+                asset_path,
+            )
+        )
+    return errors
+
+
 def has_approved_source(package: Path) -> bool:
     source_text = read_text(package / "visual-source.md").lower()
     return "approval status: `approved`" in source_text or "approval status: approved" in source_text
@@ -233,8 +350,12 @@ def validate_tokens(package: Path) -> list[dict[str, str]]:
     return errors
 
 
+def is_ignored_markdown_path(path: Path) -> bool:
+    return any(part in IGNORED_MARKDOWN_DIR_PARTS for part in path.parts)
+
+
 def markdown_files(package: Path) -> list[Path]:
-    return sorted(package.rglob("*.md"))
+    return sorted(path for path in package.rglob("*.md") if not is_ignored_markdown_path(path.relative_to(package)))
 
 
 def local_markdown_links(text: str) -> list[str]:
@@ -312,6 +433,124 @@ def validate_generated_option_references(package: Path, options: list[Path]) -> 
                 )
             )
     return errors
+
+
+def manifest_local_path(package: Path, value: object) -> Path | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    candidate = Path(value)
+    if candidate.is_absolute():
+        return None
+    resolved = (package / candidate).resolve()
+    if not resolved.is_relative_to(package.resolve()):
+        return None
+    return resolved
+
+
+def validate_asset_manifest(package: Path) -> list[dict[str, str]]:
+    path = package / "asset-manifest.json"
+    if not path.exists():
+        return [issue("missing_asset_manifest", "asset-manifest.json is required.", path)]
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return [issue("invalid_asset_manifest_json", f"asset-manifest.json is invalid JSON: {exc}", path)]
+
+    errors: list[dict[str, str]] = []
+    strategy = manifest.get("asset_strategy")
+    if strategy not in ASSET_STRATEGIES:
+        errors.append(issue("invalid_asset_manifest_strategy", f"Invalid asset_strategy: {strategy!r}.", path))
+        return errors
+
+    if strategy == "none":
+        if not manifest.get("reason"):
+            errors.append(issue("asset_manifest_missing_reason", "asset_strategy none must include a reason.", path))
+        bitmap_paths = bitmap_asset_paths(package)
+        if bitmap_paths:
+            listed = ", ".join(asset_path.relative_to(package).as_posix() for asset_path in bitmap_paths)
+            errors.append(
+                issue(
+                    "asset_manifest_strategy_mismatch",
+                    "asset_strategy none cannot be used when runtime bitmap assets exist. "
+                    f"Switch to atomic-generated-assets and list them in the manifest: {listed}",
+                    path,
+                )
+            )
+        return errors
+
+    assets = manifest.get("assets")
+    if not isinstance(assets, list) or not assets:
+        errors.append(issue("asset_manifest_missing_assets", "atomic-generated-assets requires a non-empty assets list.", path))
+        return errors
+
+    package_root = package.resolve()
+    for index, asset in enumerate(assets):
+        if not isinstance(asset, dict):
+            errors.append(issue("asset_manifest_invalid_asset", f"Asset entry {index} must be an object.", path))
+            continue
+        for key in ASSET_REQUIRED_KEYS:
+            if key not in asset:
+                errors.append(issue("asset_manifest_missing_required_key", f"Asset {index} missing required key: {key}", path))
+        final_path = manifest_local_path(package, asset.get("final_path"))
+        prototype_path = manifest_local_path(package, asset.get("prototype_path"))
+        if final_path is None:
+            errors.append(issue("asset_manifest_path_outside_package", f"Asset {index} final_path must be package-local.", path))
+        elif not final_path.is_relative_to(package_root):
+            errors.append(issue("asset_manifest_path_outside_package", f"Asset {index} final_path must stay inside the package.", path))
+        elif not final_path.is_file():
+            errors.append(issue("asset_manifest_missing_final_path", f"Missing final asset path: {asset.get('final_path')}", final_path))
+        if prototype_path is None:
+            errors.append(issue("asset_manifest_path_outside_package", f"Asset {index} prototype_path must be package-local.", path))
+        elif not prototype_path.is_relative_to(package_root):
+            errors.append(issue("asset_manifest_path_outside_package", f"Asset {index} prototype_path must stay inside the package.", path))
+        elif not prototype_path.is_file():
+            errors.append(issue("asset_manifest_missing_prototype_path", f"Missing prototype asset path: {asset.get('prototype_path')}", prototype_path))
+
+        expected_size = parse_size(str(asset.get("target_size", "")))
+        asset_label = asset.get("id", index)
+        if expected_size is None:
+            errors.append(
+                issue(
+                    "asset_manifest_dimension_mismatch",
+                    f"Asset {asset_label} target_size must use WIDTHxHEIGHT format.",
+                    path,
+                )
+            )
+        if final_path is not None and final_path.is_file():
+            errors.extend(
+                validate_manifest_png_asset(
+                    final_path,
+                    expected_size=expected_size,
+                    asset_label=asset_label,
+                    transparent=asset.get("transparent") is True,
+                    variant_label="final asset",
+                )
+            )
+        if prototype_path is not None and prototype_path.is_file():
+            errors.extend(
+                validate_manifest_png_asset(
+                    prototype_path,
+                    expected_size=expected_size,
+                    asset_label=asset_label,
+                    transparent=asset.get("transparent") is True,
+                    variant_label="prototype asset",
+                )
+            )
+    return errors
+
+
+def validate_design_qa(package: Path, screenshots: list[Path]) -> list[dict[str, str]]:
+    if not screenshots:
+        return []
+    path = package / "design-qa.md"
+    if not path.is_file():
+        return [issue("missing_design_qa_report", "design-qa.md is required after rendered screenshots exist.", path)]
+    text = path.read_text(encoding="utf-8").lower()
+    if "final result: `passed`" not in text and "final result: passed" not in text:
+        return [issue("design_qa_not_passed", "design-qa.md must include final result: passed.", path)]
+    if "source visual truth" not in text or "implementation screenshot" not in text:
+        return [issue("incomplete_design_qa_report", "design-qa.md must cite source and implementation evidence.", path)]
+    return []
 
 
 def check_package(root: Path, package: Path) -> dict[str, object]:
@@ -398,6 +637,8 @@ def check_package(root: Path, package: Path) -> dict[str, object]:
     else:
         errors.extend(validate_generated_option_references(package, generated_options))
 
+    errors.extend(validate_asset_manifest(package))
+    errors.extend(validate_design_qa(package, screenshots))
     errors.extend(validate_tokens(package))
     errors.extend(validate_links(package))
     errors.extend(validate_placeholders(package))

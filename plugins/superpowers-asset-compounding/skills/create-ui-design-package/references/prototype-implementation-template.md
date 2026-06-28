@@ -17,6 +17,7 @@ npm run dev
 - Capture the desktop screenshot after the prototype is fully rendered and interactive.
 - Capture the mobile or narrow screenshot after resizing to the target viewport.
 - Store the images in `assets/screenshots/` with stable filenames before marking the work done.
+- Keep any runtime-generated bitmap assets aligned with `asset-manifest.json`.
 
 ## Rendered screenshots
 
