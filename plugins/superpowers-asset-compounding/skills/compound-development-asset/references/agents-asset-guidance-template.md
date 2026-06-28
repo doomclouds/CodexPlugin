@@ -1,5 +1,5 @@
 <!-- asset-compounding-guidance:start -->
-<!-- asset-compounding-guidance:version=0.3.4 -->
+<!-- asset-compounding-guidance:version=0.3.1 -->
 ## Asset Compounding Retrieval Guide
 
 This repository uses hook-assisted asset compounding from the `superpowers-asset-compounding` plugin. Keep this `AGENTS.md` block as repository-specific retrieval anchors only; generic routing, plan-boundary checkpoints, closeout reminders, and `asset_gate` nudges belong to the plugin hooks and skills.
@@ -19,21 +19,10 @@ This managed block only provides asset retrieval anchors. Guidance scripts may r
 - Archives: `docs/superpowers/archives/`
 - Problems: `docs/superpowers/problems/`
 - Inbox: `docs/superpowers/inbox/`
-- Design packages: `docs/designs/`
 - Milestones: `docs/milestones/`
 - Technical debt: `docs/technical-debt/`
 
 If one of these directories does not exist, do not assume there is no asset. Search the existing directories first, then inspect current code and tests before guessing.
-
-### Design Package Navigation
-
-Use `docs/designs/` for visual-first UI design packages. These packages are project UI assets, not Superpowers specs or archives.
-
-For UI implementation work, read `docs/designs/<slug>/START_HERE.md` first. Then read `visual-source.md`, `design-tokens.json`, `component-board.md`, relevant `contracts/`, and `subagent-task-pack.md`.
-
-The approved source image at `assets/source/selected-ui-design.png` owns visual intent. The contracts own visual semantics, states, accessibility, responsive behavior, and platform constraints. The Superpowers spec and plan own the current implementation slice scope.
-
-If a design detail is missing, contradictory, or impossible to implement on the target platform, stop and report the gap instead of inventing palette, spacing, typography, layout regions, component density, or interaction states.
 
 ### Milestone Navigation
 
@@ -59,19 +48,18 @@ Do not duplicate reusable failure-mode narratives that belong in `docs/superpowe
 
 When continuing feature work, explaining prior decisions, or checking whether a requirement is already delivered:
 
-1. For UI work, search `docs/designs/` and read the matching `START_HERE.md`.
-2. Search `docs/superpowers/specs/` and `docs/superpowers/plans/` for the intended behavior and implementation plan.
-3. Search `docs/superpowers/archives/` for completed delivery history.
-4. Search `docs/superpowers/problems/` for stable reusable failure modes, root causes, and recovery rules.
-5. Search `docs/superpowers/inbox/` for uncertain but possibly reusable signals.
-6. Search `docs/milestones/` for current target stages, slice boundaries, acceptance signals, and progress evidence.
-7. Search `docs/technical-debt/` for unresolved engineering liabilities that may affect the next slice or refactor.
-8. If no asset answers the question, inspect current code and tests before guessing.
+1. Search `docs/superpowers/specs/` and `docs/superpowers/plans/` for the intended behavior and implementation plan.
+2. Search `docs/superpowers/archives/` for completed delivery history.
+3. Search `docs/superpowers/problems/` for stable reusable failure modes, root causes, and recovery rules.
+4. Search `docs/superpowers/inbox/` for uncertain but possibly reusable signals.
+5. Search `docs/milestones/` for current target stages, slice boundaries, acceptance signals, and progress evidence.
+6. Search `docs/technical-debt/` for unresolved engineering liabilities that may affect the next slice or refactor.
+7. If no asset answers the question, inspect current code and tests before guessing.
 
 Preferred keyword search:
 
 ```powershell
-rg -n "<topic-keyword>" docs/designs docs/superpowers/specs docs/superpowers/plans docs/superpowers/archives docs/superpowers/problems docs/superpowers/inbox docs/milestones docs/technical-debt
+rg -n "<topic-keyword>" docs/superpowers/specs docs/superpowers/plans docs/superpowers/archives docs/superpowers/problems docs/superpowers/inbox docs/milestones docs/technical-debt
 ```
 
 ### Hook-Owned Workflow

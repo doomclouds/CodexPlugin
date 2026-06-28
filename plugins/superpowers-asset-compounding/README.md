@@ -2,14 +2,14 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.4.1` combines seven skills with plugin-bundled Codex lifecycle hooks.
-This release adds the visual-first UI design package workflow for creating
-approved image references, design contracts, implementation guidance, and
-subagent task packs under `docs/designs/`. It builds on the v0.3.2
-structured `asset_gate` validation, `merge_only_closeout` auto-allow handling,
-report filters, session summaries, and audit log archiving.
+Version `0.3.2` combines six skills with plugin-bundled Codex lifecycle hooks.
+This release adds structured `asset_gate` validation, `merge_only_closeout`
+auto-allow handling, report filters, session summaries, and audit log archiving
+for `v0.3.2` on top of the v0.3.1 managed-guidance refreshes, the
+v0.3.0 milestone/debt navigation improvements, and the earlier hook launcher,
+audit reliability, report diagnostics, and closeout UX updates.
 
-The plugin provides seven skills:
+The plugin provides six skills:
 
 - `using-asset-compounding`: entry gate for deciding when preservation is needed.
 - `compound-development-asset`: router for `none`, `inbox`, `update-existing`, `new-problem`, `archive`, and `both`.
@@ -17,7 +17,6 @@ The plugin provides seven skills:
 - `write-superpowers-problem`: writer for problem and inbox assets.
 - `manage-superpowers-milestone`: writer and checker for project milestone ledgers.
 - `manage-technical-debt`: writer and checker for technical-debt records.
-- `create-ui-design-package`: visual-first UI design package creator for `docs/designs/<slug>/`.
 
 The plugin also bundles hooks under `hooks/hooks.json`:
 
@@ -38,7 +37,7 @@ stream with a dedicated reason code.
 
 After enabling or upgrading the plugin, review and trust the hook definitions with `/hooks`. Codex skips plugin-bundled command hooks until the current hook definition has been trusted.
 
-The core Superpowers assets live under `docs/superpowers/`. UI design packages live under `docs/designs/`.
+The intended project-local asset layout is `docs/superpowers/`.
 
 Initialize a repository with:
 
@@ -127,33 +126,6 @@ The reports do not include raw commands, prompts, diffs, command output, full re
 from problem/inbox signals. When a topic only matches problem or inbox assets,
 the requirement archive and completion gate are reported as `not_required`
 instead of forcing a missing archive finding.
-
-### UI Design Packages
-
-Use `create-ui-design-package` when UI work needs a user-approved visual baseline before Superpowers spec and implementation planning.
-
-The workflow is:
-
-```text
-brief -> visual iteration -> approved source image -> image-to-code
--> rendered QA -> design contracts -> subagent task pack
-```
-
-Generated project assets live under:
-
-```text
-docs/designs/<slug>/
-```
-
-Key files include `assets/source/selected-ui-design.png`, `design-tokens.json`,
-`component-board.md`, `contracts/`, `subagent-task-pack.md`, and
-`visual-fidelity-checklist.md`.
-
-Validation expects at least one persisted generated option under
-`assets/generated-options/`, plus rendered screenshot evidence with a desktop
-view and at least one mobile, narrow, or no-color companion view.
-
-Superpowers specs and plans should link the design package instead of duplicating it. UI implementation subagents should read `START_HERE.md` and `subagent-task-pack.md` before editing UI code.
 
 When this plugin is upgraded, bump `.codex-plugin/plugin.json`, commit and push
 the source plugin repository, then refresh the remote marketplace snapshot:

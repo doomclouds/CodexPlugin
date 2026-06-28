@@ -1,6 +1,6 @@
 {
   "name": "superpowers-asset-compounding",
-  "version": "0.4.1",
+  "version": "0.3.2",
   "description": "Local Superpowers asset-compounding plugin for routing reusable engineering knowledge into archives, problem notes, inbox triage, milestones, and technical-debt records.",
   "author": {
     "name": "doomclouds",
@@ -12,7 +12,6 @@
   "keywords": [
     "superpowers",
     "asset-compounding",
-    "design-packages",
     "archives",
     "problems",
     "inbox",
@@ -24,7 +23,7 @@
   "interface": {
     "displayName": "Superpowers Asset Compounding",
     "shortDescription": "Turn completed work and hard-won debugging lessons into reusable assets.",
-    "longDescription": "Bundle the local asset-compounding skill system as a reusable Superpowers companion plugin. It provides an entry gate, a router, an archive writer, a problem/inbox writer, milestone ledger and technical-debt record managers, deterministic completion-gate checks, and status/closeout scripts so agents can preserve completed requirement history, reusable failure modes, uncertain signals, milestones, technical debt, and retrieval guidance across repositories instead of leaving them buried in chat history or commit diffs. It also provides a visual-first UI design package skill for UI design packages that materializes approved images, reference prototypes, screenshots, tokens, contracts, and subagent task packs under docs/designs/ so Superpowers UI implementation work has a stable visual source of truth.",
+    "longDescription": "Bundle the local asset-compounding skill system as a reusable Superpowers companion plugin. It provides an entry gate, a router, an archive writer, a problem/inbox writer, milestone ledger and technical-debt record managers, deterministic completion-gate checks, and status/closeout scripts so agents can preserve completed requirement history, reusable failure modes, uncertain signals, milestones, technical debt, and retrieval guidance across repositories instead of leaving them buried in chat history or commit diffs.",
     "developerName": "doomclouds",
     "category": "Productivity",
     "websiteURL": "https://github.com/doomclouds/CodexPlugin/tree/main/plugins/superpowers-asset-compounding#readme",
@@ -39,8 +38,7 @@
       "Route this completed work into reusable Superpowers assets.",
       "Find related problem or archive assets before writing a new one.",
       "Create or update a project milestone ledger.",
-      "Create or close a technical-debt record.",
-      "Create a visual-first UI design package."
+      "Create or close a technical-debt record."
     ],
     "brandColor": "#B87333"
   }
