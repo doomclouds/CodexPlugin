@@ -1185,7 +1185,7 @@ class AssetScriptTests(unittest.TestCase):
             SKILLS / "compound-development-asset" / "references" / "agents-asset-guidance-template.md"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("asset-compounding-guidance:version=0.3.3", guidance)
+        self.assertIn("asset-compounding-guidance:version=0.3.4", guidance)
         self.assertIn("Design packages: `docs/designs/`", guidance)
         self.assertIn("START_HERE.md", guidance)
         self.assertIn("selected-ui-design.png", guidance)
@@ -1204,15 +1204,15 @@ class AssetScriptTests(unittest.TestCase):
         agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("Design packages: `docs/designs/`", agents_text)
 
-    def test_asset_compounding_plugin_metadata_mentions_v040_design_packages(self) -> None:
+    def test_asset_compounding_plugin_metadata_mentions_v041_design_packages(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["version"], "0.4.0")
+        self.assertEqual(manifest["version"], "0.4.1")
         self.assertIn("milestones", manifest["interface"]["longDescription"])
         self.assertIn("technical debt", manifest["interface"]["longDescription"].lower())
         self.assertIn("visual-first UI design package", manifest["interface"]["longDescription"])
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("Version `0.4.0`", readme)
+        self.assertIn("Version `0.4.1`", readme)
         self.assertIn("docs/designs/", readme)
         self.assertIn("manage-superpowers-milestone", readme)
         self.assertIn("manage-technical-debt", readme)
@@ -1244,7 +1244,7 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("docs/milestones/INDEX.md", guidance)
         self.assertIn("Technical Debt Navigation", guidance)
         self.assertIn("docs/technical-debt/INDEX.md", guidance)
-        self.assertIn("asset-compounding-guidance:version=0.3.3", guidance)
+        self.assertIn("asset-compounding-guidance:version=0.3.4", guidance)
         self.assertIn("Repository Context Guidance", guidance)
         self.assertIn("runtime commands", guidance)
         self.assertIn("current active milestone", guidance)
@@ -2555,7 +2555,7 @@ Extract helper.
         self.assertIn("docs/superpowers/inbox/", agents_text)
         self.assertIn("docs/milestones/", agents_text)
         self.assertIn("docs/technical-debt/", agents_text)
-        self.assertIn("asset-compounding-guidance:version=0.3.3", agents_text)
+        self.assertIn("asset-compounding-guidance:version=0.3.4", agents_text)
         self.assertIn("Repository Context Guidance", agents_text)
         self.assertIn("Milestone Navigation", agents_text)
         self.assertIn("docs/milestones/INDEX.md", agents_text)
@@ -2637,7 +2637,7 @@ Extract helper.
         self.assertIn("## TypeScript 工程规则", agents_text)
         self.assertIn("## Milestone 导航", agents_text)
         self.assertIn("## 技术债导航", agents_text)
-        self.assertIn("asset-compounding-guidance:version=0.3.3", agents_text)
+        self.assertIn("asset-compounding-guidance:version=0.3.4", agents_text)
         self.assertIn("Repository Context Guidance", agents_text)
         self.assertIn("Milestone Navigation", agents_text)
         self.assertIn("docs/milestones/INDEX.md", agents_text)
@@ -4037,7 +4037,7 @@ Old managed block.
         self.assertEqual(stdout, "")
         agents_text = (repo / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("Existing project context.", agents_text)
-        self.assertIn("asset-compounding-guidance:version=0.3.3", agents_text)
+        self.assertIn("asset-compounding-guidance:version=0.3.4", agents_text)
         self.assertTrue((repo / "docs/superpowers").is_dir())
 
         state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))

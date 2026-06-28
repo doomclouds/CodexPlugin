@@ -2,7 +2,7 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.4.0` combines seven skills with plugin-bundled Codex lifecycle hooks.
+Version `0.4.1` combines seven skills with plugin-bundled Codex lifecycle hooks.
 This release adds the visual-first UI design package workflow for creating
 approved image references, design contracts, implementation guidance, and
 subagent task packs under `docs/designs/`. It builds on the v0.3.2

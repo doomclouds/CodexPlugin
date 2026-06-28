@@ -1,5 +1,5 @@
 <!-- asset-compounding-guidance:start -->
-<!-- asset-compounding-guidance:version=0.3.3 -->
+<!-- asset-compounding-guidance:version=0.3.4 -->
 ## Asset Compounding Retrieval Guide
 
 This repository uses hook-assisted asset compounding from the `superpowers-asset-compounding` plugin. Keep this `AGENTS.md` block as repository-specific retrieval anchors only; generic routing, plan-boundary checkpoints, closeout reminders, and `asset_gate` nudges belong to the plugin hooks and skills.

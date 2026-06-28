@@ -1,6 +1,6 @@
 {
   "name": "superpowers-asset-compounding",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Local Superpowers asset-compounding plugin for routing reusable engineering knowledge into archives, problem notes, inbox triage, milestones, and technical-debt records.",
   "author": {
     "name": "doomclouds",
