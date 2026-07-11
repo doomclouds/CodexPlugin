@@ -20,16 +20,21 @@ ASSET_GATE_EVENT_ALIASES = {
 
 ASSET_GATE_ROUTES = ("none", "inbox", "update-existing", "archive", "new-problem", "both")
 
-REQUIRED_ASSET_GATE_FIELDS = (
+CORE_ASSET_GATE_FIELDS = (
     "event_type",
     "route",
     "reason",
     "evidence",
+)
+
+SUPPLEMENTAL_ASSET_GATE_FIELDS = (
     "related_assets",
     "asset_candidates",
     "deferred_signals",
     "next_step",
 )
+
+REQUIRED_ASSET_GATE_FIELDS = CORE_ASSET_GATE_FIELDS + SUPPLEMENTAL_ASSET_GATE_FIELDS
 
 
 def _normalize_empty_value(value: str) -> str:
@@ -96,7 +101,7 @@ def normalize_asset_gate_fields(fields: dict[str, str]) -> dict[str, str]:
     return normalized
 
 
-def validate_asset_gate_text(text: str) -> dict[str, object]:
+def validate_asset_gate_text(text: str, *, allow_defaults: bool = False) -> dict[str, object]:
     if "asset_gate:" not in text:
         return {
             "valid": False,
@@ -104,10 +109,19 @@ def validate_asset_gate_text(text: str) -> dict[str, object]:
             "fields": {},
             "missing": list(REQUIRED_ASSET_GATE_FIELDS),
             "invalid": [],
+            "defaultedFields": [],
         }
 
     fields = normalize_asset_gate_fields(parse_asset_gate_fields(text))
-    missing = [field for field in REQUIRED_ASSET_GATE_FIELDS if not fields.get(field)]
+    defaulted_fields: list[str] = []
+    if allow_defaults:
+        for field in SUPPLEMENTAL_ASSET_GATE_FIELDS:
+            if not fields.get(field):
+                fields[field] = "none"
+                defaulted_fields.append(field)
+        missing = [field for field in CORE_ASSET_GATE_FIELDS if not fields.get(field)]
+    else:
+        missing = [field for field in REQUIRED_ASSET_GATE_FIELDS if not fields.get(field)]
     invalid: list[str] = []
 
     event_type = fields.get("event_type")
@@ -123,6 +137,7 @@ def validate_asset_gate_text(text: str) -> dict[str, object]:
         "fields": fields,
         "missing": missing,
         "invalid": invalid,
+        "defaultedFields": defaulted_fields,
     }
 
 

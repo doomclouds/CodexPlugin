@@ -2,15 +2,16 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.3.3` combines six skills with plugin-bundled Codex lifecycle hooks.
-This v0.3.3 release hardens structured `asset_gate` validation and output with
-a deterministic emitter, tolerant YAML-like list parsing, an
-`artifact-generation` event type, and retry templates for invalid gates. It
-builds on the v0.3.2 structured validation,
-`merge_only_closeout` auto-allow handling, report filters, session summaries,
-and audit log archiving, plus the v0.3.1 managed-guidance refreshes, the
-v0.3.0 milestone/debt navigation improvements, and the earlier hook launcher,
-audit reliability, report diagnostics, and closeout UX updates.
+Version `0.5.0` combines six skills with plugin-bundled Codex lifecycle hooks.
+This v0.5.0 release makes hook runtime behavior dependable: per-session
+transactional state uses locking plus atomic replacement, states explicitly
+move between `active` and `closed` so reports archive only closed sessions, and
+verification normalizes nested or line-level exit codes into `passed`,
+`failed`, or `observed`. It also keeps Stop decisions semantic-first, adds
+platform-specific launch commands, and makes audit records build-identifiable.
+It builds on the v0.3.3 structured `asset_gate` validation, v0.3.2 report and
+archive tools, v0.3.1 managed-guidance refreshes, and v0.3.0 milestone/debt
+navigation improvements.
 
 The plugin provides six skills:
 
@@ -28,20 +29,29 @@ The plugin also bundles hooks under `hooks/hooks.json`:
 - `Stop`: asks the main agent for one continuation when meaningful work is ending without an `asset_gate` block.
 - `PreCompact` / `PostCompact`: preserve and restore compact pending asset state across compaction.
 
-The `Stop` hook validates structured `asset_gate` blocks before clearing
-closeout state. It accepts the canonical flat shape, common YAML-like nested
-fields and list values, and the legacy `artifact_generation` alias while keeping
-the route enum strict. Invalid-gate prompts include a ready-to-fill template.
-It intentionally auto-allows three low-value closeout cases:
-push-only synchronization after work has already been closed out,
-`merge_only_closeout` sessions that only record a merge sync with no edits or
-verification, and explicit cleanup-only abandonment messages such as deleting
-or abandoning obsolete asset work. Each case is still recorded in the audit
-stream with a dedicated reason code.
+The `Stop` hook first asks whether the session has meaningful closeout work,
+then validates a structured `asset_gate` before clearing state. It accepts the
+canonical flat shape, common YAML-like nested fields and list values, and the
+legacy `artifact_generation` alias while keeping the route enum strict. Core
+fields (`event_type`, `route`, `reason`, `evidence`) always remain required;
+Stop may default only omitted supplemental fields to `none` and records that
+choice. It allows no-work, push-only, and `merge_only_closeout` cases, but a
+cleanup must use an explicit valid `cleanup-only` / `none` gate rather than a
+keyword in free text.
 
 `UserPromptSubmit` is intentionally not part of the asset lifecycle. It is better suited for prompt risk checks than workflow routing.
 
-After enabling or upgrading the plugin, review and trust the hook definitions with `/hooks`. Codex skips plugin-bundled command hooks until the current hook definition has been trusted.
+Each registration uses a POSIX `command` and Windows `commandWindows` override.
+Windows prefers a real non-WindowsApps Python interpreter through
+`run_asset_hook.cmd`, then falls back to Git Bash when no direct interpreter is
+available; the POSIX launcher remains `run_asset_hook.sh`. After enabling or
+upgrading the plugin, review and trust the hook definitions with `/hooks`.
+Codex skips plugin-bundled command hooks until the current hook definition has
+been trusted.
+
+The POSIX launcher resolves the hook from the host-provided `PLUGIN_ROOT` first
+and does not require Git's `dirname` or `tr` utilities to be present on `PATH`.
+It keeps a standard `$0`-based fallback only for standalone invocation.
 
 The intended project-local asset layout is `docs/superpowers/`.
 
@@ -111,11 +121,19 @@ verification results, user feedback, and plan-boundary checkpoints, then routes
 or defers them at the final `asset_gate`.
 
 Hook usage events are written under `PLUGIN_DATA` as per-session `events.jsonl`
-files in `<project>--<session-id>` directories. Appends are serialized with a per-file lock so concurrent hook processes
-do not interleave JSONL lines. Events record structured metadata such as hook event name, decision,
-reason code, command kind, command hash/length, hook duration, exit code, signal
-names, per-tool signal deltas, asset-write markers, and candidate counts. They do
-not record prompts, diffs, command output, full commands, or full repository paths.
+files in `<project>--<session-id>` directories. State changes use a per-session
+lock transaction plus atomic replacement; JSONL appends use the same lock
+discipline so concurrent hook processes do not lose state or interleave lines.
+Persisted state keeps only repository name/hash, command kind/hash/length, and
+safe bootstrap actions or known relative directories; it does not retain a raw
+working directory, full verification command, bootstrap path, exception text,
+or tool response.
+Events record structured metadata such as hook event name, decision, reason
+code, command kind, command hash/length, hook duration, exit code, signal
+names, per-tool signal deltas, asset-write markers, candidate counts,
+`launcherKind`, `pluginVersion`, and `pluginFingerprint`. They do not record
+prompts, diffs, command output, full commands, raw tool responses, or full
+repository paths.
 
 Summarize collected usage data with:
 
@@ -127,11 +145,17 @@ python <plugin>\hooks\asset_hook_report.py <PLUGIN_DATA> archive --before 2026-0
 python <plugin>\hooks\asset_hook_report.py <PLUGIN_DATA> archive --before 2026-06-20 --json
 ```
 
-The report includes unknown command tool/repo counts, top unknown command
-clusters keyed by command hash and length, filtered stop-gate diagnostics,
-session signal summaries, and invalid JSONL line/file counts. It intentionally
-omits raw commands, prompts, diffs, command output, full repository paths, and
-secrets even if an event accidentally contains one.
+Archive copies are staged without holding a long lifecycle lock. Before publish
+and source deletion, the report takes the same per-session lock as hooks,
+rechecks closed lifecycle and event hash, then atomically publishes the stage.
+Reactivated or changed sessions stay in source and are listed as retained.
+
+The report includes report filters, unknown command tool/repo counts, top
+unknown command clusters keyed by command hash and length, filtered stop-gate
+diagnostics, session summaries, version/build/launcher aggregates, verification
+status counts, active/closed/legacy state counts, and invalid JSONL line/file
+counts. It intentionally omits raw commands, prompts, diffs, command output,
+full repository paths, and secrets even if an event accidentally contains one.
 The reports do not include raw commands, prompts, diffs, command output, full repository paths, or secrets.
 
 `asset_status.py --topic <topic>` distinguishes completed requirement status
