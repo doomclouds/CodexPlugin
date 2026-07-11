@@ -1,5 +1,10 @@
 # Superpowers Problem Index
 
+## 2026-07
+
+- [2026-07-11-hook-state-transaction-and-lifecycle-problem.md](./2026-07/2026-07-11-hook-state-transaction-and-lifecycle-problem.md): 多个 hook 进程更新同一 state 时必须以事务锁和明确生命周期避免丢更新与归档误判。
+- [2026-07-11-hook-tool-response-outcome-normalization-problem.md](./2026-07/2026-07-11-hook-tool-response-outcome-normalization-problem.md): 退出码可能嵌套在工具响应中，必须有边界地归一化为 passed、failed 或 observed。
+
 ## 2026-06
 
 - [2026-06-13-windowsapps-python-alias-hook-hang-problem.md](./2026-06/2026-06-13-windowsapps-python-alias-hook-hang-problem.md): Windows hook 不能裸调用 `python`，否则 WindowsApps alias 可能让 hook 卡在脚本启动层且没有审计失败事件。

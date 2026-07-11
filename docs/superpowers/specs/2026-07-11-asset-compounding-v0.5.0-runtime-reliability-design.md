@@ -30,11 +30,13 @@
 - 锁文件沿用 JSONL 的跨平台文件锁；写入在同目录临时文件完成后使用 os.replace。
 - 新 state 使用 schemaVersion 2，新增 lifecycle: active 或 closed、closedAtUtc、pluginVersion、pluginFingerprint。
 - SessionStart 和 PostToolUse 将 closed state 重开；所有允许结束的 Stop 分支关闭 state。
-- report 只把 lifecycle 为 closed 的 state 视为可归档。缺少 lifecycle 的历史 state 保守视为 current，不自动移动。
+- report 只把 schema 2 且 lifecycle 为 closed 的 state 视为可归档。缺少/损坏/未知 schema 的历史 state 保守视为 current，不自动移动。
+- hook 与 archive 共享会话生命周期锁；archive 先 stage 快照，再在短锁窗口复核 lifecycle 与事件 hash 后发布和删除源，重开的会话保留在源目录。
+- state 仅保存 repoName/repoHash、验证命令 kind/hash/length 和安全 bootstrap 摘要；不保存 cwd、完整命令、bootstrap 绝对路径、异常文本或原始响应。
 
 ### 验证结果正规化
 
-- extract_exit_code 支持顶层、嵌套 mapping/list 和严格行级 Exit code: 整数或 Return code: 整数。
+- extract_exit_code 支持顶层、嵌套 mapping/list 和严格行级 Exit code: 整数或 Return code: 整数，并受固定深度、节点数和文本扫描长度约束。
 - 状态为 passed、failed、observed；observed 使用 verification-observed signal，不再冒充完整验证。
 - 事件仅保存 exitCode、exitCodeSource、响应形态标签，不保存原始 response、工具输出、提示或完整命令。
 
@@ -50,6 +52,8 @@
 ### 平台启动与审计身份
 
 - hooks.json 使用 POSIX shell launcher 作为 command，Windows cmd launcher 作为 commandWindows。
+- POSIX launcher 本身保持 `sh` 兼容，避免把 Bash 专用语法交给 `sh` 注册命令。
+- POSIX launcher 优先从宿主注入的 `PLUGIN_ROOT` 定位 hook，并避免依赖 Git 工具目录中的 `dirname` 或 `tr`；仅在独立调用时保留 `$0` 路径回退。
 - Windows cmd 优先运行实际可执行且非 WindowsApps alias 的 Python；找不到时保留 Git Bash 到 shell launcher 的 fallback。
 - launcher 传入 ASSET_HOOK_LAUNCHER；事件记录 launcherKind。
 - 每条事件追加 pluginVersion 和基于 plugin.json、hooks.json、asset_hook.py 计算的 pluginFingerprint。
@@ -76,6 +80,7 @@
 4. 嵌套和文本退出码能得到 passed 或 failed；未知响应只得到 observed。
 5. no-work 加残缺 gate 允许；hard work 缺核心字段仍 block；仅缺辅助字段时 Stop 允许并记 defaultedFields。
 6. remove failed; issue unresolved 不会绕过 gate；有效 cleanup-only / none gate 可以关闭。
-7. POSIX 与 Windows 都有真实注册命令；Windows 在有真实 Python 时走直连。
+7. POSIX 与 Windows 都有真实注册命令；Windows 在有真实 Python 时走直连，精简 Git `sh.exe` 环境即使没有 Git 工具目录也可启动 POSIX launcher。
 8. 事件与 report 能显示版本、指纹、launcher 和验证状态，且不泄漏原始响应。
-9. 全量 unittest、manifest JSON、completion gate、diff check 通过，README 和 release assets 同步到 0.5.0。
+9. state 不泄漏 cwd、完整命令、bootstrap 绝对路径或异常文本；损坏 UTF-8 state 保守保护并可由 hook 恢复。
+10. 全量 unittest、manifest JSON、completion gate、diff check 通过，README 和 release assets 同步到 0.5.0。

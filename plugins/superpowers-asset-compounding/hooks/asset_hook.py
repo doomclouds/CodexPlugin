@@ -115,6 +115,8 @@ def stdin_timeout_ms() -> int:
 def handle_session_start(event: dict[str, Any]) -> dict[str, Any] | None:
     if not repo_has_assets(event):
         return None
+    with state_transaction(event) as state:
+        reopen_session_state(state)
     append_usage_event(event, "SessionStart", decision="context", reason_code="asset_repo_detected")
     return additional_context(
         "SessionStart",
@@ -131,53 +133,62 @@ def handle_session_start(event: dict[str, Any]) -> dict[str, Any] | None:
 def handle_post_tool_use(event: dict[str, Any]) -> dict[str, Any] | None:
     if not repo_has_assets(event):
         return None
-    state = load_state(event)
     tool_name = str(event.get("tool_name", ""))
     tool_input = event.get("tool_input")
     command = extract_command(tool_input).lower()
-    signals = set(state.get("meaningfulWorkSignals", []))
-    signals_before = set(signals)
-    asset_files_changed_this_tool = False
+    verification_command = is_verification_command(command)
+    exit_code, exit_code_source = extract_exit_code(event.get("tool_response")) if verification_command else (None, None)
+    verification_result = verification_status(exit_code) if verification_command else None
+    asset_files_changed_this_tool = asset_files_changed(tool_name, tool_input, command)
+    command_kind = "plan-update" if is_plan_update_tool(tool_name) else classify_command_kind(command, tool_name)
     asset_bootstrap_this_tool: dict[str, Any] | None = None
-    plan_update_gate_due_before = bool(state.get("assetGateDue"))
-    plan_update_reminder_due = False
-
-    if tool_name == "apply_patch":
-        signals.add("edited-files")
-    if is_plan_update_tool(tool_name):
-        signals.add("plan-boundary")
-        if plan_update_gate_due_before:
-            plan_update_reminder_due = True
-        if plan_has_completed_step(tool_input):
-            state["assetGateDue"] = True
-    if is_verification_command(command):
-        exit_code = extract_exit_code(event.get("tool_response"))
-        status = verification_status(exit_code)
-        signals.add("verification-failed" if status == "failed" else "verification-ran")
-        evidence = {
-            "command": summarize_command(command),
-            "status": status,
-            "summary": "tool output observed by PostToolUse",
-        }
-        if exit_code is not None:
-            evidence["exitCode"] = exit_code
-        state.setdefault("verificationEvidence", []).append(
-            evidence
-        )
-    if is_git_closeout_command(command):
-        signals.add("git-closeout")
-        state["lastGitCloseoutKind"] = classify_command_kind(command)
-    if asset_files_changed(tool_name, tool_input, command):
-        asset_files_changed_this_tool = True
-        state["assetFilesChanged"] = True
+    if asset_files_changed_this_tool:
         bootstrap_result = bootstrap_asset_guidance(event)
         if bootstrap_result is not None:
-            state["assetBootstrap"] = bootstrap_result
             asset_bootstrap_this_tool = bootstrap_result
 
-    state["meaningfulWorkSignals"] = sorted(signals)
-    save_state(event, state)
-    command_kind = "plan-update" if is_plan_update_tool(tool_name) else classify_command_kind(command, tool_name)
+    with state_transaction(event) as state:
+        reopen_session_state(state)
+        signals = set(state.get("meaningfulWorkSignals", []))
+        signals_before = set(signals)
+        plan_update_gate_due_before = bool(state.get("assetGateDue"))
+        plan_update_reminder_due = False
+
+        if tool_name == "apply_patch":
+            signals.add("edited-files")
+        if is_plan_update_tool(tool_name):
+            signals.add("plan-boundary")
+            if plan_update_gate_due_before:
+                plan_update_reminder_due = True
+            if plan_has_completed_step(tool_input):
+                state["assetGateDue"] = True
+        if verification_command:
+            signals.add(verification_signal(str(verification_result)))
+            evidence = {
+                "commandKind": command_kind,
+                "commandHash": stable_hash(command),
+                "commandLength": len(command),
+                "status": verification_result,
+            }
+            if exit_code is not None:
+                evidence["exitCode"] = exit_code
+            if exit_code_source is not None:
+                evidence["exitCodeSource"] = exit_code_source
+            state.setdefault("verificationEvidence", []).append(evidence)
+        if is_git_closeout_command(command):
+            signals.add("git-closeout")
+            state["lastGitCloseoutKind"] = classify_command_kind(command)
+        if asset_files_changed_this_tool:
+            state["assetFilesChanged"] = True
+            if asset_bootstrap_this_tool is not None:
+                state["assetBootstrap"] = asset_bootstrap_this_tool
+
+        state["meaningfulWorkSignals"] = sorted(signals)
+        state_signals = list(state["meaningfulWorkSignals"])
+        state_asset_files_changed = bool(state.get("assetFilesChanged"))
+        state_asset_bootstrap = state.get("assetBootstrap")
+        state_asset_gate_due = bool(state.get("assetGateDue"))
+
     append_usage_event(
         event,
         "PostToolUse",
@@ -188,21 +199,20 @@ def handle_post_tool_use(event: dict[str, Any]) -> dict[str, Any] | None:
         commandPresent=bool(command),
         commandHash=stable_hash(command) if command else None,
         commandLength=len(command) if command else None,
-        exitCode=extract_exit_code(event.get("tool_response")),
-        verificationStatus=verification_status(extract_exit_code(event.get("tool_response")))
-        if is_verification_command(command)
-        else None,
+        exitCode=exit_code,
+        exitCodeSource=exit_code_source,
+        verificationStatus=verification_result,
         signalsAdded=sorted(signals - signals_before),
-        signals=state["meaningfulWorkSignals"],
+        signals=state_signals,
         assetFilesChangedThisTool=asset_files_changed_this_tool,
-        assetFilesChanged=bool(state.get("assetFilesChanged")),
-        assetBootstrap=state.get("assetBootstrap", {}).get("action")
-        if isinstance(state.get("assetBootstrap"), dict)
+        assetFilesChanged=state_asset_files_changed,
+        assetBootstrap=state_asset_bootstrap.get("action")
+        if isinstance(state_asset_bootstrap, dict)
         else None,
         assetBootstrapThisTool=asset_bootstrap_this_tool.get("action")
         if isinstance(asset_bootstrap_this_tool, dict)
         else None,
-        assetGateDue=bool(state.get("assetGateDue")),
+        assetGateDue=state_asset_gate_due,
         assetGateReminder=plan_update_reminder_due if is_plan_update_tool(tool_name) else None,
     )
     if plan_update_reminder_due:
@@ -222,155 +232,139 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
     if not repo_has_assets(event):
         return None
     message = str(event.get("last_assistant_message") or "")
-    if "asset_gate:" in message:
-        state = load_state(event)
-        handoff_checks = import_handoff_checks_module()
-        validation = handoff_checks.validate_asset_gate_text(message)
-        if not validation.get("valid"):
-            sanitized_validation = sanitize_validation_for_audit(validation)
+    with state_transaction(event) as state:
+        if not has_stop_closeout_work(state):
             append_usage_event(
                 event,
                 "Stop",
-                decision="block",
-                reason_code="invalid_asset_gate",
+                decision="allow",
+                reason_code="no_meaningful_work",
+                hasAssetGate="asset_gate:" in message,
+                hasMeaningfulWork=False,
+            )
+            close_session_state(state)
+            return None
+        if "asset_gate:" in message:
+            handoff_checks = import_handoff_checks_module()
+            validation = handoff_checks.validate_asset_gate_text(message, allow_defaults=True)
+            if not validation.get("valid"):
+                sanitized_validation = sanitize_validation_for_audit(validation)
+                append_usage_event(
+                    event,
+                    "Stop",
+                    decision="block",
+                    reason_code="invalid_asset_gate",
+                    hasAssetGate=True,
+                    hasMeaningfulWork=has_stop_closeout_work(state),
+                    signals=state.get("meaningfulWorkSignals", []),
+                    candidateCount=len(state.get("subagentCandidates", [])),
+                    validation=sanitized_validation,
+                )
+                return {
+                    "decision": "block",
+                    "reason": (
+                        f"invalid asset_gate block: {validation_reason(validation)}\n"
+                        "Use this flat template:\n"
+                        f"{handoff_checks.asset_gate_template()}"
+                    ),
+                }
+            defaulted_fields = list(validation.get("defaultedFields") or [])
+            append_usage_event(
+                event,
+                "Stop",
+                decision="allow",
+                reason_code="asset_gate_present",
                 hasAssetGate=True,
                 hasMeaningfulWork=has_stop_closeout_work(state),
                 signals=state.get("meaningfulWorkSignals", []),
                 candidateCount=len(state.get("subagentCandidates", [])),
-                validation=sanitized_validation,
+                defaultedFields=defaulted_fields or None,
+            )
+            close_session_state(state)
+            return None
+        if is_push_only_closeout(state):
+            append_usage_event(
+                event,
+                "Stop",
+                decision="allow",
+                reason_code="push_only_closeout",
+                hasAssetGate=False,
+                hasMeaningfulWork=True,
+                signals=state.get("meaningfulWorkSignals", []),
+            )
+            close_session_state(state)
+            return None
+        if is_merge_only_closeout(state):
+            append_usage_event(
+                event,
+                "Stop",
+                decision="allow",
+                reason_code="merge_only_closeout",
+                hasAssetGate=False,
+                hasMeaningfulWork=True,
+                signals=state.get("meaningfulWorkSignals", []),
+            )
+            close_session_state(state)
+            return None
+        if event.get("stop_hook_active") or state.get("stopContinuationUsed"):
+            append_usage_event(
+                event,
+                "Stop",
+                decision="warn",
+                reason_code="continuation_already_used",
+                hasAssetGate=False,
+                hasMeaningfulWork=True,
+                signals=state.get("meaningfulWorkSignals", []),
+                candidateCount=len(state.get("subagentCandidates", [])),
             )
             return {
-                "decision": "block",
-                "reason": (
-                    f"invalid asset_gate block: {validation_reason(validation)}\n"
-                    "Use this flat template:\n"
-                    f"{handoff_checks.asset_gate_template()}"
-                ),
+                "systemMessage": (
+                    "Asset-compounding closeout still appears to be missing an "
+                    "asset_gate block, but the Stop hook already continued once."
+                )
             }
+
+        state["stopContinuationUsed"] = True
         append_usage_event(
             event,
             "Stop",
-            decision="allow",
-            reason_code="asset_gate_present",
-            hasAssetGate=True,
-            hasMeaningfulWork=has_stop_closeout_work(state),
-            signals=state.get("meaningfulWorkSignals", []),
-            candidateCount=len(state.get("subagentCandidates", [])),
-        )
-        clear_closeout_state(state)
-        save_state(event, state)
-        return None
-    state = load_state(event)
-    if not has_stop_closeout_work(state):
-        append_usage_event(
-            event,
-            "Stop",
-            decision="allow",
-            reason_code="no_meaningful_work",
-            hasAssetGate=False,
-            hasMeaningfulWork=False,
-        )
-        return None
-    if is_push_only_closeout(state):
-        append_usage_event(
-            event,
-            "Stop",
-            decision="allow",
-            reason_code="push_only_closeout",
-            hasAssetGate=False,
-            hasMeaningfulWork=True,
-            signals=state.get("meaningfulWorkSignals", []),
-        )
-        clear_closeout_state(state)
-        save_state(event, state)
-        return None
-    if is_merge_only_closeout(state):
-        append_usage_event(
-            event,
-            "Stop",
-            decision="allow",
-            reason_code="merge_only_closeout",
-            hasAssetGate=False,
-            hasMeaningfulWork=True,
-            signals=state.get("meaningfulWorkSignals", []),
-        )
-        clear_closeout_state(state)
-        save_state(event, state)
-        return None
-    if is_cleanup_only_closeout(state, message):
-        append_usage_event(
-            event,
-            "Stop",
-            decision="allow",
-            reason_code="cleanup_only_auto_none",
-            hasAssetGate=False,
-            hasMeaningfulWork=True,
-            signals=state.get("meaningfulWorkSignals", []),
-            cleanupOnly=True,
-        )
-        clear_closeout_state(state)
-        save_state(event, state)
-        return None
-    if event.get("stop_hook_active") or state.get("stopContinuationUsed"):
-        append_usage_event(
-            event,
-            "Stop",
-            decision="warn",
-            reason_code="continuation_already_used",
+            decision="block",
+            reason_code="missing_asset_gate",
             hasAssetGate=False,
             hasMeaningfulWork=True,
             signals=state.get("meaningfulWorkSignals", []),
             candidateCount=len(state.get("subagentCandidates", [])),
         )
         return {
-            "systemMessage": (
-                "Asset-compounding closeout still appears to be missing an "
-                "asset_gate block, but the Stop hook already continued once."
-            )
+            "decision": "block",
+            "reason": (
+                "Run the asset-compounding closeout gate for this turn. Include an "
+                "auditable asset_gate block with event_type, route, reason, "
+                "evidence, related_assets, asset_candidates, deferred_signals, and "
+                "next_step. If no asset is needed, choose route: none and give the "
+                "concrete reason."
+            ),
         }
-
-    state["stopContinuationUsed"] = True
-    save_state(event, state)
-    append_usage_event(
-        event,
-        "Stop",
-        decision="block",
-        reason_code="missing_asset_gate",
-        hasAssetGate=False,
-        hasMeaningfulWork=True,
-        signals=state.get("meaningfulWorkSignals", []),
-        candidateCount=len(state.get("subagentCandidates", [])),
-    )
-    return {
-        "decision": "block",
-        "reason": (
-            "Run the asset-compounding closeout gate for this turn. Include an "
-            "auditable asset_gate block with event_type, route, reason, "
-            "evidence, related_assets, asset_candidates, deferred_signals, and "
-            "next_step. If no asset is needed, choose route: none and give the "
-            "concrete reason."
-        ),
-    }
 
 
 def handle_pre_compact(event: dict[str, Any]) -> dict[str, Any] | None:
     if not repo_has_assets(event):
         return None
-    state = load_state(event)
-    state["lastCompactTrigger"] = str(event.get("trigger", ""))
-    save_state(event, state)
-    if state.get("subagentCandidates"):
+    with state_transaction(event) as state:
+        state["lastCompactTrigger"] = str(event.get("trigger", ""))
+        candidate_count = len(state.get("subagentCandidates", []))
+    if candidate_count:
         append_usage_event(
             event,
             "PreCompact",
             decision="warn",
             reason_code="pending_candidates",
-            candidateCount=len(state.get("subagentCandidates", [])),
+            candidateCount=candidate_count,
         )
         return {
             "systemMessage": (
                 "Asset-compounding state saved before compaction with pending "
-                f"candidates: {len(state.get('subagentCandidates', []))}."
+                f"candidates: {candidate_count}."
             )
         }
     append_usage_event(event, "PreCompact", decision="allow", reason_code="no_pending_candidates")
@@ -450,16 +444,15 @@ def bootstrap_asset_guidance(event: dict[str, Any]) -> dict[str, Any] | None:
     try:
         module = import_bootstrap_module()
         result = module.bootstrap(root, None, True)
-    except Exception as exc:  # pragma: no cover - defensive hook boundary
+    except Exception:  # pragma: no cover - defensive hook boundary
         return {
             "action": "failed",
-            "error": str(exc),
+            "errorCode": "bootstrap_failed",
         }
 
     return {
         "action": "written" if result.get("changed") else "unchanged",
         "createdDirs": result.get("created_dirs", []),
-        "agentsFile": result.get("guidance", {}).get("agents_file"),
         "guidanceAction": result.get("guidance", {}).get("action"),
     }
 
@@ -485,6 +478,41 @@ def state_path(event: dict[str, Any]) -> Path:
     return plugin_data / audit_session_segment(event) / "state.json"
 
 
+_SESSION_LIFECYCLE_LOCKS = threading.local()
+
+
+def session_lifecycle_lock_path(event: dict[str, Any]) -> Path:
+    plugin_data = Path(os.environ.get("PLUGIN_DATA") or ".asset-plugin-data")
+    return plugin_data / "_lifecycle-locks" / audit_session_segment(event)
+
+
+@contextmanager
+def session_lifecycle_lock(event: dict[str, Any]) -> Iterator[None]:
+    path = session_lifecycle_lock_path(event)
+    key = str(path)
+    depths = getattr(_SESSION_LIFECYCLE_LOCKS, "depths", None)
+    if depths is None:
+        depths = {}
+        _SESSION_LIFECYCLE_LOCKS.depths = depths
+    if key in depths:
+        depths[key] += 1
+        try:
+            yield
+        finally:
+            depths[key] -= 1
+            if depths[key] == 0:
+                del depths[key]
+        return
+    with file_lock(path, timeout_ms=lifecycle_lock_timeout_ms()):
+        depths[key] = 1
+        try:
+            yield
+        finally:
+            depths[key] -= 1
+            if depths[key] == 0:
+                del depths[key]
+
+
 def events_path(event: dict[str, Any]) -> Path:
     return state_path(event).with_name("events.jsonl")
 
@@ -493,6 +521,53 @@ def audit_session_segment(event: dict[str, Any]) -> str:
     project_name = Path(str(event.get("cwd") or "unknown-project")).name or "unknown-project"
     session_id = str(event.get("session_id") or "unknown-session")
     return f"{safe_segment(project_name)}--{safe_segment(session_id)}"
+
+
+def plugin_runtime_identity() -> dict[str, str]:
+    plugin_root = Path(os.environ.get("PLUGIN_ROOT") or Path(__file__).resolve().parents[1])
+    version = "unknown"
+    manifest_path = plugin_root / ".codex-plugin" / "plugin.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        manifest = None
+    if isinstance(manifest, dict) and isinstance(manifest.get("version"), str) and manifest["version"].strip():
+        version = manifest["version"].strip()
+
+    fingerprint_paths = (
+        ".codex-plugin/plugin.json",
+        "hooks/hooks.json",
+        "hooks/asset_hook.py",
+    )
+    digest = hashlib.sha256()
+    try:
+        for relative_path in fingerprint_paths:
+            content = (plugin_root / relative_path).read_bytes()
+            normalized = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+            digest.update(relative_path.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(normalized)
+            digest.update(b"\0")
+    except OSError:
+        fingerprint = "unknown"
+    else:
+        fingerprint = digest.hexdigest()[:16]
+    return {
+        "pluginVersion": version,
+        "pluginFingerprint": fingerprint,
+    }
+
+
+def event_runtime_identity(event: dict[str, Any]) -> dict[str, str]:
+    cached = event.get("_assetPluginRuntimeIdentity")
+    if isinstance(cached, dict) and all(isinstance(cached.get(key), str) for key in ("pluginVersion", "pluginFingerprint")):
+        return {
+            "pluginVersion": str(cached["pluginVersion"]),
+            "pluginFingerprint": str(cached["pluginFingerprint"]),
+        }
+    identity = plugin_runtime_identity()
+    event["_assetPluginRuntimeIdentity"] = identity
+    return identity
 
 
 def append_usage_event(
@@ -515,13 +590,16 @@ def append_usage_event(
         "turnHash": stable_hash(str(event.get("turn_id") or "")),
         "repoName": Path(str(event.get("cwd") or "")).name,
         "repoHash": stable_hash(str(event.get("cwd") or "").lower()),
+        "launcherKind": os.environ.get("ASSET_HOOK_LAUNCHER") or "unknown",
+        **event_runtime_identity(event),
     }
     for key, value in extra.items():
         if value is not None:
             payload[key] = value
     path = events_path(event)
     try:
-        append_jsonl_event(path, payload)
+        with session_lifecycle_lock(event):
+            append_jsonl_event(path, payload)
     except OSError:
         return
 
@@ -540,6 +618,8 @@ def append_raw_usage_event(
         "decision": decision,
         "reasonCode": reason_code,
         "processId": os.getpid(),
+        "launcherKind": os.environ.get("ASSET_HOOK_LAUNCHER") or "unknown",
+        **plugin_runtime_identity(),
     }
     for key, value in extra.items():
         if value is not None:
@@ -555,27 +635,45 @@ def append_raw_usage_event(
 def append_jsonl_event(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n"
-    with event_file_lock(path):
+    with file_lock(path):
         with path.open("a", encoding="utf-8", newline="\n") as stream:
             stream.write(line)
             stream.flush()
 
 
+def lock_timeout_ms(env_name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(env_name, str(default)))
+    except ValueError:
+        value = default
+    return max(100, min(value, 60000))
+
+
+def lifecycle_lock_timeout_ms() -> int:
+    return lock_timeout_ms("ASSET_HOOK_LIFECYCLE_LOCK_TIMEOUT_MS", 30000)
+
+
 @contextmanager
-def event_file_lock(path: Path) -> Iterator[None]:
+def file_lock(path: Path, *, timeout_ms: int | None = None) -> Iterator[None]:
     lock_path = path.with_name(path.name + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+b") as lock_stream:
-        acquire_lock(lock_stream)
+        acquire_lock(lock_stream, timeout_ms=timeout_ms)
         try:
             yield
         finally:
             release_lock(lock_stream)
 
 
-def acquire_lock(stream: BinaryIO) -> None:
-    timeout_ms = int(os.environ.get("ASSET_HOOK_EVENT_LOCK_TIMEOUT_MS", "1000"))
-    deadline = time.monotonic() + max(1, timeout_ms) / 1000
+@contextmanager
+def event_file_lock(path: Path) -> Iterator[None]:
+    with file_lock(path):
+        yield
+
+
+def acquire_lock(stream: BinaryIO, *, timeout_ms: int | None = None) -> None:
+    resolved_timeout_ms = timeout_ms if timeout_ms is not None else lock_timeout_ms("ASSET_HOOK_EVENT_LOCK_TIMEOUT_MS", 1000)
+    deadline = time.monotonic() + max(1, resolved_timeout_ms) / 1000
     while True:
         try:
             lock_stream(stream)
@@ -629,19 +727,144 @@ def stable_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
+def repo_identity(event: dict[str, Any]) -> dict[str, str]:
+    cwd = str(event.get("cwd") or "")
+    return {
+        "repoName": Path(cwd).name,
+        "repoHash": stable_hash(cwd.lower()),
+    }
+
+
+SAFE_BOOTSTRAP_CREATED_DIRS = frozenset(
+    {
+        "docs/superpowers",
+        "docs/superpowers/specs",
+        "docs/superpowers/plans",
+        "docs/superpowers/archives",
+        "docs/superpowers/problems",
+        "docs/superpowers/inbox",
+        "docs/milestones",
+        "docs/technical-debt",
+    }
+)
+SAFE_BOOTSTRAP_GUIDANCE_ACTIONS = frozenset({"inserted", "updated", "unchanged"})
+SAFE_VERIFICATION_STATUSES = frozenset({"passed", "failed", "observed"})
+SAFE_EXIT_CODE_SOURCES = frozenset({"top-level", "nested", "text", "unknown"})
+SAFE_COMMAND_KIND_RE = re.compile(r"^[a-z0-9-]{1,80}$")
+SAFE_COMMAND_HASH_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
+def sanitize_verification_evidence(entries: Any) -> list[dict[str, Any]]:
+    if not isinstance(entries, list):
+        return []
+    sanitized_entries: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        raw_command = entry.get("command")
+        if isinstance(raw_command, str):
+            command_kind = classify_command_kind(raw_command)
+            command_hash = stable_hash(raw_command)
+            command_length = len(raw_command)
+        else:
+            candidate_kind = entry.get("commandKind")
+            command_kind = (
+                candidate_kind
+                if isinstance(candidate_kind, str) and SAFE_COMMAND_KIND_RE.fullmatch(candidate_kind)
+                else "unknown"
+            )
+            candidate_hash = entry.get("commandHash")
+            command_hash = (
+                candidate_hash
+                if isinstance(candidate_hash, str) and SAFE_COMMAND_HASH_RE.fullmatch(candidate_hash)
+                else None
+            )
+            candidate_length = entry.get("commandLength")
+            command_length = candidate_length if isinstance(candidate_length, int) and candidate_length >= 0 else None
+
+        status = entry.get("status")
+        sanitized: dict[str, Any] = {
+            "commandKind": command_kind,
+            "status": status
+            if isinstance(status, str) and status in SAFE_VERIFICATION_STATUSES
+            else "observed",
+        }
+        if command_hash is not None:
+            sanitized["commandHash"] = command_hash
+        if command_length is not None:
+            sanitized["commandLength"] = command_length
+        exit_code = entry.get("exitCode")
+        if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+            sanitized["exitCode"] = exit_code
+        exit_code_source = entry.get("exitCodeSource")
+        if isinstance(exit_code_source, str) and exit_code_source in SAFE_EXIT_CODE_SOURCES:
+            sanitized["exitCodeSource"] = exit_code_source
+        sanitized_entries.append(sanitized)
+    return sanitized_entries
+
+
+def sanitize_asset_bootstrap(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    action = value.get("action")
+    sanitized: dict[str, Any] = {
+        "action": action
+        if isinstance(action, str) and action in {"written", "unchanged", "failed"}
+        else "unknown"
+    }
+    created_dirs = value.get("createdDirs")
+    if isinstance(created_dirs, list):
+        safe_dirs = [
+            directory.replace("\\", "/")
+            for directory in created_dirs
+            if isinstance(directory, str) and directory.replace("\\", "/") in SAFE_BOOTSTRAP_CREATED_DIRS
+        ]
+        if safe_dirs:
+            sanitized["createdDirs"] = safe_dirs
+    guidance_action = value.get("guidanceAction")
+    if isinstance(guidance_action, str) and guidance_action in SAFE_BOOTSTRAP_GUIDANCE_ACTIONS:
+        sanitized["guidanceAction"] = guidance_action
+    if value.get("errorCode") == "bootstrap_failed":
+        sanitized["errorCode"] = "bootstrap_failed"
+    return sanitized
+
+
+def sanitize_state_for_storage(state: dict[str, Any]) -> None:
+    state.pop("cwd", None)
+    state["verificationEvidence"] = sanitize_verification_evidence(state.get("verificationEvidence"))
+    asset_bootstrap = sanitize_asset_bootstrap(state.get("assetBootstrap"))
+    if asset_bootstrap is None:
+        state.pop("assetBootstrap", None)
+    else:
+        state["assetBootstrap"] = asset_bootstrap
+
+
 def load_state(event: dict[str, Any]) -> dict[str, Any]:
-    path = state_path(event)
+    return load_state_path(state_path(event), event)
+
+
+def load_state_path(path: Path, event: dict[str, Any]) -> dict[str, Any]:
     if path.is_file():
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+            state = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(state, dict):
+                return state
+        except (UnicodeDecodeError, json.JSONDecodeError):
             pass
+    return default_state(event)
+
+
+def default_state(event: dict[str, Any]) -> dict[str, Any]:
+    identity = event_runtime_identity(event)
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "sessionId": str(event.get("session_id") or ""),
         "turnId": str(event.get("turn_id") or ""),
-        "cwd": str(event.get("cwd") or ""),
+        **repo_identity(event),
         "repoHasSuperpowersAssets": repo_has_assets(event),
+        "lifecycle": "active",
+        "closedAtUtc": None,
+        **identity,
         "meaningfulWorkSignals": [],
         "verificationEvidence": [],
         "subagentCandidates": [],
@@ -652,12 +875,52 @@ def load_state(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@contextmanager
+def state_transaction(event: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    path = state_path(event)
+    with session_lifecycle_lock(event):
+        with file_lock(path):
+            state = load_state_path(path, event)
+            yield state
+            save_state_path_atomic(path, state, event)
+
+
 def save_state(event: dict[str, Any], state: dict[str, Any]) -> None:
     path = state_path(event)
+    with session_lifecycle_lock(event):
+        with file_lock(path):
+            save_state_path_atomic(path, state, event)
+
+
+def save_state_path_atomic(path: Path, state: dict[str, Any], event: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    state["schemaVersion"] = 2
     state["turnId"] = str(event.get("turn_id") or state.get("turnId") or "")
-    state["cwd"] = str(event.get("cwd") or state.get("cwd") or "")
-    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    state.update(repo_identity(event))
+    state.setdefault("sessionId", str(event.get("session_id") or ""))
+    state.setdefault("repoHasSuperpowersAssets", repo_has_assets(event))
+    state.setdefault("lifecycle", "active")
+    state.setdefault("closedAtUtc", None)
+    state.update(event_runtime_identity(event))
+    state.setdefault("meaningfulWorkSignals", [])
+    state.setdefault("verificationEvidence", [])
+    state.setdefault("subagentCandidates", [])
+    state.setdefault("assetFilesChanged", False)
+    state.setdefault("stopContinuationUsed", False)
+    state.setdefault("assetGateDue", False)
+    state.setdefault("lastGitCloseoutKind", "")
+    sanitize_state_for_storage(state)
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        with temp_path.open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write(json.dumps(state, ensure_ascii=False, indent=2))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
 
 
 def safe_segment(value: str) -> str:
@@ -673,24 +936,81 @@ def extract_command(tool_input: Any) -> str:
     return ""
 
 
-def summarize_command(command: str) -> str:
-    return " ".join(command.split())[:240]
+EXIT_CODE_KEYS = ("exit_code", "exitCode", "returncode", "returnCode")
+EXIT_CODE_LINE_RE = re.compile(r"(?im)^\s*(?:exit|return)\s+code\s*:\s*(-?\d+)\s*$")
+MAX_EXIT_CODE_RESPONSE_DEPTH = 6
+MAX_EXIT_CODE_RESPONSE_NODES = 256
+MAX_EXIT_CODE_TEXT_CHARS = 4096
 
 
-def extract_exit_code(tool_response: Any) -> int | None:
-    if not isinstance(tool_response, dict):
-        return None
-    for key in ("exit_code", "exitCode", "returncode", "returnCode"):
-        value = tool_response.get(key)
-        if isinstance(value, int):
-            return value
-    return None
+def extract_exit_code(tool_response: Any) -> tuple[int | None, str]:
+    return extract_exit_code_from_value(
+        tool_response,
+        depth=0,
+        top_level=True,
+        remaining_nodes=[MAX_EXIT_CODE_RESPONSE_NODES],
+    )
+
+
+def extract_exit_code_from_value(
+    value: Any,
+    *,
+    depth: int,
+    top_level: bool,
+    remaining_nodes: list[int],
+) -> tuple[int | None, str]:
+    if depth > MAX_EXIT_CODE_RESPONSE_DEPTH or remaining_nodes[0] <= 0:
+        return None, "unknown"
+    remaining_nodes[0] -= 1
+    if isinstance(value, dict):
+        for key in EXIT_CODE_KEYS:
+            candidate = value.get(key)
+            if isinstance(candidate, int) and not isinstance(candidate, bool):
+                return candidate, "top-level" if top_level else "nested"
+        for candidate in value.values():
+            if remaining_nodes[0] <= 0:
+                break
+            exit_code, source = extract_exit_code_from_value(
+                candidate,
+                depth=depth + 1,
+                top_level=False,
+                remaining_nodes=remaining_nodes,
+            )
+            if exit_code is not None:
+                return exit_code, source
+        return None, "unknown"
+    if isinstance(value, (list, tuple)):
+        for candidate in value:
+            if remaining_nodes[0] <= 0:
+                break
+            exit_code, source = extract_exit_code_from_value(
+                candidate,
+                depth=depth + 1,
+                top_level=False,
+                remaining_nodes=remaining_nodes,
+            )
+            if exit_code is not None:
+                return exit_code, source
+        return None, "unknown"
+    if isinstance(value, str):
+        match = EXIT_CODE_LINE_RE.search(value[:MAX_EXIT_CODE_TEXT_CHARS])
+        if match:
+            return int(match.group(1)), "text"
+    return None, "unknown"
 
 
 def verification_status(exit_code: int | None) -> str:
     if exit_code is None:
         return "observed"
     return "passed" if exit_code == 0 else "failed"
+
+
+def verification_signal(status: str) -> str:
+    return {
+        "passed": "verification-ran",
+        "failed": "verification-failed",
+        "observed": "verification-observed",
+    }.get(status, "verification-observed")
 
 
 def is_verification_command(command: str) -> bool:
@@ -892,22 +1212,6 @@ def is_merge_only_closeout(state: dict[str, Any]) -> bool:
     )
 
 
-def is_cleanup_only_closeout(state: dict[str, Any], message: str) -> bool:
-    if not (
-        state.get("assetFilesChanged")
-        or "edited-files" in set(state.get("meaningfulWorkSignals") or [])
-        or "git-closeout" in set(state.get("meaningfulWorkSignals") or [])
-    ):
-        return False
-    normalized = message.lower()
-    return bool(
-        re.search(
-            r"cleanup-only|清理|删除|移除|放弃|废弃|不再|remove|delete|cleanup|abandon|deprecated",
-            normalized,
-        )
-    )
-
-
 def clear_closeout_state(state: dict[str, Any]) -> None:
     state["meaningfulWorkSignals"] = []
     state["verificationEvidence"] = []
@@ -916,6 +1220,17 @@ def clear_closeout_state(state: dict[str, Any]) -> None:
     state["stopContinuationUsed"] = False
     state["assetGateDue"] = False
     state["lastGitCloseoutKind"] = ""
+
+
+def close_session_state(state: dict[str, Any]) -> None:
+    clear_closeout_state(state)
+    state["lifecycle"] = "closed"
+    state["closedAtUtc"] = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def reopen_session_state(state: dict[str, Any]) -> None:
+    state["lifecycle"] = "active"
+    state["closedAtUtc"] = None
 
 
 if __name__ == "__main__":

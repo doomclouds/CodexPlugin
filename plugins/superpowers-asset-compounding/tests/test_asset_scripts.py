@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import importlib.util
 from pathlib import Path
@@ -93,14 +96,17 @@ class AssetScriptTests(unittest.TestCase):
             debt_agent_text,
         )
 
-    def test_asset_compounding_plugin_metadata_mentions_v032_audit_archive(self) -> None:
+    def test_asset_compounding_plugin_metadata_mentions_v050_runtime_reliability(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["version"], "0.3.3")
+        self.assertEqual(manifest["version"], "0.5.0")
         self.assertIn("milestones", manifest["interface"]["longDescription"])
         self.assertIn("technical debt", manifest["interface"]["longDescription"].lower())
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("v0.3.3", readme)
+        self.assertIn("Version `0.5.0`", readme)
+        self.assertIn("transactional state", readme)
+        self.assertIn("pluginFingerprint", readme)
+        self.assertIn("commandWindows", readme)
         self.assertIn("manage-superpowers-milestone", readme)
         self.assertIn("manage-technical-debt", readme)
         self.assertIn("structured `asset_gate` validation", readme)
@@ -113,6 +119,8 @@ class AssetScriptTests(unittest.TestCase):
             "The reports do not include raw commands, prompts, diffs, command output, full repository paths, or secrets",
             readme,
         )
+        hooks = json.loads(HOOKS_CONFIG.read_text(encoding="utf-8"))["hooks"]
+        self.assertTrue(all("commandWindows" in registrations[0]["hooks"][0] for registrations in hooks.values()))
 
         guidance = (
             SKILLS / "compound-development-asset" / "references" / "agents-asset-guidance-template.md"
@@ -2153,8 +2161,9 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
             "PostCompact",
         ):
             self.assertIn(event_name, hooks)
-            command = hooks[event_name][0]["hooks"][0]["command"]
-            self.assertIn("run_asset_hook.cmd", command)
+            handler = hooks[event_name][0]["hooks"][0]
+            self.assertIn("run_asset_hook.sh", handler["command"])
+            self.assertIn("run_asset_hook.cmd", handler["commandWindows"])
 
         self.assertNotIn("UserPromptSubmit", hooks)
         self.assertNotIn("SubagentStart", hooks)
@@ -2168,9 +2177,133 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertTrue(HOOK_LAUNCHER.is_file())
         self.assertTrue(HOOK_BASH_LAUNCHER.is_file())
         for registrations in config["hooks"].values():
-            command = registrations[0]["hooks"][0]["command"]
-            self.assertIn("run_asset_hook.cmd", command)
-            self.assertNotRegex(command, forbidden)
+            handler = registrations[0]["hooks"][0]
+            self.assertIn("run_asset_hook.sh", handler["command"])
+            self.assertIn("run_asset_hook.cmd", handler["commandWindows"])
+            self.assertNotRegex(handler["command"], forbidden)
+            self.assertNotRegex(handler["commandWindows"], forbidden)
+
+    def test_windows_launcher_prefers_real_python_before_git_bash(self) -> None:
+        launcher = HOOK_LAUNCHER.read_text(encoding="utf-8")
+
+        self.assertIn("CODEX_ASSET_PYTHON", launcher)
+        self.assertIn("WindowsApps", launcher)
+        self.assertIn("ASSET_HOOK_LAUNCHER=windows-direct", launcher)
+        self.assertIn("asset_hook.py", launcher)
+        self.assertIn("GIT_BASH", launcher)
+        self.assertIn("ASSET_HOOK_LAUNCHER=windows-git-bash", launcher)
+
+    def test_windows_launcher_does_not_preflight_a_second_python_process(self) -> None:
+        launcher = HOOK_LAUNCHER.read_text(encoding="utf-8")
+
+        self.assertNotIn('-c "import sys"', launcher)
+
+    def test_posix_launcher_is_compatible_with_sh_registration(self) -> None:
+        launcher = HOOK_BASH_LAUNCHER.read_text(encoding="utf-8")
+
+        self.assertTrue(launcher.startswith("#!/usr/bin/env sh\n"))
+        self.assertNotIn("pipefail", launcher)
+        self.assertNotIn("BASH_SOURCE", launcher)
+        self.assertNotIn("local ", launcher)
+        self.assertNotIn("< <", launcher)
+
+    def test_posix_launcher_runs_without_git_utility_path(self) -> None:
+        if os.name != "nt":
+            self.skipTest("bare Git sh launcher coverage is Windows-specific")
+
+        git_sh = Path(os.environ.get("ProgramFiles", r"C:\\Program Files")) / "Git/usr/bin/sh.exe"
+        if not git_sh.is_file():
+            self.skipTest("Git sh.exe is not installed")
+
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        env = os.environ.copy()
+        env.update(
+            {
+                "PYTHONIOENCODING": "utf-8",
+                "PLUGIN_ROOT": str(ROOT),
+                "PLUGIN_DATA": str(plugin_data),
+                "CODEX_ASSET_PYTHON": sys.executable,
+            }
+        )
+        bare_git_utility_dir = str(git_sh.parent).casefold()
+        env["PATH"] = os.pathsep.join(
+            path for path in env.get("PATH", "").split(os.pathsep) if path.rstrip("\\/").casefold() != bare_git_utility_dir
+        )
+        event = {
+            "hook_event_name": "SessionStart",
+            "session_id": "bare-sh-session",
+            "turn_id": "bare-sh-turn",
+            "cwd": str(repo),
+            "source": "startup",
+        }
+
+        completed = subprocess.run(
+            [str(git_sh), str(HOOK_BASH_LAUNCHER)],
+            input=json.dumps(event),
+            check=False,
+            text=True,
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
+        self.assertIn("hookSpecificOutput", completed.stdout)
+        audit_dir = self.audit_dir(plugin_data, repo, "bare-sh-session")
+        audit_event = json.loads((audit_dir / "events.jsonl").read_text(encoding="utf-8"))
+        self.assertEqual(audit_event["launcherKind"], "posix-shell")
+
+    def test_usage_event_records_launcher_kind_without_plugin_root(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        with mock.patch.dict(os.environ, {"ASSET_HOOK_LAUNCHER": "windows-direct"}):
+            code, stdout, stderr = self.run_hook(
+                {
+                    "hook_event_name": "PostToolUse",
+                    "session_id": "session-1",
+                    "turn_id": "turn-1",
+                    "cwd": str(repo),
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "git status --short"},
+                    "tool_response": {"exit_code": 0},
+                },
+                plugin_data=plugin_data,
+            )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        event_text = (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8")
+        self.assertNotIn(str(ROOT), event_text)
+        event = json.loads(event_text.splitlines()[-1])
+        self.assertEqual(event["launcherKind"], "windows-direct")
+
+    def test_usage_event_records_plugin_version_and_fingerprint(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": "runtime-identity-session",
+                "turn_id": "runtime-identity-turn",
+                "cwd": str(repo),
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(stdout)
+        audit_dir = self.audit_dir(plugin_data, repo, "runtime-identity-session")
+        event = json.loads((audit_dir / "events.jsonl").read_text(encoding="utf-8"))
+        state = json.loads((audit_dir / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(event["pluginVersion"], manifest["version"])
+        self.assertRegex(event["pluginFingerprint"], r"^[0-9a-f]{16}$")
+        self.assertEqual(state["pluginVersion"], manifest["version"])
+        self.assertEqual(state["pluginFingerprint"], event["pluginFingerprint"])
 
     def test_hook_state_directory_includes_project_name_and_session_id(self) -> None:
         repo = self.create_repo()
@@ -2282,6 +2415,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(events[-1]["hookEventName"], "HookInput")
         self.assertEqual(events[-1]["reasonCode"], "stdin_timeout")
         self.assertEqual(events[-1]["timeoutMs"], 100)
+        self.assertEqual(events[-1]["launcherKind"], "unknown")
 
     def test_subagent_lifecycle_events_are_noops_when_called_directly(self) -> None:
         repo = self.create_repo()
@@ -2439,8 +2573,9 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout, "")
         state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
-        self.assertTrue(state["assetGateDue"])
-        self.assertEqual(state["meaningfulWorkSignals"], ["plan-boundary"])
+        self.assertEqual(state["lifecycle"], "closed")
+        self.assertFalse(state["assetGateDue"])
+        self.assertEqual(state["meaningfulWorkSignals"], [])
 
     def test_stop_with_asset_gate_clears_asset_gate_due(self) -> None:
         repo = self.create_repo()
@@ -2485,6 +2620,69 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertFalse(state["assetGateDue"])
 
+    def test_stop_allow_marks_session_closed_and_post_tool_use_reopens_it(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "dotnet test .\\LightRAGNet.slnx"},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": (
+                    "asset_gate:\n"
+                    "  event_type: implementation-boundary\n"
+                    "  route: none\n"
+                    "reason: focused test verified the change\n"
+                    "evidence: dotnet test passed\n"
+                    "related_assets: none\n"
+                    "asset_candidates: none\n"
+                    "deferred_signals: none\n"
+                    "next_step: none"
+                ),
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        state_path = self.audit_dir(plugin_data, repo) / "state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(state["lifecycle"], "closed")
+        self.assertIsNotNone(state["closedAtUtc"])
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-2",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "git status --short"},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        reopened = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(reopened["lifecycle"], "active")
+        self.assertIsNone(reopened["closedAtUtc"])
+
     def test_stop_blocks_invalid_asset_gate_without_clearing_state(self) -> None:
         repo = self.create_repo()
         plugin_data = self.temp_root / "plugin-data"
@@ -2527,12 +2725,126 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertIn("verification-ran", state["meaningfulWorkSignals"])
 
+    def test_stop_allows_incomplete_gate_when_no_hard_work(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "asset_gate:\n  route: none\nreason: no code changed",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        events = [
+            json.loads(line)
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["reasonCode"], "no_meaningful_work")
+
+    def test_stop_allows_missing_supplemental_fields_when_hard_work_exists(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "dotnet test .\\LightRAGNet.slnx"},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": (
+                    "asset_gate:\n"
+                    "  event_type: implementation-boundary\n"
+                    "  route: none\n"
+                    "reason: focused behavior is complete\n"
+                    "evidence: dotnet test passed"
+                ),
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        events = [
+            json.loads(line)
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["reasonCode"], "asset_gate_present")
+        self.assertEqual(
+            events[-1]["defaultedFields"],
+            ["related_assets", "asset_candidates", "deferred_signals", "next_step"],
+        )
+
+    def test_stop_blocks_missing_reason_or_evidence_when_hard_work_exists(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "apply_patch",
+                "tool_input": {"patch": "*** Begin Patch\n*** End Patch"},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "asset_gate:\n  event_type: implementation-boundary\n  route: none",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertNotEqual(stdout, "")
+        payload = json.loads(stdout)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("reason", payload["reason"])
+        self.assertIn("evidence", payload["reason"])
+
     def test_stop_invalid_asset_gate_audit_event_omits_free_form_field_values(self) -> None:
         repo = self.create_repo()
         plugin_data = self.temp_root / "plugin-data"
         fake_secret = "FAKE-SECRET-12345"
         raw_invalid_event_type = f"event_type={fake_secret}"
         raw_invalid_route = f"route={fake_secret}"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "apply_patch",
+                "tool_input": {"patch": "*** Begin Patch\n*** End Patch"},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
 
         code, stdout, stderr = self.run_hook(
             {
@@ -2788,7 +3100,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["meaningfulWorkSignals"], [])
 
-    def test_stop_allows_cleanup_only_abandonment_without_reprompting_asset_gate(self) -> None:
+    def test_stop_does_not_auto_allow_failed_cleanup_phrase(self) -> None:
         repo = self.create_repo()
         plugin_data = self.temp_root / "plugin-data"
 
@@ -2816,7 +3128,56 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 "session_id": "session-1",
                 "turn_id": "turn-1",
                 "cwd": str(repo),
-                "last_assistant_message": "已清理并删除废弃需求，放弃这个插件方向。",
+                "last_assistant_message": "remove failed; issue unresolved.",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertNotEqual(stdout, "")
+        payload = json.loads(stdout)
+        self.assertEqual(payload["decision"], "block")
+        events = [
+            json.loads(line)
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["reasonCode"], "missing_asset_gate")
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
+        self.assertIn("edited-files", state["meaningfulWorkSignals"])
+
+    def test_stop_allows_structured_cleanup_only_none_gate(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "apply_patch",
+                "tool_input": {"patch": "*** Begin Patch\n*** Delete File: docs/superpowers/specs/old-feature.md\n*** End Patch"},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": (
+                    "asset_gate:\n"
+                    "  event_type: cleanup-only\n"
+                    "  route: none\n"
+                    "reason: obsolete design asset was intentionally removed\n"
+                    "evidence: deletion patch was reviewed\n"
+                    "related_assets: none\n"
+                    "asset_candidates: none\n"
+                    "deferred_signals: none\n"
+                    "next_step: none"
+                ),
             },
             plugin_data=plugin_data,
         )
@@ -2827,10 +3188,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
             json.loads(line)
             for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
-        self.assertEqual(events[-1]["reasonCode"], "cleanup_only_auto_none")
-        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["meaningfulWorkSignals"], [])
-        self.assertFalse(state["assetFilesChanged"])
+        self.assertEqual(events[-1]["reasonCode"], "asset_gate_present")
 
     def test_session_start_context_mentions_worktree_workspace(self) -> None:
         repo = self.temp_root / ".worktrees" / "feature-demo"
@@ -2877,6 +3235,231 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(state["meaningfulWorkSignals"], ["verification-failed"])
         self.assertEqual(state["verificationEvidence"][0]["status"], "failed")
         self.assertEqual(state["verificationEvidence"][0]["exitCode"], 1)
+
+    def test_post_tool_use_extracts_nested_exit_code(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "dotnet test .\\LightRAGNet.slnx"},
+                "tool_response": {"result": {"returnCode": 0}},
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["meaningfulWorkSignals"], ["verification-ran"])
+        self.assertEqual(state["verificationEvidence"][0]["status"], "passed")
+        self.assertEqual(state["verificationEvidence"][0]["exitCode"], 0)
+        events = [
+            json.loads(line)
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["exitCode"], 0)
+        self.assertEqual(events[-1]["exitCodeSource"], "nested")
+        self.assertEqual(events[-1]["verificationStatus"], "passed")
+
+    def test_state_redacts_runtime_paths_and_verification_commands(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        secret = "super-secret-token"
+        command = f'dotnet test "{repo / (secret + ".sln")}"'
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "privacy-session",
+                "turn_id": "privacy-turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+                "tool_response": {"result": {"returnCode": 0}},
+            },
+            plugin_data=plugin_data,
+        )
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "privacy-session",
+                "turn_id": "privacy-turn-2",
+                "cwd": str(repo),
+                "tool_name": "apply_patch",
+                "tool_input": {
+                    "patch": "*** Begin Patch\n*** Add File: docs/superpowers/plans/privacy.md\n+# Privacy\n*** End Patch"
+                },
+                "tool_response": {},
+            },
+            plugin_data=plugin_data,
+        )
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+
+        state_path = self.audit_dir(plugin_data, repo, "privacy-session") / "state.json"
+        state_text = state_path.read_text(encoding="utf-8")
+        state = json.loads(state_text)
+        evidence = state["verificationEvidence"][0]
+
+        self.assertNotIn(str(repo), state_text)
+        self.assertNotIn(secret, state_text)
+        self.assertNotIn('"cwd"', state_text)
+        self.assertNotIn("agentsFile", state_text)
+        self.assertEqual(state["repoName"], repo.name)
+        self.assertIn("repoHash", state)
+        self.assertNotIn("command", evidence)
+        self.assertIn("commandHash", evidence)
+        self.assertIn("commandKind", evidence)
+        self.assertEqual(state["assetBootstrap"]["action"], "written")
+
+    def test_state_sanitizer_recovers_from_malformed_legacy_values(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        audit_dir = self.audit_dir(plugin_data, repo, "malformed-state")
+        audit_dir.mkdir(parents=True)
+        audit_dir.joinpath("state.json").write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "cwd": str(repo),
+                    "verificationEvidence": [
+                        {"command": "dotnet test secret.sln", "status": ["unexpected"]},
+                        {"commandKind": {"unexpected": "mapping"}, "status": {"unexpected": "mapping"}},
+                    ],
+                    "assetBootstrap": {"action": ["unexpected"], "guidanceAction": {"unexpected": "mapping"}},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": "malformed-state",
+                "turn_id": "malformed-turn",
+                "cwd": str(repo),
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(stdout)
+        state_text = audit_dir.joinpath("state.json").read_text(encoding="utf-8")
+        state = json.loads(state_text)
+        self.assertNotIn(str(repo), state_text)
+        self.assertNotIn("secret.sln", state_text)
+        self.assertEqual(state["verificationEvidence"][0]["status"], "observed")
+        self.assertEqual(state["assetBootstrap"]["action"], "unknown")
+
+    def test_post_tool_use_extracts_line_level_text_exit_code(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "npm test"},
+                "tool_response": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Test suite failed.\nExit code: 1\n",
+                        }
+                    ]
+                },
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["meaningfulWorkSignals"], ["verification-failed"])
+        self.assertEqual(state["verificationEvidence"][0]["status"], "failed")
+        self.assertEqual(state["verificationEvidence"][0]["exitCode"], 1)
+        events = [
+            json.loads(line)
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["exitCode"], 1)
+        self.assertEqual(events[-1]["exitCodeSource"], "text")
+        self.assertEqual(events[-1]["verificationStatus"], "failed")
+
+    def test_post_tool_use_bounds_large_tool_response_scan(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        response = {"content": [{"type": "text", "text": "x" * 5000 + "\nExit code: 1"}]}
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "bounded-response-session",
+                "turn_id": "bounded-response-turn",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "dotnet test bounded.sln"},
+                "tool_response": response,
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        state = json.loads(
+            (self.audit_dir(plugin_data, repo, "bounded-response-session") / "state.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(state["verificationEvidence"][0]["status"], "observed")
+        self.assertNotIn("exitCode", state["verificationEvidence"][0])
+
+    def test_post_tool_use_marks_unknown_outcome_as_observed(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "npm run build"},
+                "tool_response": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Build produced output without an exit status.",
+                        }
+                    ]
+                },
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["meaningfulWorkSignals"], ["verification-observed"])
+        self.assertEqual(state["verificationEvidence"][0]["status"], "observed")
+        self.assertNotIn("exitCode", state["verificationEvidence"][0])
+        events = [
+            json.loads(line)
+            for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertNotIn("exitCode", events[-1])
+        self.assertEqual(events[-1]["exitCodeSource"], "unknown")
+        self.assertEqual(events[-1]["verificationStatus"], "observed")
 
     def test_post_tool_use_does_not_count_dotnet_build_version_as_verification(self) -> None:
         repo = self.create_repo()
@@ -3219,6 +3802,85 @@ Old managed block.
         self.assertGreaterEqual(report["hook_duration_ms"]["max"], 0)
         self.assertEqual(len(report["slow_events"]), 3)
 
+    def test_hook_report_summarizes_v050_runtime_identity_and_session_lifecycle(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        active = plugin_data / "RepoA--active"
+        closed = plugin_data / "RepoA--closed"
+        legacy = plugin_data / "RepoA--legacy"
+        for session in (active, closed, legacy):
+            session.mkdir(parents=True)
+        active.joinpath("state.json").write_text(
+            '{"schemaVersion":2,"lifecycle":"active","pluginVersion":"0.5.0","pluginFingerprint":"build-a"}',
+            encoding="utf-8",
+        )
+        closed.joinpath("state.json").write_text(
+            '{"schemaVersion":2,"lifecycle":"closed","pluginVersion":"0.5.0","pluginFingerprint":"build-a"}',
+            encoding="utf-8",
+        )
+        legacy.joinpath("state.json").write_text('{"schemaVersion":1}', encoding="utf-8")
+        active.joinpath("events.jsonl").write_text(
+            json.dumps(
+                {
+                    "timestampUtc": "2026-07-11T00:00:00Z",
+                    "hookEventName": "PostToolUse",
+                    "decision": "recorded",
+                    "reasonCode": "tool_observed",
+                    "repoName": "RepoA",
+                    "pluginVersion": "0.5.0",
+                    "pluginFingerprint": "build-a",
+                    "launcherKind": "windows-direct",
+                    "verificationStatus": "passed",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        closed.joinpath("events.jsonl").write_text(
+            json.dumps(
+                {
+                    "timestampUtc": "2026-07-11T00:01:00Z",
+                    "hookEventName": "PostToolUse",
+                    "decision": "recorded",
+                    "reasonCode": "tool_observed",
+                    "repoName": "RepoA",
+                    "pluginVersion": "0.5.0",
+                    "pluginFingerprint": "build-a",
+                    "launcherKind": "posix-shell",
+                    "verificationStatus": "failed",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        legacy.joinpath("events.jsonl").write_text(
+            json.dumps(
+                {
+                    "timestampUtc": "2026-07-11T00:02:00Z",
+                    "hookEventName": "PostToolUse",
+                    "decision": "recorded",
+                    "reasonCode": "tool_observed",
+                    "repoName": "RepoA",
+                    "verificationStatus": "observed",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        report = self.run_json(HOOK_REPORT, plugin_data, "--json")
+
+        self.assertEqual(report["plugin_versions"], {"0.5.0": 2, "unknown": 1})
+        self.assertEqual(report["plugin_fingerprints"], {"build-a": 2, "unknown": 1})
+        self.assertEqual(
+            report["launcher_kinds"],
+            {"posix-shell": 1, "unknown": 1, "windows-direct": 1},
+        )
+        self.assertEqual(report["verification_statuses"], {"failed": 1, "observed": 1, "passed": 1})
+        self.assertEqual(report["active_sessions"], 1)
+        self.assertEqual(report["closed_sessions"], 1)
+        self.assertEqual(report["legacy_state_sessions"], 1)
+        self.assertNotIn(str(self.temp_root), json.dumps(report))
+
     def test_hook_report_clusters_unknown_commands_without_raw_command_text(self) -> None:
         plugin_data = self.temp_root / "plugin-data"
         session_dir = plugin_data / "session-unknown"
@@ -3507,6 +4169,53 @@ Old managed block.
         self.assertEqual(summary["total_events"], 1)
         self.assertEqual(summary["repos"], ["RepoA"])
 
+    def test_hook_report_archive_keeps_session_reactivated_after_snapshot(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        session = plugin_data / "RepoA--closed-session"
+        session.mkdir(parents=True)
+        session.joinpath("events.jsonl").write_text(
+            '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","decision":"allow","reasonCode":"asset_gate_present","repoName":"RepoA"}\n',
+            encoding="utf-8",
+        )
+        session.joinpath("state.json").write_text(
+            '{"schemaVersion":2,"lifecycle":"closed","closedAtUtc":"2026-06-01T00:00:00Z"}',
+            encoding="utf-8",
+        )
+
+        spec = importlib.util.spec_from_file_location("asset_hook_report_under_test", HOOK_REPORT)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        args = argparse.Namespace(
+            plugin_data=str(plugin_data),
+            before="2026-06-10",
+            since=None,
+            until=None,
+            repo=None,
+            dry_run=False,
+            include_current=False,
+            json=True,
+        )
+        original_copytree = module.shutil.copytree
+
+        def reactivate_after_snapshot(source: Path, destination: Path, *args: object, **kwargs: object) -> object:
+            copied = original_copytree(source, destination, *args, **kwargs)
+            session.joinpath("state.json").write_text(
+                '{"schemaVersion":2,"lifecycle":"active","closedAtUtc":null}',
+                encoding="utf-8",
+            )
+            return copied
+
+        with mock.patch.object(module.shutil, "copytree", side_effect=reactivate_after_snapshot):
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                self.assertEqual(module.run_archive(args), 0)
+
+        result = json.loads(stdout.getvalue())
+        self.assertEqual(result["sessionCount"], 0)
+        self.assertTrue(session.exists())
+        self.assertEqual(json.loads(session.joinpath("state.json").read_text(encoding="utf-8"))["lifecycle"], "active")
+
     def test_hook_report_archive_manifest_write_failure_keeps_source_session(self) -> None:
         plugin_data = self.temp_root / "plugin-data"
         session = plugin_data / "RepoA--old-session"
@@ -3547,6 +4256,8 @@ Old managed block.
         archive_root = plugin_data / "_archives"
         archived_copy = next(archive_root.rglob("RepoA--old-session"), None)
         self.assertIsNotNone(archived_copy, "copied archive payload should still exist for inspection")
+        summary = self.run_json(HOOK_REPORT, plugin_data, "--json")
+        self.assertEqual(summary["total_events"], 1)
 
     def test_hook_report_archive_before_uses_session_last_event_boundary(self) -> None:
         plugin_data = self.temp_root / "plugin-data"
@@ -3594,6 +4305,78 @@ Old managed block.
         self.assertEqual(result["sessionCount"], 1)
         self.assertTrue(current.exists())
         self.assertFalse(old.exists())
+
+    def test_hook_report_archives_closed_session_but_keeps_legacy_state_session(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        closed = plugin_data / "RepoA--closed-session"
+        active = plugin_data / "RepoA--active-session"
+        legacy = plugin_data / "RepoA--legacy-session"
+        legacy_closed = plugin_data / "RepoA--legacy-closed-session"
+        for session in (closed, active, legacy, legacy_closed):
+            session.mkdir(parents=True)
+            session.joinpath("events.jsonl").write_text(
+                '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","reasonCode":"asset_gate_present","repoName":"RepoA"}\n',
+                encoding="utf-8",
+            )
+        closed.joinpath("state.json").write_text(
+            '{"schemaVersion":2,"lifecycle":"closed","closedAtUtc":"2026-06-01T00:00:00Z"}',
+            encoding="utf-8",
+        )
+        active.joinpath("state.json").write_text(
+            '{"schemaVersion":2,"lifecycle":"active","closedAtUtc":null}',
+            encoding="utf-8",
+        )
+        legacy.joinpath("state.json").write_text("{}", encoding="utf-8")
+        legacy_closed.joinpath("state.json").write_text(
+            '{"schemaVersion":1,"lifecycle":"closed"}',
+            encoding="utf-8",
+        )
+
+        result = self.run_json(HOOK_REPORT, plugin_data, "archive", "--before", "2026-06-10", "--dry-run", "--json")
+
+        self.assertEqual(result["status"], "dry_run")
+        self.assertEqual(result["sessionCount"], 1)
+        self.assertEqual(result["eventCount"], 1)
+        self.assertTrue(closed.exists())
+        self.assertTrue(active.exists())
+        self.assertTrue(legacy.exists())
+        self.assertTrue(legacy_closed.exists())
+
+    def test_invalid_utf8_state_is_protected_by_report_and_recovered_by_hook(self) -> None:
+        plugin_data = self.temp_root / "plugin-data"
+        report_session = plugin_data / "RepoA--invalid-state"
+        report_session.mkdir(parents=True)
+        report_session.joinpath("events.jsonl").write_text(
+            '{"timestampUtc":"2026-06-01T00:00:00Z","hookEventName":"Stop","reasonCode":"asset_gate_present","repoName":"RepoA"}\n',
+            encoding="utf-8",
+        )
+        report_session.joinpath("state.json").write_bytes(b"\xff\xfe\x00")
+
+        result = self.run_json(HOOK_REPORT, plugin_data, "archive", "--before", "2026-06-10", "--dry-run", "--json")
+        summary = self.run_json(HOOK_REPORT, plugin_data, "--json")
+
+        self.assertEqual(result["sessionCount"], 0)
+        self.assertEqual(summary["legacy_state_sessions"], 1)
+
+        repo = self.create_repo()
+        hook_state = self.audit_dir(plugin_data, repo, "invalid-hook-state")
+        hook_state.mkdir(parents=True)
+        hook_state.joinpath("state.json").write_bytes(b"\xff\xfe\x00")
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": "invalid-hook-state",
+                "turn_id": "invalid-hook-turn",
+                "cwd": str(repo),
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(stdout)
+        state = json.loads(hook_state.joinpath("state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["schemaVersion"], 2)
+        self.assertEqual(state["lifecycle"], "active")
 
     def test_hook_report_archive_uses_deterministic_suffix_when_hash_dir_exists(self) -> None:
         plugin_data = self.temp_root / "plugin-data"
@@ -3684,6 +4467,124 @@ for index in range(25):
             {(event["writer"], event["index"]) for event in events},
             {(str(writer), index) for writer in range(8) for index in range(25)},
         )
+
+    def test_concurrent_state_transactions_preserve_both_updates(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        writer = self.temp_root / "state_writer.py"
+        event = {
+            "session_id": "session-1",
+            "turn_id": "turn-1",
+            "cwd": str(repo),
+        }
+        writer.write_text(
+            f"""
+import importlib.util
+import json
+import sys
+import time
+
+spec = importlib.util.spec_from_file_location("asset_hook_under_test", {str(HOOK_SCRIPT)!r})
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+event = json.loads(sys.argv[1])
+command = sys.argv[2]
+signal = sys.argv[3]
+
+with module.state_transaction(event) as state:
+    state.setdefault("verificationEvidence", []).append({{"command": command}})
+    signals = set(state.get("meaningfulWorkSignals", []))
+    signals.add(signal)
+    state["meaningfulWorkSignals"] = sorted(signals)
+    time.sleep(0.15)
+""",
+            encoding="utf-8",
+        )
+        env = os.environ.copy()
+        env["PLUGIN_ROOT"] = str(ROOT)
+        env["PLUGIN_DATA"] = str(plugin_data)
+        env["PYTHONIOENCODING"] = "utf-8"
+        processes = [
+            subprocess.Popen(
+                ["python", str(writer), json.dumps(event), command, signal],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                env=env,
+            )
+            for command, signal in (
+                ("dotnet test first.sln", "verification-ran"),
+                ("npm test second", "verification-observed"),
+            )
+        ]
+        results = []
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=10)
+            results.append((process.returncode, stdout, stderr))
+        for returncode, stdout, stderr in results:
+            self.assertEqual(returncode, 0, stderr or stdout)
+
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
+        expected_commands = {"dotnet test first.sln", "npm test second"}
+        self.assertEqual(
+            {entry["commandHash"] for entry in state["verificationEvidence"]},
+            {hashlib.sha256(command.encode("utf-8")).hexdigest()[:16] for command in expected_commands},
+        )
+        self.assertEqual(
+            {entry["commandLength"] for entry in state["verificationEvidence"]},
+            {len(command) for command in expected_commands},
+        )
+        self.assertTrue(all("command" not in entry for entry in state["verificationEvidence"]))
+        self.assertEqual(
+            state["meaningfulWorkSignals"],
+            ["verification-observed", "verification-ran"],
+        )
+
+    def test_hook_state_transaction_waits_for_shared_archive_lifecycle_lock(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        session_id = "archive-lock-session"
+        audit_dir = self.audit_dir(plugin_data, repo, session_id)
+        event = {
+            "hook_event_name": "SessionStart",
+            "session_id": session_id,
+            "turn_id": "archive-lock-turn",
+            "cwd": str(repo),
+        }
+        spec = importlib.util.spec_from_file_location("asset_hook_report_under_test", HOOK_REPORT)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        report_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(report_module)
+        env = os.environ.copy()
+        env["PLUGIN_ROOT"] = str(ROOT)
+        env["PLUGIN_DATA"] = str(plugin_data)
+        env["PYTHONIOENCODING"] = "utf-8"
+
+        with report_module.session_lifecycle_lock(plugin_data, audit_dir):
+            process = subprocess.Popen(
+                ["python", str(HOOK_SCRIPT)],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+            self.assertIsNotNone(process.stdin)
+            process.stdin.write(json.dumps(event).encode("utf-8"))
+            process.stdin.close()
+            time.sleep(0.2)
+            self.assertFalse((audit_dir / "state.json").exists())
+
+        return_code = process.wait(timeout=3)
+        stdout = process.stdout.read().decode("utf-8", errors="replace") if process.stdout else ""
+        stderr = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
+        if process.stdout:
+            process.stdout.close()
+        if process.stderr:
+            process.stderr.close()
+        self.assertEqual(return_code, 0, stderr or stdout)
+        self.assertTrue((audit_dir / "state.json").is_file())
 
     def test_post_tool_use_classifies_common_diagnostic_commands(self) -> None:
         repo = self.create_repo()

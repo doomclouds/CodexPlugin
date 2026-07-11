@@ -1,5 +1,9 @@
 # Superpowers Archive Index
 
+## 2026-07
+
+- [2026-07-11-asset-compounding-v0.5.0-runtime-reliability-archives.md](./2026-07/2026-07-11-asset-compounding-v0.5.0-runtime-reliability-archives.md): v0.5.0 让资产复利 hook 的状态、验证、Stop、跨平台启动和运行身份审计具备可验证的可靠性边界。
+
 ## 2026-06
 
 - [2026-06-28-asset-gate-schema-tolerance-v0.3.3-archives.md](./2026-06/2026-06-28-asset-gate-schema-tolerance-v0.3.3-archives.md): 归档 superpowers-asset-compounding v0.3.3，新增 asset_gate 生成器、YAML-like 宽容解析和 invalid gate 模板，降低门限 schema 反复报错。

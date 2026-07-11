@@ -6,7 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "& \"$env:PLUGIN_ROOT\\hooks\\run_asset_hook.cmd\"",
+            "command": "sh \"$PLUGIN_ROOT/hooks/run_asset_hook.sh\"",
+            "commandWindows": "& \"$env:PLUGIN_ROOT\\hooks\\run_asset_hook.cmd\"",
             "statusMessage": "Loading asset-compounding context"
           }
         ]
@@ -18,7 +19,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "& \"$env:PLUGIN_ROOT\\hooks\\run_asset_hook.cmd\"",
+            "command": "sh \"$PLUGIN_ROOT/hooks/run_asset_hook.sh\"",
+            "commandWindows": "& \"$env:PLUGIN_ROOT\\hooks\\run_asset_hook.cmd\"",
             "statusMessage": "Recording asset closeout signals"
           }
         ]
@@ -29,7 +31,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "& \"$env:PLUGIN_ROOT\\hooks\\run_asset_hook.cmd\"",
+            "command": "sh \"$PLUGIN_ROOT/hooks/run_asset_hook.sh\"",
+            "commandWindows": "& \"$env:PLUGIN_ROOT\\hooks\\run_asset_hook.cmd\"",
             "statusMessage": "Checking asset closeout gate"
           }
         ]
@@ -41,7 +44,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "& \"$env:PLUGIN_ROOT\\hooks\\run_asset_hook.cmd\"",
+            "command": "sh \"$PLUGIN_ROOT/hooks/run_asset_hook.sh\"",
+            "commandWindows": "& \"$env:PLUGIN_ROOT\\hooks\\run_asset_hook.cmd\"",
             "statusMessage": "Saving asset-compounding state"
           }
         ]
@@ -53,7 +57,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "& \"$env:PLUGIN_ROOT\\hooks\\run_asset_hook.cmd\"",
+            "command": "sh \"$PLUGIN_ROOT/hooks/run_asset_hook.sh\"",
+            "commandWindows": "& \"$env:PLUGIN_ROOT\\hooks\\run_asset_hook.cmd\"",
             "statusMessage": "Restoring asset-compounding state"
           }
         ]
