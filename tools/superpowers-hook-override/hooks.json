@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$PLUGIN_ROOT/hooks/run-hook.cmd\" session-start",
+            "commandWindows": "& \"$env:PLUGIN_ROOT\\hooks\\run-hook.cmd\" session-start",
+            "async": false,
+            "statusMessage": "Loading Superpowers workflow"
+          }
+        ]
+      }
+    ]
+  }
+}
