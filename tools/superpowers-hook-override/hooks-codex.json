@@ -6,8 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"$PLUGIN_ROOT/hooks/run-hook.cmd\" session-start",
-            "commandWindows": "& \"$env:PLUGIN_ROOT\\hooks\\run-hook.cmd\" session-start",
+            "command": "sh \"$PLUGIN_ROOT/hooks/run-hook.cmd\" session-start-codex",
+            "commandWindows": "& \"$env:PLUGIN_ROOT\\hooks\\run-codex-session-start.cmd\"",
             "async": false,
             "statusMessage": "Loading Superpowers workflow"
           }

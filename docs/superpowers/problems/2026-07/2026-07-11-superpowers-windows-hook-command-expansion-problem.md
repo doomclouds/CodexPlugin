@@ -1,76 +1,83 @@
-# Superpowers Windows hook 命令变量展开失败
+# Superpowers Codex SessionStart 覆盖未加载
 
-- Date: `2026-07-11`
-- Topic slug: `superpowers-windows-hook-command-expansion`
-- Status: `Captured`
-- Scope: `Environment`
-- Tags: `superpowers`, `codex`, `windows`, `powershell`, `hooks`
+- Date: 2026-07-11
+- Topic slug: superpowers-windows-hook-command-expansion
+- Status: Captured
+- Scope: Environment
+- Tags: superpowers, codex, windows, hooks, manifest, runtime-cache
 
 ## Symptom
 
-`superpowers@superpowers-dev` 在原生 Windows Codex 中没有注入
-SessionStart 的 Superpowers 上下文，看起来像 hook 没有触发；直接复现时命令
-报 `/hooks/run-hook.cmd` 不存在。
+superpowers@superpowers-dev 已启用且 skill 可见，但原生 Windows Codex 的新
+线程没有收到 Superpowers SessionStart 上下文；只改 marketplace 目录中的
+hooks/hooks.json 后，现象完全不变。
 
 ## Trigger / Context
 
-- 已启用的插件通过默认 `hooks/hooks.json` 注册 SessionStart。
-- 注册只写了 Bash/Claude 形式的
-  `"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" session-start`，没有
-  `commandWindows`。
-- Codex 在 Windows 使用 PowerShell 命令语义，而 `${CLAUDE_PLUGIN_ROOT}` 不是
-  `$env:CLAUDE_PLUGIN_ROOT`。
+- 上游 v6.1.1 的 .codex-plugin/plugin.json 声明 "hooks": {}。
+- codex plugin list 显示的是 marketplace 克隆，而实际 hook 运行路径位于
+  %USERPROFILE%\.codex\plugins\cache\superpowers-dev\superpowers\<version>。
+- 新的显式 hook 定义会因 hash 变化进入 modified 状态，未信任时 Codex 会跳过它。
 
 ## Root Cause
 
-插件发现和 hook 信任并非根因。默认 `hooks/hooks.json` 是 Codex 支持的插件
-位置，且 Codex 也会提供兼容的 `CLAUDE_PLUGIN_ROOT` 环境变量；失败发生在
-PowerShell 对命令字符串的展开阶段。`${CLAUDE_PLUGIN_ROOT}` 被当作未定义的
-PowerShell 变量，路径退化为 `/hooks/run-hook.cmd`，因此 `run-hook.cmd` 和
-`session-start` 从未被执行。
+这是三层边界叠加，而不是单纯的 PowerShell 展开失败：
+
+1. 上游故意用空 hooks 对象阻止 Codex 自动发现 Claude 的 hooks/hooks.json，
+   因此该文件即使存在也不会注册。
+2. marketplace 克隆不是实际运行时；只改它不会影响 cache 内已安装版本。
+3. 若重新注册通用脚本，Windows 还需要 commandWindows，且 Codex 必须得到
+   hookSpecificOutput.additionalContext 而不是依赖兼容环境变量分支。
+
+原先观察到的 Bash 形式 CLAUDE_PLUGIN_ROOT PowerShell 展开问题是邻近兼容风险，
+但在 v6.1.1 中它不是“不触发”的主根因，因为上游根本没有注册该通用 hook。
 
 ## Fix
 
-- 保持 POSIX `command`，并新增 Windows 专用
-  `commandWindows: & "$env:PLUGIN_ROOT\hooks\run-hook.cmd" session-start`。
-- 用可追踪的覆盖 JSON 和 PowerShell 应用脚本替换仅活动插件根下的
-  `hooks/hooks.json`。
-- 应用前校验 manifest 的 `name == superpowers`，并将原始与应用文件、哈希和
-  元数据快照到 `%USERPROFILE%\.codex\plugin-overrides`。
-- 覆盖后要求重启 Codex 并在 `/hooks` 重新审核，而不是手写信任哈希。
+- 显式将运行缓存的 manifest 指向 ./hooks/hooks-codex.json。
+- 安装 Codex 专用 session-start-codex，固定输出正确的 hookSpecificOutput JSON，
+  并在 Windows 使用 & "$env:PLUGIN_ROOT\hooks\run-codex-session-start.cmd"。
+- 恢复脚本按版本优先定位实际 cache，快照 manifest 与全部 Codex hook 文件，先
+  写入前置文件、最后提交 manifest，避免复制失败后注册指向不存在的 hook。
+- 严格 Windows launcher 在 Git Bash 缺失时返回非零，不再让上游通用 launcher
+  的静默 exit 0 伪装成“已触发但无上下文”。
+- 不把 PATH 中的裸 bash 当作兼容承诺；WSL 与 WindowsApps alias 可能接受
+  Windows 路径却不具备 Git-for-Windows 的运行边界，因此只接受标准 Git Bash。
+- 通过 hooks/list 读取精确 currentHash 后信任同一 hook state，并以真实
+  ephemeral turn/start 验证运行完成与 context 注入。
 
 ## Why This Fix
 
-Windows override 只修正宿主 shell 的路径展开，仍复用上游的
-`run-hook.cmd`、Git Bash 选择逻辑和 `session-start` 输出协议。它比修改 skill
-内容、直接编辑 `config.toml` 或伪造 trust 记录更小、更可回滚，也能在上游插件
-更新覆盖缓存后通过同一个脚本重放。
+显式 Codex 配置绕开了上游的自动发现抑制，又不改动 skill 内容、Git Bash launcher
+或 resume 语义。cache 路由和快照将“能手工跑”提升为“宿主真正加载且下次可重放”。
+用 Codex 返回的 hash 信任定义避免复用已删除 hooks-codex.json 的旧 hash 或猜测
+序列化规则。
 
 ## Recognition Clues
 
-- `/hooks` 显示 Superpowers SessionStart 已注册，但新线程没有 Superpowers 上下文。
-- 手工在 PowerShell 执行 `${CLAUDE_PLUGIN_ROOT}` 形式命令时路径变为
-  `/hooks/run-hook.cmd`。
-- 将同一输入交给 `$env:PLUGIN_ROOT\hooks\run-hook.cmd` 后退出 `0` 并返回
-  `hookSpecificOutput`。
-- `codex plugin list` 指向 transient marketplace 根，说明直接改缓存会被下一次
-  更新覆盖，必须保留外部恢复包。
+- hooks/list 中没有 pluginId == superpowers@superpowers-dev，但插件和 skill 均已
+  启用：优先检查 manifest 是否为 hooks: {}。
+- hooks/list.sourcePath 指向 cache，而已修改文件位于 .codex\.tmp\marketplaces：
+  修改目标错了。
+- Superpowers hook 出现但 trustStatus 为 modified 或 untrusted：先读取
+  currentHash，不要沿用旧 trust record。
+- 真正的 turn/start 会出现 thread-scoped hook/started 和 hook/completed；
+  debug prompt-input 不执行生命周期 hook，不能作为触发验收。
 
 ## Applicability / Non-Applicability
 
 ### Applies When
 
-- 插件 hook 的通用命令含 Bash 风格 `${VAR}`，而 Codex 在 Windows 使用
-  PowerShell 执行该命令。
-- 插件可在 `hooks/hooks.json` 中提供 `commandWindows`，并且 launcher 可从
-  `PLUGIN_ROOT` 调用。
+- 用户明确希望恢复一个上游在 Codex 中默认禁用的 plugin SessionStart hook。
+- Codex 的 plugin source 与运行 cache 路径不同，或 hook 状态和文件变更不同步。
+- Windows hook 需要 PowerShell 专用命令与 Codex 专用输出协议。
 
 ### Does Not Apply When
 
-- hook 已拥有正确的 `commandWindows` 且手工调用 launcher 已成功；不要为了
-  UI 可见性问题重复覆盖。
-- 失败来自 WindowsApps Python、Git Bash 缺失、trust 未审核或旧会话的失效路径；
-  它们需要各自的诊断与修复。
+- 用户接受上游“skills 原生发现、无 SessionStart 注入”的默认行为；不要无故重启用。
+- hooks/list 已显示同一 Superpowers hook trusted 且真实生命周期已完成；问题应在
+  skill 路由、桌面进程重载或用户期望的 resume 边界中继续定位。
+- 目标是 asset-compounding 插件或其他 plugin；不要复用本覆盖脚本。
 
 ## Related Artifacts
 
@@ -80,6 +87,7 @@ Windows override 只修正宿主 shell 的路径展开，仍复用上游的
 - Related Problems:
   - [WindowsApps Python Alias Hook Hang](../2026-06/2026-06-13-windowsapps-python-alias-hook-hang-problem.md)
 - Code or Test:
-  - [Canonical hook override](../../../../tools/superpowers-hook-override/hooks.json)
+  - [Canonical Codex hook override](../../../../tools/superpowers-hook-override/hooks-codex.json)
+  - [Codex session-start payload](../../../../tools/superpowers-hook-override/session-start-codex)
   - [Application script](../../../../tools/superpowers-hook-override/apply-superpowers-codex-hook-override.ps1)
   - [Regression test](../../../../tools/superpowers-hook-override/test-superpowers-hook-override.ps1)

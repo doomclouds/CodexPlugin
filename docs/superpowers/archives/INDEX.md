@@ -3,7 +3,7 @@
 ## 2026-07
 
 - [2026-07-11-asset-compounding-v0.5.0-runtime-reliability-archives.md](./2026-07/2026-07-11-asset-compounding-v0.5.0-runtime-reliability-archives.md): v0.5.0 让资产复利 hook 的状态、验证、Stop、跨平台启动和运行身份审计具备可验证的可靠性边界。
-- [2026-07-11-superpowers-windows-hook-override-archives.md](./2026-07/2026-07-11-superpowers-windows-hook-override-archives.md): 为 Superpowers 的 Windows Codex SessionStart 提供 `commandWindows` 兼容注册与可重放恢复快照。
+- [2026-07-11-superpowers-windows-hook-override-archives.md](./2026-07/2026-07-11-superpowers-windows-hook-override-archives.md): 为 Superpowers 恢复显式 Codex SessionStart，覆盖运行缓存、严格 Windows launcher 与可重放快照。
 
 ## 2026-06
 

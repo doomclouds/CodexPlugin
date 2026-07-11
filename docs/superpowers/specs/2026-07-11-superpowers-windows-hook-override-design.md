@@ -1,90 +1,53 @@
 # Superpowers Windows Hook Override Design
 
-- Date: `2026-07-11`
-- Topic slug: `superpowers-windows-hook-override`
+- Date: 2026-07-11
+- Topic slug: superpowers-windows-hook-override
 - Status: Approved by direct repair request
-- Scope: `superpowers@superpowers-dev` v6.1.1 on native Windows Codex
+- Scope: superpowers@superpowers-dev v6.1.1 on native Windows Codex
 
 ## Problem and evidence
 
-The active Superpowers plugin discovers `hooks/hooks.json`, but its sole
-`SessionStart` command is Claude/Bash syntax:
+v6.1.1 intentionally declares "hooks": {} in .codex-plugin/plugin.json, so
+Codex suppresses automatic discovery of the Claude-oriented hooks/hooks.json.
+The upstream history confirms this is a deliberate no-SessionStart-hook choice.
 
-```json
-"command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" session-start"
-```
-
-Under the Windows PowerShell command host, `${CLAUDE_PLUGIN_ROOT}` is a
-PowerShell variable rather than an environment-variable reference. A controlled
-reproduction therefore resolves it to `/hooks/run-hook.cmd` and fails before
-the launcher starts. The same input succeeds when invoked through the
-Windows-specific Codex shape:
-
-```json
-"commandWindows": "& \"$env:PLUGIN_ROOT\\hooks\\run-hook.cmd\" session-start"
-```
-
-Codex documents `hooks/hooks.json` as the default plugin hook location and
-documents both `PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` for plugin commands. The
-problem is Windows shell expansion, not plugin discovery, skill content, or the
-stale `hooks-codex.json` trust record.
+The earlier local override changed only the marketplace clone. Codex actually
+loads C:\Users\10062\.codex\plugins\cache\superpowers-dev\superpowers\6.1.1;
+hooks/list therefore showed no Superpowers hook. The generic session-start
+script also has an unsafe fallback output shape for Codex when the compatibility
+environment variable is absent.
 
 ## Design
 
-### Canonical override
-
-Keep `SessionStart`, its matcher, and the upstream `run-hook.cmd` launcher.
-Replace only the hook registration with a dual-platform command:
-
-```json
-{
-  "type": "command",
-  "command": "sh \"$PLUGIN_ROOT/hooks/run-hook.cmd\" session-start",
-  "commandWindows": "& \"$env:PLUGIN_ROOT\\hooks\\run-hook.cmd\" session-start",
-  "async": false,
-  "statusMessage": "Loading Superpowers workflow"
-}
-```
-
-The POSIX command expands `$PLUGIN_ROOT` in `sh`; Windows uses Codex's
-`commandWindows` override. The existing launcher continues to select Git Bash
-for the extensionless `session-start` script.
-
-### Durable recovery kit
-
-Track a small override kit in `tools/superpowers-hook-override/`:
-
-- `hooks.json`: canonical replacement for the active plugin's hook file.
-- `apply-superpowers-codex-hook-override.ps1`: validates the target manifest,
-  snapshots the current file outside the update-prone cache, then atomically
-  copies the canonical configuration.
-- `test-superpowers-hook-override.ps1`: creates a disposable fake plugin root
-  and verifies snapshot, replacement, and manifest guard behavior.
-- `README.md`: copy/reapply procedure after a future Superpowers update.
-
-Every application writes a timestamped snapshot below
-`%USERPROFILE%\.codex\plugin-overrides\superpowers@superpowers-dev\`. The
-repository kit remains the source of truth; the snapshot is a local rollback
-artifact, not a runtime plugin location.
+- Point the runtime manifest explicitly to ./hooks/hooks-codex.json.
+- Keep matcher startup|clear|compact; do not add resume because upstream removed
+  it to prevent duplicate bootstrap injection on resumed threads.
+- Use a dedicated session-start-codex script that always emits
+  hookSpecificOutput.additionalContext.
+- Use commandWindows with a dedicated strict launcher,
+  & "$env:PLUGIN_ROOT\hooks\run-codex-session-start.cmd", so missing Git Bash
+  returns a visible failure rather than a zero-exit empty payload; do not fall
+  through to WSL or WindowsApps bash aliases.
+- Resolve the versioned runtime cache from the marketplace root, snapshot the
+  runtime manifest/hook state under %USERPROFILE%\.codex\plugin-overrides, and
+  stage hook files before atomically committing the manifest pointer.
+- Trust only the exact currentHash reported by hooks/list; never reuse the
+  stale hash for a deleted hook file.
 
 ## Boundaries
 
-- Do not edit Superpowers skills or the upstream `session-start` payload.
-- Do not edit `config.toml` trust hashes or bypass trust. After the hook file
-  changes, Codex must be restarted and the new entry reviewed in `/hooks`.
-- Do not treat the old missing `hooks-codex.json` trust record as an active
-  hook. It is evidence of a prior layout, not the command currently running.
-- Apply only to the active plugin path reported by `codex plugin list`.
+- This is a user-requested local override of upstream's no-Codex-hook choice.
+- Do not modify upstream Superpowers history or re-enable resume.
+- Do not treat the marketplace clone as the runtime source of truth.
+- A fresh runtime probe proves the engine path; the already-running desktop
+  process still needs a restart to load changed files.
 
 ## Acceptance
 
-1. A PowerShell reproduction of the old registered command fails before the
-   launcher, while the Windows override emits a valid `SessionStart`
-   `hookSpecificOutput` payload.
-2. The canonical JSON contains both POSIX `command` and Windows
-   `commandWindows` fields.
-3. Applying the override validates `name == "superpowers"`, keeps a timestamped
-   original snapshot outside the plugin directory, and replaces only
-   `hooks/hooks.json`.
-4. The repeatable test passes against a temporary plugin root.
-5. After restart and `/hooks` trust, a new session receives Superpowers context.
+1. hooks/list shows one enabled Superpowers hook from the runtime cache.
+2. It is trusted, uses commandWindows, and matches startup|clear|compact.
+3. An ephemeral turn/start produces a completed thread-scoped SessionStart run
+   with a context entry.
+4. The recovery-kit test proves cache routing, snapshots, manifest pointer,
+   deterministic payload through the real Windows launcher, missing-hooks
+   manifest compatibility, and wrong-plugin rejection.
