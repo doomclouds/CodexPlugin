@@ -1,0 +1,27 @@
+{
+  "name": "superpowers-lite",
+  "version": "0.1.0",
+  "description": "面向 Codex 的风险适配型工程工作流技能集。",
+  "author": {
+    "name": "doomclouds",
+    "url": "https://github.com/doomclouds"
+  },
+  "homepage": "https://github.com/doomclouds/Ambition/tree/main/plugins/superpowers-lite",
+  "repository": "https://github.com/doomclouds/Ambition",
+  "license": "MIT",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Superpowers Lite",
+    "shortDescription": "适配任务风险与规模的 Codex 工程技能",
+    "longDescription": "为设计、调试、实施、评审和验证提供按需加载的中文操作手册。",
+    "developerName": "doomclouds",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "defaultPrompt": ["我有一个想要实现的功能。", "请为这个项目添加一个功能。"],
+    "websiteURL": "https://github.com/doomclouds/Ambition/tree/main/plugins/superpowers-lite",
+    "brandColor": "#F59E0B",
+    "composerIcon": "./assets/superpowers-small.svg",
+    "logo": "./assets/app-icon.png",
+    "screenshots": []
+  }
+}
