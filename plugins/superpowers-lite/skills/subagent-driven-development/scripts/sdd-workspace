@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Resolve and create the working-tree directory used by SDD artifacts.
+# The directory is self-ignored so reports stay out of accidental commits.
+# Usage: sdd-workspace
+# Keep LF line endings because Unix-like test environments invoke this directly.
+set -euo pipefail
+
+root=$(git rev-parse --show-toplevel)
+dir="$root/.superpowers/sdd"
+mkdir -p "$dir"
+printf '*\n' > "$dir/.gitignore"
+cd "$dir" && pwd

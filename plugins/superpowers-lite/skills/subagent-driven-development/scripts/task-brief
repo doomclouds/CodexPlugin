@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Extract one task from a plan into a durable worker brief.
+# Usage: task-brief PLAN_FILE TASK_NUMBER [OUTFILE]
+# Default: <repo-root>/.superpowers/sdd/task-<N>-brief.md
+# Keep LF line endings because Unix-like test environments invoke this directly.
+set -euo pipefail
+
+if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+  echo "用法: task-brief PLAN_FILE TASK_NUMBER [OUTFILE]" >&2
+  exit 2
+fi
+
+plan=$1
+n=$2
+[ -f "$plan" ] || { echo "计划文件不存在: $plan" >&2; exit 2; }
+
+if [ $# -eq 3 ]; then
+  out=$3
+else
+  dir=$("$(cd "$(dirname "$0")" && pwd)/sdd-workspace")
+  out="$dir/task-${n}-brief.md"
+fi
+
+awk -v n="$n" '
+  /^```/ { infence = !infence }
+  !infence && /^#+[ \t]+Task[ \t]+[0-9]+/ {
+    intask = ($0 ~ ("^#+[ \t]+Task[ \t]+" n "([^0-9]|$)"))
+  }
+  !infence && /^#+[ \t]+任务[ \t]+[0-9]+/ {
+    intask = ($0 ~ ("^#+[ \t]+任务[ \t]+" n "([^0-9]|$)"))
+  }
+  intask { print }
+' "$plan" > "$out"
+
+if [ ! -s "$out" ]; then
+  echo "在 ${plan} 中找不到任务 ${n}（标题需匹配 Task ${n} 或任务 ${n}）" >&2
+  exit 3
+fi
+
+echo "已写入 ${out}: $(wc -l < "$out" | tr -d ' ') 行"

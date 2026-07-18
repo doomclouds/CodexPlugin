@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Package committed or uncommitted work for read-only review.
+# This script never stages or commits.
+set -euo pipefail
+
+usage() {
+  echo '用法: review-package BASE HEAD [OUTFILE]' >&2
+  echo '  或: review-package --worktree BASE [OUTFILE]' >&2
+  exit 2
+}
+
+mode=range
+if [ "${1:-}" = '--worktree' ]; then
+  mode=worktree
+  [ $# -ge 2 ] && [ $# -le 3 ] || usage
+  base=$2
+  out=${3:-}
+else
+  [ $# -ge 2 ] && [ $# -le 3 ] || usage
+  base=$1
+  head=$2
+  out=${3:-}
+fi
+
+git rev-parse --verify --quiet "$base" >/dev/null || { echo "无效 BASE: $base" >&2; exit 2; }
+if [ "$mode" = range ]; then
+  git rev-parse --verify --quiet "$head" >/dev/null || { echo "无效 HEAD: $head" >&2; exit 2; }
+fi
+
+if [ -z "$out" ]; then
+  dir=$("$(cd "$(dirname "$0")" && pwd)/sdd-workspace")
+  if [ "$mode" = worktree ]; then
+    out="$dir/review-worktree-$(git rev-parse --short "$base").diff"
+  else
+    out="$dir/review-$(git rev-parse --short "$base")..$(git rev-parse --short "$head").diff"
+  fi
+fi
+mkdir -p "$(dirname "$out")"
+
+if [ "$mode" = range ]; then
+  {
+    echo "# 评审包: ${base}..${head}"
+    echo; echo '## 提交'; git log --oneline "${base}..${head}"
+    echo; echo '## 变更文件'; git diff --stat "${base}..${head}"
+    echo; echo '## 差异'; git diff -U10 "${base}..${head}"
+  } > "$out"
+else
+  {
+    echo "# 评审包: 工作区对比 ${base}"
+    echo '# 只读快照；没有暂存或提交任何文件。'
+    echo; echo '## 状态'; git status --short --untracked-files=all
+    echo; echo '## BASE 后提交'; git log --oneline "${base}..HEAD"
+    echo; echo '## 已暂存差异'; git diff --cached -U10 "$base"
+    echo; echo '## 未暂存差异'; git diff -U10
+    echo; echo '## 未跟踪且未忽略文件'
+    while IFS= read -r -d '' file; do
+      printf '\n### %s\n' "$file"
+      git diff --no-index -- /dev/null "$file" || true
+    done < <(git ls-files --others --exclude-standard -z)
+  } > "$out"
+fi
+
+echo "已写入 ${out}: $(wc -l < "$out" | tr -d ' ') 行"
