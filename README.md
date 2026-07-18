@@ -7,7 +7,6 @@
 - `figure`: 将图像类图表重建为可编辑 Visio 图形的 Codex 插件。
 - `git-workflow`: 清理 stale branches、创建提交、推送并创建 PR 的 Git 工作流插件。
 - `superpowers-asset-compounding`: 将完成的需求、调试经验和复用线索沉淀为仓库内 Superpowers 资产的 Codex 插件。
-- `superpowers-lite`: 面向 Codex 的风险适配型中文工程工作流技能集。
 
 暂时不用的插件放在 `deprecated-plugins/`，不会出现在当前 marketplace 中。
 
@@ -24,7 +23,6 @@ codex plugin marketplace list
 codex plugin add figure@codex-plugin
 codex plugin add git-workflow@codex-plugin
 codex plugin add superpowers-asset-compounding@codex-plugin
-codex plugin add superpowers-lite@codex-plugin
 ```
 
 安装或升级后，开启一个新线程再使用插件，确保 Codex 重新加载插件内的 skills、hooks 和工具配置。
@@ -38,7 +36,6 @@ codex plugin marketplace upgrade codex-plugin
 codex plugin add figure@codex-plugin
 codex plugin add git-workflow@codex-plugin
 codex plugin add superpowers-asset-compounding@codex-plugin
-codex plugin add superpowers-lite@codex-plugin
 ```
 
 然后开启新线程验证。旧的 `local-home` cache 同步脚本不再作为本仓库发布流程使用。
@@ -73,11 +70,6 @@ plugins/
     skills/
     hooks/
     tests/
-  superpowers-lite/
-    .codex-plugin/
-      plugin.json
-    assets/
-    skills/
 ```
 
 ## License
