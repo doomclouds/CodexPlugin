@@ -7,7 +7,6 @@ from pathlib import Path
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_SKILLS = {
     "clarify",
-    "spec",
     "plan",
     "build",
     "debug",
@@ -79,6 +78,17 @@ class EngineeringWorkflowPluginTests(unittest.TestCase):
         )
         self.assertIn("RED:", build)
         self.assertIn("RED skipped:", build)
+
+    def test_plan_owns_task_definition_and_execution_plan(self) -> None:
+        plan = (PLUGIN_ROOT / "skills" / "plan" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "spec、规格、设计说明、实施计划",
+            "AC-*",
+            "执行计划只是同一任务文档",
+        ):
+            self.assertIn(required, plan)
 
     def test_markdown_references_resolve(self) -> None:
         for path in PLUGIN_ROOT.rglob("*.md"):

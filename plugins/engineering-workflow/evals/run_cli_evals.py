@@ -11,7 +11,6 @@ EVAL_ROOT = Path(__file__).resolve().parent
 PLUGIN_ROOT = EVAL_ROOT.parent
 KNOWN_STAGE_SKILLS = {
     "clarify",
-    "spec",
     "plan",
     "build",
     "debug",

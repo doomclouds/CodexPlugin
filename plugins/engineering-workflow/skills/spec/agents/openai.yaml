@@ -1,6 +1,0 @@
-interface:
-  display_name: "编写规格"
-  short_description: "把复杂需求整理成明确的验收条件、功能范围、风险和任务文档"
-  default_prompt: "使用 $spec 整理当前需求并更新任务文档。"
-policy:
-  allow_implicit_invocation: true

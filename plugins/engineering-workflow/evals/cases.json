@@ -5,7 +5,7 @@
       "id": "small-clear-change",
       "prompt": "把 README 里的错别字‘验正’改成‘验证’，改完确认没有其他改动。",
       "expected_skills": ["build", "verify"],
-      "excluded_skills": ["clarify", "spec", "plan", "explore"],
+      "excluded_skills": ["clarify", "plan", "explore"],
       "constraints": ["不创建规格或计划文档", "不修改相邻内容"]
     },
     {
@@ -18,7 +18,7 @@
     {
       "id": "cross-session-feature",
       "prompt": "为采集服务实现断线重连：最多重试 3 次、指数退避、取消立即停止、耗尽后返回明确失败。任务会跨多个会话，请完成规格、计划、实现、审查和验收。",
-      "expected_skills": ["spec", "plan", "build", "review", "verify"],
+      "expected_skills": ["plan", "build", "review", "verify"],
       "excluded_skills": [],
       "constraints": ["使用稳定的 AC 编号", "覆盖取消和重试耗尽边界"]
     },
@@ -33,7 +33,7 @@
       "id": "fix-reproducible-bug",
       "prompt": "定位并修复 CSV 最后一行没有换行时被漏读的问题，补回归测试，审查并验收。",
       "expected_skills": ["debug", "build", "review", "verify"],
-      "excluded_skills": ["spec", "plan", "explore"],
+      "excluded_skills": ["plan", "explore"],
       "constraints": ["先复现再修复", "保留 RED 证据"]
     },
     {
@@ -61,27 +61,27 @@
       "id": "whole-group-does-not-mean-all-stages",
       "prompt": "使用整个工程协作技能组，把命令行帮助里的一个 typo 修掉并验证，不要扩大范围。",
       "expected_skills": ["build", "verify"],
-      "excluded_skills": ["clarify", "spec", "plan", "explore"],
+      "excluded_skills": ["clarify", "plan", "explore"],
       "constraints": ["选择最小技能链", "不为流程完整调用全部技能"]
     },
     {
       "id": "domain-language-update",
       "prompt": "我们代码里把同一个业务概念同时叫 Record、Acquisition 和 Capture。请统一领域语言，更新对应领域的 CONTEXT.md 和 CONTEXT.MAP.md 导航，不要修改实现。",
       "expected_skills": ["clarify"],
-      "excluded_skills": ["build", "spec", "plan", "verify"],
+      "excluded_skills": ["build", "plan", "verify"],
       "constraints": ["用具体场景消除同词多义", "CONTEXT.MAP.md 只做导航，CONTEXT.md 不写实现细节"]
     },
     {
       "id": "architecture-design-only",
       "prompt": "只设计采集设备模块的公共接口和测试接缝，比较至少两个方案，不要开始实现。",
-      "expected_skills": ["clarify", "spec"],
+      "expected_skills": ["plan"],
       "excluded_skills": ["build", "review", "verify"],
       "constraints": ["比较深度和局部性", "不为单一实现制造假抽象"]
     },
     {
       "id": "persist-complex-task",
       "prompt": "这项设备断线重连工作会跨多个会话。先统一 ConnectionAttempt、ReconnectPolicy 等领域术语，再把规格和可恢复计划写入仓库；本次不要实现。",
-      "expected_skills": ["clarify", "spec", "plan"],
+      "expected_skills": ["clarify", "plan"],
       "excluded_skills": ["build", "review", "verify"],
       "constraints": ["创建或更新领域 CONTEXT.md 和 CONTEXT.MAP.md", "规格和计划维护在同一份按年月分桶的任务文档中"]
     },
