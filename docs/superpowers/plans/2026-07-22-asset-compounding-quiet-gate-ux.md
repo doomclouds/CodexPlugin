@@ -598,16 +598,9 @@ Restart Codex, open `/hooks`, and approve the v0.5.1 Hook definition. Open a new
 
 - [ ] **Step 4: Run the missing/invalid Stop -> corrected asset-writing host probe**
 
-In the new task, run this focused verification, then make the first final handoff with a missing or invalid hidden gate:
-
-```bash
-TMPDIR=/private/tmp .venv/bin/python -m unittest \
-  plugins.superpowers-asset-compounding.tests.test_asset_scripts.AssetScriptTests.test_emit_asset_gate_hides_none_route_and_remains_valid
-```
-
-Expected first result: Stop blocks once and shows exactly one visible `资产复利未完成：...` failure with cause, impact, and next step.
-
-On the continuation, create exactly `docs/superpowers/inbox/2026-07-22-quiet-gate-host-probe.md` with this probe-only content:
+In the new task, first create exactly
+`docs/superpowers/inbox/2026-07-22-quiet-gate-host-probe.md` with this
+probe-only content:
 
 ```markdown
 # Quiet Gate Host Probe
@@ -615,7 +608,21 @@ On the continuation, create exactly `docs/superpowers/inbox/2026-07-22-quiet-gat
 Temporary probe only; do not index or archive.
 ```
 
-Do not add the probe to `docs/superpowers/inbox/INDEX.md`; the probe must never be staged or archived. Close the corrected handoff with `emit_asset_gate.py` using route `inbox` and `related_assets` set to that exact path.
+Do not add the probe to `docs/superpowers/inbox/INDEX.md`; the probe must never be staged or archived. Then run this focused verification and make the first
+final handoff with a missing or invalid hidden gate:
+
+```bash
+TMPDIR=/private/tmp .venv/bin/python -m unittest \
+  plugins.superpowers-asset-compounding.tests.test_asset_scripts.AssetScriptTests.test_emit_asset_gate_hides_none_route_and_remains_valid
+```
+
+Expected first result: the controlled file edit marks meaningful work, so Stop
+blocks once and shows exactly one visible `资产复利未完成：...` failure with
+cause, impact, and next step. The focused test alone does not make a gate due.
+
+On the continuation, do not modify another file. Close the corrected handoff
+with `emit_asset_gate.py` using route `inbox` and `related_assets` set to that
+exact path.
 
 Expected corrected result: the later final handoff shows exactly one `资产复利：已更新 ...` receipt for that path, while the hidden gate and HTML comment markers remain invisible. The prior failure and later success receipt are allowed because they belong to separate final handoffs; the corrected handoff must not duplicate its receipt.
 
@@ -676,7 +683,7 @@ Add this first bullet under `## 2026-07` in `docs/superpowers/archives/INDEX.md`
 Run:
 
 ```bash
-.venv/bin/python plugins/superpowers-asset-compounding/skills/compound-development-asset/scripts/check_completion_gate.py . --completed-topic "asset compounding quiet gate ux" --json
+.venv/bin/python plugins/superpowers-asset-compounding/skills/compound-development-asset/scripts/check_completion_gate.py . --completed-topic "asset compounding v0.5.1 quiet gate ux" --json
 git diff --check
 git add docs/superpowers/archives/2026-07/2026-07-22-asset-compounding-v0.5.1-quiet-gate-ux-archives.md docs/superpowers/archives/INDEX.md
 git commit -m "docs(asset-compounding): archive quiet gate ux v0.5.1"

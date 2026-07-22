@@ -2,6 +2,7 @@
 
 ## 2026-07
 
+- [2026-07-22-asset-compounding-v0.5.1-quiet-gate-ux-archives.md](./2026-07/2026-07-22-asset-compounding-v0.5.1-quiet-gate-ux-archives.md): v0.5.1 隐藏常规 asset_gate，只在资产写入或不可恢复异常时向用户反馈，并通过真实 Stop 纠正流程验收。
 - [2026-07-11-asset-compounding-v0.5.0-runtime-reliability-archives.md](./2026-07/2026-07-11-asset-compounding-v0.5.0-runtime-reliability-archives.md): v0.5.0 让资产复利 hook 的状态、验证、Stop、跨平台启动和运行身份审计具备可验证的可靠性边界。
 - [2026-07-11-superpowers-windows-hook-override-archives.md](./2026-07/2026-07-11-superpowers-windows-hook-override-archives.md): 为 Superpowers 恢复显式 Codex SessionStart，覆盖运行缓存、严格 Windows launcher 与可重放快照。
 
