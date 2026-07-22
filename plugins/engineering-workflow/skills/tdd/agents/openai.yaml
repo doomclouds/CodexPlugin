@@ -1,0 +1,6 @@
+interface:
+  display_name: "测试驱动开发"
+  short_description: "用失败测试驱动一个行为切片，完成最小实现并保持测试可信"
+  default_prompt: "使用 $tdd 通过 RED、GREEN、REFACTOR 循环实现这个行为。"
+policy:
+  allow_implicit_invocation: true

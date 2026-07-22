@@ -1,7 +1,7 @@
 {
   "name": "engineering-workflow",
-  "version": "0.4.0",
-  "description": "Chinese-first engineering workflow plugin for clarification, task planning, implementation, debugging, exploration, review, and verification.",
+  "version": "0.5.0",
+  "description": "Chinese-first engineering workflow plugin for clarification, task planning, test-driven implementation, debugging, exploration, review, and verification.",
   "author": {
     "name": "doomclouds",
     "url": "https://github.com/doomclouds"
@@ -18,13 +18,14 @@
     "debugging",
     "code-review",
     "verification",
+    "tdd",
     "chinese"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Engineering Workflow",
     "shortDescription": "面向中文开发者的精简工程闭环。",
-    "longDescription": "七个精简工程技能共享同一份项目连续性契约。强模型自行选择最小方法；复杂任务将领域语言、验收、计划、进度、风险和证据维护在少量 Markdown 资产中，确保后续会话可以继续推进。",
+    "longDescription": "七个精简工作流技能加一个可选 TDD 方法，共享同一份项目连续性契约。强模型自行选择最小方法；复杂任务将领域语言、验收、计划、进度、风险和证据维护在少量 Markdown 资产中，确保后续会话可以继续推进。",
     "developerName": "doomclouds",
     "category": "Productivity",
     "capabilities": [
@@ -36,6 +37,7 @@
       "把复杂任务维护为可跨会话恢复的领域上下文和任务文档。",
       "澄清这个需求，并判断是否需要任务计划。",
       "按垂直切片实现这个功能并持续运行验证。",
+      "使用 TDD 通过失败测试逐步实现这个核心行为。",
       "审查并验收当前代码变更，给出可复现证据。"
     ],
     "brandColor": "#0F766E"

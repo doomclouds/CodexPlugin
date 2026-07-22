@@ -3,12 +3,15 @@ import re
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_SKILLS = {
     "clarify",
     "plan",
     "build",
+    "tdd",
     "debug",
     "explore",
     "review",
@@ -22,12 +25,9 @@ def read_frontmatter(path: Path) -> dict[str, str]:
     if match is None:
         raise AssertionError(f"Missing frontmatter: {path}")
 
-    fields = {}
-    for line in match.group("body").splitlines():
-        key, separator, value = line.partition(":")
-        if not separator:
-            raise AssertionError(f"Invalid frontmatter line in {path}: {line}")
-        fields[key.strip()] = value.strip()
+    fields = yaml.safe_load(match.group("body"))
+    if not isinstance(fields, dict):
+        raise AssertionError(f"Invalid frontmatter mapping: {path}")
     return fields
 
 
@@ -38,6 +38,9 @@ class EngineeringWorkflowPluginTests(unittest.TestCase):
         )
         self.assertEqual("engineering-workflow", manifest["name"])
         self.assertEqual("./skills/", manifest["skills"])
+        self.assertRegex(manifest["version"], r"^0\.\d+\.\d+$")
+        self.assertEqual(len(manifest["keywords"]), len(set(manifest["keywords"])))
+        self.assertEqual("Engineering Workflow", manifest["interface"]["displayName"])
 
         skill_names = {
             path.name
@@ -55,15 +58,23 @@ class EngineeringWorkflowPluginTests(unittest.TestCase):
                 self.assertEqual(skill_name, fields["name"])
                 self.assertTrue(fields["description"])
 
-                ui = (skill_root / "agents" / "openai.yaml").read_text(encoding="utf-8")
-                description = re.search(r'^  short_description: "([^"]+)"$', ui, re.MULTILINE)
-                prompt = re.search(r'^  default_prompt: "([^"]+)"$', ui, re.MULTILINE)
-                self.assertIsNotNone(description)
-                self.assertIsNotNone(prompt)
-                self.assertLessEqual(25, len(description.group(1)))
-                self.assertLessEqual(len(description.group(1)), 64)
-                self.assertIn(f"${skill_name}", prompt.group(1))
-                self.assertIn("allow_implicit_invocation: true", ui)
+                skill_text = (skill_root / "SKILL.md").read_text(encoding="utf-8")
+                self.assertLessEqual(len(skill_text.splitlines()), 500)
+
+                ui = yaml.safe_load(
+                    (skill_root / "agents" / "openai.yaml").read_text(encoding="utf-8")
+                )
+                self.assertEqual({"interface", "policy"}, set(ui))
+                self.assertEqual(
+                    {"display_name", "short_description", "default_prompt"},
+                    set(ui["interface"]),
+                )
+                description = ui["interface"]["short_description"]
+                prompt = ui["interface"]["default_prompt"]
+                self.assertLessEqual(25, len(description))
+                self.assertLessEqual(len(description), 64)
+                self.assertIn(f"${skill_name}", prompt)
+                self.assertIs(True, ui["policy"]["allow_implicit_invocation"])
 
     def test_shared_contract_is_present_where_consumed(self) -> None:
         for skill_name in EXPECTED_SKILLS:
@@ -76,8 +87,13 @@ class EngineeringWorkflowPluginTests(unittest.TestCase):
         build = (PLUGIN_ROOT / "skills" / "build" / "SKILL.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("RED:", build)
-        self.assertIn("RED skipped:", build)
+        self.assertIn("../tdd/SKILL.md", build)
+
+        tdd = (PLUGIN_ROOT / "skills" / "tdd" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        for marker in ("RED", "GREEN", "REFACTOR", "公开入口", "实现证据"):
+            self.assertIn(marker, tdd)
 
     def test_plan_owns_task_definition_and_execution_plan(self) -> None:
         plan = (PLUGIN_ROOT / "skills" / "plan" / "SKILL.md").read_text(
@@ -87,6 +103,7 @@ class EngineeringWorkflowPluginTests(unittest.TestCase):
             "spec、规格、设计说明、实施计划",
             "AC-*",
             "执行计划只是同一任务文档",
+            "../tdd/SKILL.md",
         ):
             self.assertIn(required, plan)
 
@@ -167,21 +184,63 @@ class EngineeringWorkflowPluginTests(unittest.TestCase):
         document = json.loads(
             (PLUGIN_ROOT / "evals" / "cases.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(1, document["schema_version"])
-        self.assertGreaterEqual(len(document["cases"]), 13)
+        self.assertEqual(2, document["schema_version"])
+        self.assertGreaterEqual(len(document["cases"]), 20)
 
         case_ids = set()
+        prompts = set()
+        expected_coverage = set()
         for case in document["cases"]:
             with self.subTest(case=case["id"]):
                 self.assertNotIn(case["id"], case_ids)
                 case_ids.add(case["id"])
+                self.assertNotIn(case["prompt"], prompts)
+                prompts.add(case["prompt"])
                 expected = set(case["expected_skills"])
-                excluded = set(case["excluded_skills"])
+                allowed = set(case["allowed_skills"])
+                expected_coverage.update(expected)
                 self.assertTrue(case["prompt"])
-                self.assertTrue(case["constraints"])
                 self.assertTrue(expected)
-                self.assertLessEqual(expected | excluded, EXPECTED_SKILLS)
-                self.assertFalse(expected & excluded)
+                self.assertLessEqual(expected, allowed)
+                self.assertLessEqual(allowed, EXPECTED_SKILLS)
+
+                for before, after in case.get("order_constraints", []):
+                    self.assertNotEqual(before, after)
+                    self.assertIn(before, allowed)
+                    self.assertIn(after, allowed)
+
+                for group in case.get("required_one_of", []):
+                    self.assertGreaterEqual(len(group), 2)
+                    self.assertLessEqual(set(group), allowed)
+
+                for check_name in ("required_patterns", "forbidden_patterns"):
+                    for field, patterns in case.get(check_name, {}).items():
+                        self.assertIn(
+                            field,
+                            {
+                                "goal",
+                                "assumptions",
+                                "acceptance_criteria",
+                                "edge_behaviors",
+                                "non_goals",
+                                "risks",
+                                "action_boundary",
+                                "rationale",
+                            },
+                        )
+                        self.assertTrue(patterns)
+                        for pattern in patterns:
+                            re.compile(pattern)
+
+        self.assertEqual(EXPECTED_SKILLS, expected_coverage)
+        for skill_name in EXPECTED_SKILLS:
+            self.assertTrue(
+                any(
+                    skill_name not in case["allowed_skills"]
+                    for case in document["cases"]
+                ),
+                f"Missing negative routing coverage for {skill_name}",
+            )
 
 
 if __name__ == "__main__":
