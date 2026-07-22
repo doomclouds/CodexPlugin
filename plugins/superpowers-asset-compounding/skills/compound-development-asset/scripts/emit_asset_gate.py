@@ -31,16 +31,20 @@ def join_values(values: list[str] | None) -> str:
 
 def main() -> int:
     args = parse_args()
-    block = canonical_asset_gate_text(
-        event_type=args.event_type,
-        route=args.route,
-        reason=args.reason,
-        evidence=join_values(args.evidence),
-        related_assets=args.related_assets,
-        asset_candidates=args.asset_candidates,
-        deferred_signals=args.deferred_signals,
-        next_step=args.next_step,
-    )
+    try:
+        block = canonical_asset_gate_text(
+            event_type=args.event_type,
+            route=args.route,
+            reason=args.reason,
+            evidence=join_values(args.evidence),
+            related_assets=args.related_assets,
+            asset_candidates=args.asset_candidates,
+            deferred_signals=args.deferred_signals,
+            next_step=args.next_step,
+        )
+    except ValueError as exc:
+        print(f"invalid asset_gate arguments: {exc}", file=sys.stderr)
+        return 2
     validation = validate_asset_gate_text(block)
     if not validation["valid"]:
         missing = ", ".join(str(item) for item in validation.get("missing") or [])

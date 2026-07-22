@@ -42,6 +42,11 @@ def _normalize_empty_value(value: str) -> str:
     return "none" if cleaned in {"[]", "{}", "null", "None"} else cleaned
 
 
+def _validate_canonical_scalar(field: str, value: str) -> None:
+    if "\r" in value or "\n" in value or "-->" in value:
+        raise ValueError(f"{field} contains an unsafe line break or HTML comment closure")
+
+
 def _set_field(fields: dict[str, str], key: str, value: str) -> None:
     fields[key] = _normalize_empty_value(value)
 
@@ -152,17 +157,20 @@ def canonical_asset_gate_text(
     deferred_signals: str = "none",
     next_step: str = "none",
 ) -> str:
+    raw_fields = {
+        "event_type": event_type,
+        "route": route,
+        "reason": reason,
+        "evidence": evidence,
+        "related_assets": related_assets,
+        "asset_candidates": asset_candidates,
+        "deferred_signals": deferred_signals,
+        "next_step": next_step,
+    }
+    for field, value in raw_fields.items():
+        _validate_canonical_scalar(field, value)
     fields = normalize_asset_gate_fields(
-        {
-            "event_type": event_type.strip(),
-            "route": route.strip(),
-            "reason": reason.strip(),
-            "evidence": evidence.strip(),
-            "related_assets": related_assets.strip(),
-            "asset_candidates": asset_candidates.strip(),
-            "deferred_signals": deferred_signals.strip(),
-            "next_step": next_step.strip(),
-        }
+        {field: value.strip() for field, value in raw_fields.items()}
     )
     return (
         "asset_gate:\n"
@@ -178,6 +186,8 @@ def canonical_asset_gate_text(
 
 
 def asset_gate_handoff_text(block: str, *, route: str, related_assets: str) -> str:
+    if "-->" in block:
+        raise ValueError("asset_gate block contains an HTML comment closure")
     hidden_gate = f"<!-- asset-compounding\n{block}\n-->"
     if route.strip() == "none":
         return hidden_gate

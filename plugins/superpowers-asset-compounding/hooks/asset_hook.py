@@ -41,22 +41,50 @@ def main() -> int:
         )
         return 1
 
+    if not isinstance(event, dict):
+        append_raw_usage_event(
+            "HookInput",
+            decision="error",
+            reason_code="invalid_event_shape",
+            durationMs=elapsed_ms(started_at),
+        )
+        print(
+            "资产复利未完成：Hook 输入类型无效；主要任务可能已完成，但本轮知识尚未沉淀。"
+            "下一步：重试当前操作。",
+            file=sys.stderr,
+        )
+        return 1
+
     event["_assetHookStartedAt"] = started_at
-    hook_event_name = str(event.get("hook_event_name", ""))
-    handlers = {
-        "SessionStart": handle_session_start,
-        "PostToolUse": handle_post_tool_use,
-        "Stop": handle_stop,
-        "PreCompact": handle_pre_compact,
-        "PostCompact": handle_post_compact,
-    }
-    handler = handlers.get(hook_event_name)
-    if handler is None:
+    try:
+        hook_event_name = str(event.get("hook_event_name", ""))
+        handlers = {
+            "SessionStart": handle_session_start,
+            "PostToolUse": handle_post_tool_use,
+            "Stop": handle_stop,
+            "PreCompact": handle_pre_compact,
+            "PostCompact": handle_post_compact,
+        }
+        handler = handlers.get(hook_event_name)
+        if handler is None:
+            return 0
+        output = handler(event)
+        if output is not None:
+            print(json.dumps(output, ensure_ascii=False))
         return 0
-    output = handler(event)
-    if output is not None:
-        print(json.dumps(output, ensure_ascii=False))
-    return 0
+    except Exception:  # pragma: no cover - exercised through the process boundary
+        append_raw_usage_event(
+            "HookRuntime",
+            decision="error",
+            reason_code="dispatch_error",
+            durationMs=elapsed_ms(started_at),
+        )
+        print(
+            "资产复利未完成：Hook 运行失败；主要任务可能已完成，但本轮知识尚未沉淀。"
+            "下一步：重试当前操作。",
+            file=sys.stderr,
+        )
+        return 1
 
 
 def read_stdin_with_timeout(started_at: float) -> str | None:
@@ -271,6 +299,24 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
             validation = handoff_checks.validate_asset_gate_text(message, allow_defaults=True)
             if not validation.get("valid"):
                 sanitized_validation = sanitize_validation_for_audit(validation)
+                if event.get("stop_hook_active") or state.get("stopContinuationUsed"):
+                    append_usage_event(
+                        event,
+                        "Stop",
+                        decision="warn",
+                        reason_code="continuation_already_used",
+                        hasAssetGate=True,
+                        hasMeaningfulWork=has_stop_closeout_work(state),
+                        signals=state.get("meaningfulWorkSignals", []),
+                        candidateCount=len(state.get("subagentCandidates", [])),
+                        validation=sanitized_validation,
+                    )
+                    return {
+                        "systemMessage": (
+                            "Asset compounding still lacks a valid hidden asset gate after one Stop retry."
+                        )
+                    }
+                state["stopContinuationUsed"] = True
                 append_usage_event(
                     event,
                     "Stop",

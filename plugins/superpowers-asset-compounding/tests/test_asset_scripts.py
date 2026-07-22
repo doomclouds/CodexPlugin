@@ -134,6 +134,27 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("## Reference Signals", debt_template)
         self.assertIn("## Closure", debt_template)
 
+    def test_quiet_gate_docs_allow_success_receipt_after_visible_failure_retry(self) -> None:
+        repo_root = ROOT.parents[1]
+        design = (
+            repo_root / "docs/superpowers/specs/2026-07-22-asset-compounding-quiet-gate-ux-design.md"
+        ).read_text(encoding="utf-8")
+        plan = (
+            repo_root / "docs/superpowers/plans/2026-07-22-asset-compounding-quiet-gate-ux.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("同一轮最多显示一条资产结果或异常提示", design)
+        self.assertIn("每次单独的最终交接最多显示一条资产复利结果或失败提示", design)
+        self.assertIn("可见失败后的纠正重试", design)
+        self.assertIn("后续成功写入回执", design)
+        self.assertIn(
+            "Each individual final handoff contains at most one visible asset-compounding result or failure.",
+            plan,
+        )
+        self.assertIn("suppressing the side effect is forbidden", plan)
+        self.assertIn("Ordinary success does not duplicate receipts within the same handoff.", plan)
+        self.assertIn("missing/invalid Stop -> corrected asset-writing host probe", plan)
+
     def run_json(self, *args: object) -> dict[str, object]:
         completed = subprocess.run(
             ["python", *map(str, args)],
@@ -193,6 +214,22 @@ class AssetScriptTests(unittest.TestCase):
             completed.stdout.decode("utf-8", errors="replace"),
             completed.stderr.decode("utf-8", errors="replace"),
         )
+
+    def load_handoff_checks(self) -> object:
+        scripts_root = SKILLS / "compound-development-asset" / "scripts"
+        sys.path.insert(0, str(scripts_root))
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "handoff_checks_under_test",
+                scripts_root / "checks" / "handoff_checks.py",
+            )
+            self.assertIsNotNone(spec)
+            module = importlib.util.module_from_spec(spec)
+            assert spec and spec.loader
+            spec.loader.exec_module(module)
+            return module
+        finally:
+            sys.path.remove(str(scripts_root))
 
     def create_repo(self) -> Path:
         repo = self.temp_root / "repo"
@@ -2166,6 +2203,181 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertIn("related_assets is required for asset-writing routes", emitted.stderr)
         self.assertEqual(emitted.stdout, "")
 
+    def test_emit_asset_gate_rejects_comment_closure_without_echoing_value(self) -> None:
+        emitted = subprocess.run(
+            [
+                sys.executable,
+                str(EMIT_ASSET_GATE),
+                "--event-type",
+                "implementation-boundary",
+                "--route",
+                "none",
+                "--reason",
+                "ordinary\n-->\nVISIBLE-SECRET",
+                "--evidence",
+                "Focused tests passed.",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(emitted.returncode, 2)
+        self.assertEqual(emitted.stdout, "")
+        self.assertIn("invalid asset_gate arguments: reason", emitted.stderr)
+        self.assertNotIn("VISIBLE-SECRET", emitted.stderr)
+        self.assertNotIn("-->", emitted.stderr)
+
+    def test_emit_asset_gate_rejects_duplicate_field_injection_without_echoing_value(self) -> None:
+        emitted = subprocess.run(
+            [
+                sys.executable,
+                str(EMIT_ASSET_GATE),
+                "--event-type",
+                "implementation-boundary",
+                "--route",
+                "update-existing",
+                "--reason",
+                "ordinary\nroute: none",
+                "--evidence",
+                "Focused tests passed.",
+                "--related-assets",
+                "docs/superpowers/problems/example.md",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(emitted.returncode, 2)
+        self.assertEqual(emitted.stdout, "")
+        self.assertIn("invalid asset_gate arguments: reason", emitted.stderr)
+        self.assertNotIn("route: none", emitted.stderr)
+
+    def test_emit_asset_gate_rejects_cr_in_every_canonical_scalar_field(self) -> None:
+        scalar_flags = (
+            "--event-type",
+            "--route",
+            "--reason",
+            "--evidence",
+            "--related-assets",
+            "--asset-candidates",
+            "--deferred-signals",
+            "--next-step",
+        )
+        base_args = [
+            "--event-type",
+            "implementation-boundary",
+            "--route",
+            "none",
+            "--reason",
+            "ordinary",
+            "--evidence",
+            "Focused tests passed.",
+            "--related-assets",
+            "none",
+            "--asset-candidates",
+            "none",
+            "--deferred-signals",
+            "none",
+            "--next-step",
+            "none",
+        ]
+
+        for flag in scalar_flags:
+            with self.subTest(flag=flag):
+                args = list(base_args)
+                args[args.index(flag) + 1] = "ordinary\rUNSAFE-SECRET"
+                emitted = subprocess.run(
+                    [sys.executable, str(EMIT_ASSET_GATE), *args],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+                self.assertEqual(emitted.returncode, 2)
+                self.assertEqual(emitted.stdout, "")
+                self.assertIn(flag.removeprefix("--").replace("-", "_"), emitted.stderr)
+                self.assertNotIn("UNSAFE-SECRET", emitted.stderr)
+
+    def test_asset_gate_handoff_rejects_direct_comment_closure(self) -> None:
+        handoff_checks = self.load_handoff_checks()
+
+        with self.assertRaisesRegex(ValueError, "HTML comment closure"):
+            handoff_checks.asset_gate_handoff_text(
+                "asset_gate:\n  route: none\n-->\nVISIBLE-SECRET",
+                route="none",
+                related_assets="none",
+            )
+
+    def test_emitter_output_routes_are_accepted_by_real_stop_hook(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        handoff_checks = self.load_handoff_checks()
+
+        for route, related_assets, has_receipt in (
+            ("none", "none", False),
+            ("update-existing", "docs/superpowers/problems/example.md", True),
+        ):
+            with self.subTest(route=route):
+                session_id = f"emitter-stop-{route}"
+                self.run_hook(
+                    {
+                        "hook_event_name": "PostToolUse",
+                        "session_id": session_id,
+                        "turn_id": "turn-1",
+                        "cwd": str(repo),
+                        "tool_name": "apply_patch",
+                        "tool_input": {"patch": "*** Begin Patch\n*** End Patch"},
+                        "tool_response": {"ok": True},
+                    },
+                    plugin_data=plugin_data,
+                )
+                emitted = subprocess.run(
+                    [
+                        sys.executable,
+                        str(EMIT_ASSET_GATE),
+                        "--event-type",
+                        "implementation-boundary",
+                        "--route",
+                        route,
+                        "--reason",
+                        "Focused closeout complete.",
+                        "--evidence",
+                        "Focused tests passed.",
+                        "--related-assets",
+                        related_assets,
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+
+                code, stdout, stderr = self.run_hook(
+                    {
+                        "hook_event_name": "Stop",
+                        "session_id": session_id,
+                        "turn_id": "turn-1",
+                        "cwd": str(repo),
+                        "last_assistant_message": emitted.stdout,
+                    },
+                    plugin_data=plugin_data,
+                )
+
+                self.assertEqual(code, 0, stderr)
+                self.assertEqual(stdout, "")
+                validation = handoff_checks.validate_asset_gate_text(emitted.stdout)
+                self.assertTrue(validation["valid"])
+                self.assertEqual(validation["fields"]["route"], route)
+                self.assertEqual("资产复利：已更新" in emitted.stdout, has_receipt)
+                events = [
+                    json.loads(line)
+                    for line in (
+                        self.audit_dir(plugin_data, repo, session_id) / "events.jsonl"
+                    ).read_text(encoding="utf-8").splitlines()
+                ]
+                self.assertEqual(events[-1]["reasonCode"], "asset_gate_present")
+
     def test_completion_gate_accepts_asset_candidates_and_asset_gate(self) -> None:
         repo = self.temp_root / "candidate_repo"
         repo.mkdir()
@@ -2435,6 +2647,49 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertIn("资产复利未完成：Hook 输入格式无效", stderr)
         self.assertIn("主要任务可能已完成", stderr)
         self.assertIn("下一步：重试当前操作", stderr)
+
+    def test_hook_rejects_non_object_json_without_leaking_input(self) -> None:
+        for payload, secret in ((b"[]", ""), (b'"INJECTED-SECRET"', "INJECTED-SECRET")):
+            with self.subTest(payload=payload):
+                code, stdout, stderr = self.run_hook_raw(payload)
+
+                self.assertEqual(code, 1)
+                self.assertEqual(stdout, "")
+                self.assertIn("资产复利未完成：Hook 输入类型无效", stderr)
+                self.assertIn("主要任务可能已完成", stderr)
+                self.assertIn("下一步：重试当前操作", stderr)
+                self.assertNotIn("Traceback", stderr)
+                self.assertNotIn("TypeError", stderr)
+                self.assertNotIn("asset_hook.py", stderr)
+                if secret:
+                    self.assertNotIn(secret, stderr)
+
+    def test_hook_runtime_state_failure_is_actionable_and_privacy_safe(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "INJECTED-SECRET-state-file"
+        plugin_data.write_text("not a directory", encoding="utf-8")
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": "runtime-failure-session",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "source": "startup",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("资产复利未完成：Hook 运行失败", stderr)
+        self.assertIn("主要任务可能已完成", stderr)
+        self.assertIn("下一步：重试当前操作", stderr)
+        self.assertNotIn("Traceback", stderr)
+        self.assertNotIn("NotADirectoryError", stderr)
+        self.assertNotIn("INJECTED-SECRET", stderr)
+        self.assertNotIn(str(HOOK_SCRIPT), stderr)
+        self.assertNotIn(sys.executable, stderr)
 
     def test_hook_times_out_when_stdin_never_closes(self) -> None:
         plugin_data = self.temp_root / "plugin-data"
@@ -2792,6 +3047,159 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(events[-1]["reasonCode"], "invalid_asset_gate")
         state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertIn("verification-ran", state["meaningfulWorkSignals"])
+
+    def test_stop_invalid_gate_retry_does_not_consume_a_second_continuation(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "invalid-retry-session",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "apply_patch",
+                "tool_input": {"patch": "*** Begin Patch\n*** End Patch"},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+        stop_event = {
+            "hook_event_name": "Stop",
+            "session_id": "invalid-retry-session",
+            "turn_id": "turn-1",
+            "cwd": str(repo),
+            "last_assistant_message": "asset_gate:\n  route: none\nreason: missing fields",
+        }
+
+        code, stdout, stderr = self.run_hook(stop_event, plugin_data=plugin_data)
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(json.loads(stdout)["decision"], "block")
+        state_path = self.audit_dir(plugin_data, repo, "invalid-retry-session") / "state.json"
+        self.assertTrue(json.loads(state_path.read_text(encoding="utf-8"))["stopContinuationUsed"])
+
+        code, stdout, stderr = self.run_hook(stop_event, plugin_data=plugin_data)
+
+        self.assertEqual(code, 0, stderr)
+        retry_payload = json.loads(stdout)
+        self.assertNotIn("decision", retry_payload)
+        self.assertEqual(
+            retry_payload["systemMessage"],
+            "Asset compounding still lacks a valid hidden asset gate after one Stop retry.",
+        )
+        events = [
+            json.loads(line)
+            for line in state_path.with_name("events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["reasonCode"], "continuation_already_used")
+
+    def test_stop_missing_then_invalid_retry_does_not_block_again(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "missing-invalid-retry-session",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "apply_patch",
+                "tool_input": {"patch": "*** Begin Patch\n*** End Patch"},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "missing-invalid-retry-session",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "No gate yet.",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(json.loads(stdout)["decision"], "block")
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "missing-invalid-retry-session",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "asset_gate:\n  route: none\nreason: still missing fields",
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        retry_payload = json.loads(stdout)
+        self.assertNotIn("decision", retry_payload)
+        self.assertIn("systemMessage", retry_payload)
+        events = [
+            json.loads(line)
+            for line in (
+                self.audit_dir(plugin_data, repo, "missing-invalid-retry-session") / "events.jsonl"
+            ).read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events[-1]["reasonCode"], "continuation_already_used")
+
+    def test_stop_valid_gate_wins_after_blocked_retry(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "valid-retry-session",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "apply_patch",
+                "tool_input": {"patch": "*** Begin Patch\n*** End Patch"},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+        self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "valid-retry-session",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "No gate yet.",
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "valid-retry-session",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": (
+                    "asset_gate:\n"
+                    "  event_type: implementation-boundary\n"
+                    "  route: none\n"
+                    "reason: corrected gate\n"
+                    "evidence: focused tests passed\n"
+                    "related_assets: none\n"
+                    "asset_candidates: none\n"
+                    "deferred_signals: none\n"
+                    "next_step: none"
+                ),
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        audit_dir = self.audit_dir(plugin_data, repo, "valid-retry-session")
+        state = json.loads((audit_dir / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["lifecycle"], "closed")
+        events = [json.loads(line) for line in (audit_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(events[-1]["reasonCode"], "asset_gate_present")
 
     def test_stop_accepts_hidden_asset_gate(self) -> None:
         repo = self.create_repo()

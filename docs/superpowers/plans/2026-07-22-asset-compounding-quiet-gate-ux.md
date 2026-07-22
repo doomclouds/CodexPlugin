@@ -13,6 +13,9 @@
 - The UX principle is exactly: mechanism hidden by default, side effects proactively reported, failures never hidden.
 - `route: none` produces no user-visible asset text.
 - A successful asset-writing route produces exactly one `资产复利：已更新 ...` receipt containing the real asset path.
+- Each individual final handoff contains at most one visible asset-compounding result or failure.
+- A retry after a visible failure may later show one successful write receipt, because suppressing the side effect is forbidden.
+- Ordinary success does not duplicate receipts within the same handoff.
 - Stop block and unrecovered Hook failures remain visible and actionable.
 - Legacy plain `asset_gate` blocks continue to validate.
 - Do not add settings, commands, skills, routes, dependencies, or a second session-state protocol.
@@ -593,30 +596,32 @@ Expected: push succeeds, the marketplace snapshot points at the pushed commit, a
 
 Restart Codex, open `/hooks`, and approve the v0.5.1 Hook definition. Open a new task in `/Users/palink/CodexProjects/CodexPlugin` so SessionStart uses the new plugin cache.
 
-- [ ] **Step 4: Run the route-none host probe**
+- [ ] **Step 4: Run the missing/invalid Stop -> corrected asset-writing host probe**
 
-In the new task, run this focused verification and close out with `route: none`:
+In the new task, run this focused verification, then make the first final handoff with a missing or invalid hidden gate:
 
 ```bash
 TMPDIR=/private/tmp .venv/bin/python -m unittest \
   plugins.superpowers-asset-compounding.tests.test_asset_scripts.AssetScriptTests.test_emit_asset_gate_hides_none_route_and_remains_valid
 ```
 
-Expected user-visible result: the final answer contains the test result but no `asset_gate`, HTML comment marker, or `资产复利：` receipt.
+Expected first result: Stop blocks once and shows exactly one visible `资产复利未完成：...` failure with cause, impact, and next step. On the continuation, complete a small legitimate asset write selected for that task and use `emit_asset_gate.py` with the matching asset-writing route and real written path.
+
+Expected corrected result: the later final handoff shows exactly one `资产复利：已更新 ...` receipt for that path, while the hidden gate and HTML comment markers remain invisible. The prior failure and later success receipt are allowed because they belong to separate final handoffs; the corrected handoff must not duplicate its receipt.
 
 Then run:
 
 ```bash
-.venv/bin/python plugins/superpowers-asset-compounding/hooks/asset_hook_report.py /Users/palink/.codex/plugins/data/superpowers-asset-compounding-codex-plugin --since 2026-07-22 --reason asset_gate_present --json
+.venv/bin/python plugins/superpowers-asset-compounding/hooks/asset_hook_report.py /Users/palink/.codex/plugins/data/superpowers-asset-compounding-codex-plugin --since 2026-07-22 --json
 ```
 
-Expected audit result: at least one Stop event has `reasonCode: asset_gate_present` for the new session.
+Expected audit result: the new session contains one blocked Stop with `reasonCode: missing_asset_gate` or `invalid_asset_gate`, followed by an allowed Stop with `reasonCode: asset_gate_present`.
 
-If the comment is visible, stripped before Stop, or causes a Stop block, stop the release. Do not write the archive; preserve the failing evidence and return to a separate session-state design.
+If the corrected comment is visible, stripped before Stop, blocks again, suppresses the successful write receipt, or duplicates that receipt, stop the release. Do not write the archive; preserve the failing evidence and return to the design.
 
 - [ ] **Step 5: Create the accepted requirement archive**
 
-After the host probe passes, create the archive with this content:
+After the corrected asset-writing host probe passes, create the archive with this content:
 
 ```markdown
 # Asset Compounding v0.5.1 Quiet Gate UX Archive
@@ -637,8 +642,8 @@ After the host probe passes, create the archive with this content:
 ## Evidence
 
 - The full asset-script unittest suite passed with only the existing Windows-only skip.
-- The installed v0.5.1 route-none probe showed no gate or receipt in the Codex UI.
-- The corresponding audit event recorded `reasonCode: asset_gate_present`.
+- The installed v0.5.1 retry probe showed one visible failure followed by one successful write receipt, with no visible gate or duplicate receipt.
+- The corresponding audit events recorded the initial missing/invalid reason and the corrected `asset_gate_present` result.
 - Manifest JSON, completion preflight, and `git diff --check` passed.
 ```
 
