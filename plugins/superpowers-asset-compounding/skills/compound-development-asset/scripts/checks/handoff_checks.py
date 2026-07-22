@@ -179,7 +179,7 @@ def canonical_asset_gate_text(
 
 def asset_gate_handoff_text(block: str, *, route: str, related_assets: str) -> str:
     hidden_gate = f"<!-- asset-compounding\n{block}\n-->"
-    if route == "none":
+    if route.strip() == "none":
         return hidden_gate
 
     normalized_assets = _normalize_empty_value(related_assets)

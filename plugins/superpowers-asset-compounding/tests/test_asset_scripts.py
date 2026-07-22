@@ -2108,6 +2108,28 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         )
         self.assertEqual(result["status"], "pass")
 
+    def test_emit_asset_gate_hides_whitespace_padded_none_route(self) -> None:
+        emitted = subprocess.run(
+            [
+                sys.executable,
+                str(EMIT_ASSET_GATE),
+                "--event-type",
+                "implementation-boundary",
+                "--route",
+                " none ",
+                "--reason",
+                "No reusable asset is needed.",
+                "--evidence",
+                "Focused tests passed.",
+            ],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertTrue(emitted.stdout.startswith("<!-- asset-compounding\nasset_gate:\n"))
+        self.assertNotIn("资产复利：", emitted.stdout)
+
     def test_emit_asset_gate_reports_one_successful_asset_write(self) -> None:
         emitted = subprocess.run(
             [
