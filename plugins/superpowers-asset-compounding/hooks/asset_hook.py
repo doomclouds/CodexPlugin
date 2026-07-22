@@ -1188,7 +1188,8 @@ def validation_reason(result: dict[str, Any]) -> str:
     if missing:
         parts.append(f"missing required fields: {', '.join(str(item) for item in missing)}")
     if invalid:
-        parts.append(f"invalid values: {', '.join(str(item) for item in invalid)}")
+        invalid_fields = [str(item).split("=", 1)[0].strip() or "asset_gate" for item in invalid]
+        parts.append(f"invalid values: {', '.join(invalid_fields)}")
     if not parts:
         return "asset_gate validation failed"
     return "; ".join(parts)
