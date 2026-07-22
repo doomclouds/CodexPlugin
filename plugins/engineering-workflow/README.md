@@ -60,6 +60,8 @@
 .venv/bin/python plugins/engineering-workflow/evals/run_cli_evals.py
 ```
 
+每次评测都会启动新的临时会话，并把 Codex 的可写状态隔离到临时目录；只复用当前环境的认证和模型缓存，不读取主会话历史，也不会把临时工作区写入全局 `~/.codex/config.toml`。
+
 发布前可重复执行高风险用例，并保存 JSON 报告。重复运行保持串行，避免多个 Codex 进程争用资源导致假超时：
 
 ```bash

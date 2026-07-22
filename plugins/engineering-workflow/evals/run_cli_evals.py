@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -148,6 +149,20 @@ def field_text(result: dict, field: str) -> str:
     return str(value)
 
 
+def isolated_codex_environment(temp_root: Path) -> dict[str, str]:
+    source_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    isolated_home = temp_root / "codex-home"
+    isolated_home.mkdir(mode=0o700, parents=True)
+    for name in ("auth.json", "models_cache.json"):
+        source = source_home / name
+        if source.is_file():
+            shutil.copy2(source, isolated_home / name)
+
+    environment = os.environ.copy()
+    environment["CODEX_HOME"] = str(isolated_home)
+    return environment
+
+
 def validate_result(case: dict, result: dict) -> list[str]:
     selected_list = result["selected_skills"]
     skipped_list = result["skipped_skills"]
@@ -215,11 +230,13 @@ def run_case(
 ) -> tuple[bool, dict]:
     with tempfile.TemporaryDirectory(prefix="engineering-workflow-eval-") as temp_dir:
         temp_root = Path(temp_dir)
-        schema_path = temp_root / "output-schema.json"
-        result_path = temp_root / "result.json"
-        skills_root = temp_root / "skills"
+        workspace = temp_root / "workspace"
+        workspace.mkdir()
+        schema_path = workspace / "output-schema.json"
+        result_path = workspace / "result.json"
+        skills_root = workspace / "skills"
         shutil.copytree(PLUGIN_ROOT / "skills", skills_root)
-        shutil.copytree(PLUGIN_ROOT / "references", temp_root / "references")
+        shutil.copytree(PLUGIN_ROOT / "references", workspace / "references")
         schema_path.write_text(
             json.dumps(OUTPUT_SCHEMA, ensure_ascii=False), encoding="utf-8"
         )
@@ -238,7 +255,7 @@ def run_case(
             "--sandbox",
             "read-only",
             "--cd",
-            str(temp_root),
+            str(workspace),
             "--output-schema",
             str(schema_path),
             "--output-last-message",
@@ -255,6 +272,7 @@ def run_case(
                 text=True,
                 timeout=timeout,
                 check=False,
+                env=isolated_codex_environment(temp_root),
             )
         except subprocess.TimeoutExpired as error:
             duration = time.monotonic() - started

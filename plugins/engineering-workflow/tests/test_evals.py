@@ -1,6 +1,9 @@
 import importlib.util
+import os
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -86,6 +89,23 @@ class RoutingEvaluatorTests(unittest.TestCase):
         self.assertFalse(any("goal missing pattern" in error for error in errors))
         self.assertTrue(any("missing pattern" in error for error in errors))
         self.assertTrue(any("forbidden pattern" in error for error in errors))
+
+    def test_isolates_codex_writes_without_copying_user_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_home = root / "source"
+            source_home.mkdir()
+            (source_home / "auth.json").write_text("{}", encoding="utf-8")
+            (source_home / "models_cache.json").write_text("{}", encoding="utf-8")
+            (source_home / "config.toml").write_text("model = 'test'", encoding="utf-8")
+
+            with patch.dict(os.environ, {"CODEX_HOME": str(source_home)}):
+                environment = EVALS.isolated_codex_environment(root / "run")
+
+            isolated_home = Path(environment["CODEX_HOME"])
+            self.assertTrue((isolated_home / "auth.json").is_file())
+            self.assertTrue((isolated_home / "models_cache.json").is_file())
+            self.assertFalse((isolated_home / "config.toml").exists())
 
 
 if __name__ == "__main__":
