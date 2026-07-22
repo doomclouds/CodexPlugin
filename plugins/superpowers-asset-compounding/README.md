@@ -2,16 +2,12 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.5.0` combines six skills with plugin-bundled Codex lifecycle hooks.
-This v0.5.0 release makes hook runtime behavior dependable: per-session
-transactional state uses locking plus atomic replacement, states explicitly
-move between `active` and `closed` so reports archive only closed sessions, and
-verification normalizes nested or line-level exit codes into `passed`,
-`failed`, or `observed`. It also keeps Stop decisions semantic-first, adds
-platform-specific launch commands, and makes audit records build-identifiable.
-It builds on the v0.3.3 structured `asset_gate` validation, v0.3.2 report and
-archive tools, v0.3.1 managed-guidance refreshes, and v0.3.0 milestone/debt
-navigation improvements.
+Version `0.5.1` combines six skills with plugin-bundled Codex lifecycle hooks.
+This v0.5.1 release adds quiet closeout UX: routine gates travel in a hidden
+HTML comment, `route: none` stays invisible, successful asset writes show one
+`资产复利：已更新 ...` receipt with the written path, and unrecovered Stop or
+Hook failures remain visible and actionable. It preserves the v0.5.0 runtime
+reliability, structured gate schema, routes, audit privacy, and session state.
 
 The plugin provides six skills:
 
@@ -29,15 +25,11 @@ The plugin also bundles hooks under `hooks/hooks.json`:
 - `Stop`: asks the main agent for one continuation when meaningful work is ending without an `asset_gate` block.
 - `PreCompact` / `PostCompact`: preserve and restore compact pending asset state across compaction.
 
-The `Stop` hook first asks whether the session has meaningful closeout work,
-then validates a structured `asset_gate` before clearing state. It accepts the
-canonical flat shape, common YAML-like nested fields and list values, and the
-legacy `artifact_generation` alias while keeping the route enum strict. Core
-fields (`event_type`, `route`, `reason`, `evidence`) always remain required;
-Stop may default only omitted supplemental fields to `none` and records that
-choice. It allows no-work, push-only, and `merge_only_closeout` cases, but a
-cleanup must use an explicit valid `cleanup-only` / `none` gate rather than a
-keyword in free text.
+The `Stop` hook reads the raw final assistant message, where the canonical gate
+is carried inside a hidden HTML comment. `route: none` therefore stays invisible
+in the rendered response while audit validation remains unchanged. Successful
+asset-writing routes show one `资产复利：已更新 ...` receipt before the hidden
+comment. Legacy plain gates remain accepted for compatibility.
 
 `UserPromptSubmit` is intentionally not part of the asset lifecycle. It is better suited for prompt risk checks than workflow routing.
 
@@ -48,6 +40,10 @@ available; the POSIX launcher remains `run_asset_hook.sh`. After enabling or
 upgrading the plugin, review and trust the hook definitions with `/hooks`.
 Codex skips plugin-bundled command hooks until the current hook definition has
 been trusted.
+
+After any quiet-closeout Hook or guidance change, restart Codex and review
+`/hooks` before host acceptance. Unit tests cannot prove that the desktop
+renderer hides the comment while Stop still receives the raw message.
 
 The POSIX launcher resolves the hook from the host-provided `PLUGIN_ROOT` first
 and does not require Git's `dirname` or `tr` utilities to be present on `PATH`.
@@ -82,11 +78,14 @@ Before final handoff, merge, PR, or cleanup, run:
 python <plugin>\skills\compound-development-asset\scripts\check_completion_gate.py . --json
 ```
 
-To generate a validated closeout block instead of hand-writing field names, run:
+To generate a validated, response-ready closeout, run:
 
 ```powershell
 python <plugin>\skills\compound-development-asset\scripts\emit_asset_gate.py --event-type implementation-boundary --route none --reason "No reusable asset is needed for this boundary." --evidence "Focused tests passed."
 ```
+
+The `none` route emits only the hidden gate. Asset-writing routes also require
+`--related-assets` and emit one visible receipt containing the written path.
 
 For completed requirement work, include the topic so spec+plan without archive
 coverage becomes a blocking issue:

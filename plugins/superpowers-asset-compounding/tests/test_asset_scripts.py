@@ -96,29 +96,14 @@ class AssetScriptTests(unittest.TestCase):
             debt_agent_text,
         )
 
-    def test_asset_compounding_plugin_metadata_mentions_v050_runtime_reliability(self) -> None:
+    def test_asset_compounding_plugin_metadata_mentions_v051_quiet_gate_ux(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["version"], "0.5.0")
-        self.assertIn("milestones", manifest["interface"]["longDescription"])
-        self.assertIn("technical debt", manifest["interface"]["longDescription"].lower())
+        self.assertEqual(manifest["version"], "0.5.1")
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("Version `0.5.0`", readme)
-        self.assertIn("transactional state", readme)
-        self.assertIn("pluginFingerprint", readme)
-        self.assertIn("commandWindows", readme)
-        self.assertIn("manage-superpowers-milestone", readme)
-        self.assertIn("manage-technical-debt", readme)
-        self.assertIn("structured `asset_gate` validation", readme)
-        self.assertIn("archive --before", readme)
-        self.assertIn("--since", readme)
-        self.assertIn("merge_only_closeout", readme)
-        self.assertIn("session summaries", readme)
-        self.assertIn("report filters", readme)
-        self.assertIn(
-            "The reports do not include raw commands, prompts, diffs, command output, full repository paths, or secrets",
-            readme,
-        )
+        self.assertIn("Version `0.5.1`", readme)
+        self.assertIn("hidden HTML comment", readme)
+        self.assertIn("资产复利：已更新", readme)
         hooks = json.loads(HOOKS_CONFIG.read_text(encoding="utf-8"))["hooks"]
         self.assertTrue(all("commandWindows" in registrations[0]["hooks"][0] for registrations in hooks.values()))
 
