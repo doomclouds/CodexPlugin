@@ -27,14 +27,18 @@ def main() -> int:
         return 1
     try:
         event = json.loads(raw_input)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError):
         append_raw_usage_event(
             "HookInput",
             decision="error",
             reason_code="invalid_json",
             durationMs=elapsed_ms(started_at),
         )
-        print(f"Invalid hook JSON: {exc}", file=sys.stderr)
+        print(
+            "资产复利未完成：Hook 输入格式无效；主要任务可能已完成，但本轮知识尚未沉淀。"
+            "下一步：重试当前操作。",
+            file=sys.stderr,
+        )
         return 1
 
     event["_assetHookStartedAt"] = started_at
@@ -77,7 +81,11 @@ def read_stdin_with_timeout(started_at: float) -> str | None:
             durationMs=elapsed_ms(started_at),
             timeoutMs=timeout_ms,
         )
-        print(f"Hook stdin read timed out after {timeout_ms}ms", file=sys.stderr)
+        print(
+            "资产复利未完成：Hook 输入超时；主要任务可能已完成，但本轮知识尚未沉淀。"
+            "下一步：重试当前操作。",
+            file=sys.stderr,
+        )
         sys.stderr.flush()
         os._exit(1)
     if isinstance(result, BaseException):
@@ -88,18 +96,26 @@ def read_stdin_with_timeout(started_at: float) -> str | None:
             durationMs=elapsed_ms(started_at),
             error=type(result).__name__,
         )
-        print(f"Hook stdin read failed: {result}", file=sys.stderr)
+        print(
+            "资产复利未完成：Hook 输入读取失败；主要任务可能已完成，但本轮知识尚未沉淀。"
+            "下一步：重试当前操作。",
+            file=sys.stderr,
+        )
         return None
     try:
         return result.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
+    except UnicodeDecodeError:
         append_raw_usage_event(
             "HookInput",
             decision="error",
             reason_code="stdin_decode_error",
             durationMs=elapsed_ms(started_at),
         )
-        print(f"Invalid hook JSON: {exc}", file=sys.stderr)
+        print(
+            "资产复利未完成：Hook 输入格式无效；主要任务可能已完成，但本轮知识尚未沉淀。"
+            "下一步：重试当前操作。",
+            file=sys.stderr,
+        )
         return None
 
 
@@ -124,7 +140,10 @@ def handle_session_start(event: dict[str, Any]) -> dict[str, Any] | None:
             "This repository uses hook-assisted asset compounding. Keep asset "
             "workflow concise: subagents report candidates, the main agent owns "
             "route decisions and writes, and meaningful closeout needs an "
-            "auditable asset_gate block. "
+            "auditable asset_gate block. Put the auditable asset_gate in an HTML "
+            "comment before final handoff; keep route none silent, report "
+            "successful asset writes once with the written path, and expose "
+            "unrecovered failures. "
             f"{workspace_context(event)}"
         ),
     )
@@ -222,7 +241,10 @@ def handle_post_tool_use(event: dict[str, Any]) -> dict[str, Any] | None:
                 "Before starting the next planned task, run the main-agent asset "
                 "gate: decide route none, inbox, update-existing, archive, "
                 "new-problem, or both; use the asset-compounding scripts when "
-                "you need deterministic evidence."
+                "you need deterministic evidence. Put the auditable asset_gate "
+                "in an HTML comment before final handoff; keep route none silent, "
+                "report successful asset writes once with the written path, and "
+                "expose unrecovered failures."
             )
         }
     return None
@@ -263,9 +285,10 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
                 return {
                     "decision": "block",
                     "reason": (
-                        f"invalid asset_gate block: {validation_reason(validation)}\n"
-                        "Use this flat template:\n"
-                        f"{handoff_checks.asset_gate_template()}"
+                        "资产复利未完成：隐藏门限无效（"
+                        f"{validation_reason(validation)}"
+                        "）；主要任务结果不受影响，但本轮知识尚未完成沉淀。"
+                        "下一步：重新生成有效的隐藏门限后重试。"
                     ),
                 }
             defaulted_fields = list(validation.get("defaultedFields") or [])
@@ -319,8 +342,7 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
             )
             return {
                 "systemMessage": (
-                    "Asset-compounding closeout still appears to be missing an "
-                    "asset_gate block, but the Stop hook already continued once."
+                    "Asset compounding still lacks a valid hidden asset gate after one Stop retry."
                 )
             }
 
@@ -338,11 +360,8 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
         return {
             "decision": "block",
             "reason": (
-                "Run the asset-compounding closeout gate for this turn. Include an "
-                "auditable asset_gate block with event_type, route, reason, "
-                "evidence, related_assets, asset_candidates, deferred_signals, and "
-                "next_step. If no asset is needed, choose route: none and give the "
-                "concrete reason."
+                "资产复利未完成：缺少隐藏门限；主要任务结果不受影响，"
+                "但本轮知识尚未完成沉淀。下一步：生成有效的隐藏门限后重试。"
             ),
         }
 

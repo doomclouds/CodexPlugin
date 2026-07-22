@@ -2407,6 +2407,10 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         context = payload["hookSpecificOutput"]["additionalContext"]
         self.assertIn("hook-assisted asset compounding", context)
         self.assertIn("asset_gate", context)
+        self.assertIn("HTML comment", context)
+        self.assertIn("route none silent", context)
+        self.assertIn("report successful asset writes once", context)
+        self.assertIn("expose unrecovered failures", context)
 
         no_asset_repo = self.temp_root / "plain_repo"
         no_asset_repo.mkdir()
@@ -2437,6 +2441,15 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
 
         self.assertEqual(code, 0, stderr)
         self.assertIn("asset_gate", json.loads(stdout)["hookSpecificOutput"]["additionalContext"])
+
+    def test_hook_invalid_json_failure_is_visible_and_actionable(self) -> None:
+        code, stdout, stderr = self.run_hook_raw(b"{")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("资产复利未完成：Hook 输入格式无效", stderr)
+        self.assertIn("主要任务可能已完成", stderr)
+        self.assertIn("下一步：重试当前操作", stderr)
 
     def test_hook_times_out_when_stdin_never_closes(self) -> None:
         plugin_data = self.temp_root / "plugin-data"
@@ -2470,7 +2483,9 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
 
         self.assertEqual(return_code, 1, stdout)
         self.assertEqual(stdout, "")
-        self.assertIn("stdin read timed out", stderr)
+        self.assertIn("资产复利未完成：Hook 输入超时", stderr)
+        self.assertIn("主要任务可能已完成", stderr)
+        self.assertIn("下一步：重试当前操作", stderr)
         events = [
             json.loads(line)
             for line in (plugin_data / "_hook" / "events.jsonl").read_text(encoding="utf-8").splitlines()
@@ -2596,6 +2611,11 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertIn("systemMessage", payload)
         self.assertIn("asset", payload["systemMessage"])
         self.assertIn("before starting the next planned task", payload["systemMessage"].lower())
+        message = payload["systemMessage"]
+        self.assertIn("HTML comment", message)
+        self.assertIn("route none silent", message)
+        self.assertIn("report successful asset writes once", message)
+        self.assertIn("expose unrecovered failures", message)
 
     def test_stop_allows_plan_boundary_only_without_asset_gate(self) -> None:
         repo = self.create_repo()
@@ -2776,10 +2796,10 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(code, 0, stderr)
         payload = json.loads(stdout)
         self.assertEqual(payload["decision"], "block")
-        self.assertIn("invalid asset_gate", payload["reason"])
-        self.assertIn("asset_gate:", payload["reason"])
-        self.assertIn("event_type: implementation-boundary", payload["reason"])
-        self.assertIn("evidence: <", payload["reason"])
+        self.assertIn("资产复利未完成：", payload["reason"])
+        self.assertIn("主要任务结果不受影响", payload["reason"])
+        self.assertIn("下一步：", payload["reason"])
+        self.assertNotIn("Use this flat template", payload["reason"])
         events = [
             json.loads(line)
             for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
@@ -2787,6 +2807,55 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(events[-1]["reasonCode"], "invalid_asset_gate")
         state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertIn("verification-ran", state["meaningfulWorkSignals"])
+
+    def test_stop_accepts_hidden_asset_gate(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "quiet-gate-session",
+                "turn_id": "quiet-gate-turn",
+                "cwd": str(repo),
+                "tool_name": "apply_patch",
+                "tool_input": {"patch": "*** Begin Patch\n*** End Patch"},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+        hidden_message = (
+            "完成验证。\n\n"
+            "<!-- asset-compounding\n"
+            "asset_gate:\n"
+            "  event_type: implementation-boundary\n"
+            "  route: none\n"
+            "reason: no reusable signal\n"
+            "evidence: focused tests passed\n"
+            "related_assets: none\n"
+            "asset_candidates: none\n"
+            "deferred_signals: none\n"
+            "next_step: none\n"
+            "-->"
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "quiet-gate-session",
+                "turn_id": "quiet-gate-turn",
+                "cwd": str(repo),
+                "last_assistant_message": hidden_message,
+            },
+            plugin_data=plugin_data,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        audit_dir = self.audit_dir(plugin_data, repo, "quiet-gate-session")
+        state = json.loads((audit_dir / "state.json").read_text(encoding="utf-8"))
+        events = [json.loads(line) for line in (audit_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(state["lifecycle"], "closed")
+        self.assertEqual(events[-1]["reasonCode"], "asset_gate_present")
 
     def test_stop_allows_incomplete_gate_when_no_hard_work(self) -> None:
         repo = self.create_repo()
@@ -3048,7 +3117,10 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(code, 0, stderr)
         payload = json.loads(stdout)
         self.assertEqual(payload["decision"], "block")
-        self.assertIn("asset_gate", payload["reason"])
+        self.assertIn("资产复利未完成：", payload["reason"])
+        self.assertIn("主要任务结果不受影响", payload["reason"])
+        self.assertIn("下一步：", payload["reason"])
+        self.assertNotIn("Use this flat template", payload["reason"])
 
         code, stdout, stderr = self.run_hook(
             {
