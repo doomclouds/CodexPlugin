@@ -5,16 +5,16 @@
 - Plugin packages live under `plugins/`; each plugin owns its `.codex-plugin/plugin.json`, skills, hooks, and README.
 - Marketplace metadata lives under `.agents/plugins/`; keep plugin source paths relative to that marketplace root.
 - Superpowers assets live under `docs/superpowers/`; search specs, plans, archives, problems, and inbox notes before guessing from memory.
-- Validate archived asset-compounding changes with `python deprecated-plugins/superpowers-asset-compounding/tests/test_asset_scripts.py`.
+- Bootstrap Python tooling with `uv venv --python 3.12 .venv && uv pip sync --python .venv/bin/python requirements-dev.txt`.
+- Validate archived asset-compounding changes on macOS with `TMPDIR="$(realpath "${TMPDIR:-/tmp}")" .venv/bin/python deprecated-plugins/superpowers-asset-compounding/tests/test_asset_scripts.py`.
+- Validate engineering-workflow changes with `.venv/bin/python -m unittest discover -s plugins/engineering-workflow/tests -p 'test_*.py'`.
 - After changing plugin hooks or manifests, restart Codex and review `/hooks` before judging runtime behavior.
 
 <!-- asset-compounding-guidance:start -->
 <!-- asset-compounding-guidance:version=0.3.1 -->
 ## Asset Compounding Retrieval Guide
 
-This repository uses hook-assisted asset compounding from the `superpowers-asset-compounding` plugin. Keep this `AGENTS.md` block as repository-specific retrieval anchors only; generic routing, plan-boundary checkpoints, closeout reminders, and `asset_gate` nudges belong to the plugin hooks and skills.
-
-If the plugin was just installed or upgraded, review and trust the bundled hooks with `/hooks` before relying on lifecycle automation.
+This repository retains historical assets created by the now-archived `superpowers-asset-compounding` plugin. Keep this block as repository-specific retrieval guidance, but do not assume its former hooks or lifecycle automation are active.
 
 ### Repository Context Guidance
 
@@ -72,12 +72,7 @@ Preferred keyword search:
 rg -n "<topic-keyword>" docs/superpowers/specs docs/superpowers/plans docs/superpowers/archives docs/superpowers/problems docs/superpowers/inbox docs/milestones docs/technical-debt
 ```
 
-### Hook-Owned Workflow
+### Archived Workflow Automation
 
-- `SessionStart` injects a short asset protocol when `docs/superpowers/` exists.
-- `PostToolUse` records compact signals from edits, verification, git closeout commands, and main-agent plan updates.
-- `Stop` may request one more pass when meaningful work lacks an `asset_gate`.
-- `PreCompact` / `PostCompact` preserve pending asset signals across compaction.
-
-Subagent lifecycle hooks are intentionally not used for asset compounding. The main agent owns final route decisions and repository asset writes. Use the plugin skills and scripts when the hook-provided context indicates an archive, problem, inbox, or update is needed.
+The former lifecycle hooks are no longer active. The main agent owns retrieval decisions and any repository asset writes. Use scripts under `deprecated-plugins/superpowers-asset-compounding/` only when explicitly maintaining those historical assets.
 <!-- asset-compounding-guidance:end -->

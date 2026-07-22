@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "small-clear-change",
+      "prompt": "把 README 里的错别字‘验正’改成‘验证’，改完确认没有其他改动。",
+      "expected_skills": ["build", "verify"],
+      "excluded_skills": ["clarify", "spec", "plan", "explore"],
+      "constraints": ["不创建规格或计划文档", "不修改相邻内容"]
+    },
+    {
+      "id": "material-product-ambiguity",
+      "prompt": "给账户管理增加删除功能。软删除还是彻底删除会影响合规和恢复能力，请先把这个决定澄清，暂时不要写代码。",
+      "expected_skills": ["clarify"],
+      "excluded_skills": ["build", "review", "verify"],
+      "constraints": ["只问会改变方案的问题", "保持工作区不变"]
+    },
+    {
+      "id": "cross-session-feature",
+      "prompt": "为采集服务实现断线重连：最多重试 3 次、指数退避、取消立即停止、耗尽后返回明确失败。任务会跨多个会话，请完成规格、计划、实现、审查和验收。",
+      "expected_skills": ["spec", "plan", "build", "review", "verify"],
+      "excluded_skills": [],
+      "constraints": ["使用稳定的 AC 编号", "覆盖取消和重试耗尽边界"]
+    },
+    {
+      "id": "diagnosis-only",
+      "prompt": "只诊断为什么服务在每天零点偶发 CPU 飙升，给出复现证据和根因；不要修改任何文件。",
+      "expected_skills": ["debug"],
+      "excluded_skills": ["build", "review", "verify"],
+      "constraints": ["没有复现反馈回路不得宣称根因", "保持工作区不变"]
+    },
+    {
+      "id": "fix-reproducible-bug",
+      "prompt": "定位并修复 CSV 最后一行没有换行时被漏读的问题，补回归测试，审查并验收。",
+      "expected_skills": ["debug", "build", "review", "verify"],
+      "excluded_skills": ["spec", "plan", "explore"],
+      "constraints": ["先复现再修复", "保留 RED 证据"]
+    },
+    {
+      "id": "external-current-fact",
+      "prompt": "调研当前 .NET SDK 是否原生支持生成 OpenAPI 3.1，只查官方一手资料并给结论，不要改代码。",
+      "expected_skills": ["explore"],
+      "excluded_skills": ["build", "review", "verify"],
+      "constraints": ["使用当前官方资料", "区分事实和推断"]
+    },
+    {
+      "id": "review-only",
+      "prompt": "只审查当前 diff 是否满足需求、工程质量以及安全可靠性，列出可操作问题，不要修复。",
+      "expected_skills": ["review"],
+      "excluded_skills": ["build", "verify"],
+      "constraints": ["先 findings 后摘要", "保持工作区不变"]
+    },
+    {
+      "id": "verify-only",
+      "prompt": "只验收当前实现是否满足现有验收条件，运行必要命令并给证据；失败就报告，不要改代码。",
+      "expected_skills": ["verify"],
+      "excluded_skills": ["build", "review"],
+      "constraints": ["区分通过、失败、未运行", "保持工作区不变"]
+    },
+    {
+      "id": "whole-group-does-not-mean-all-stages",
+      "prompt": "使用整个工程协作技能组，把命令行帮助里的一个 typo 修掉并验证，不要扩大范围。",
+      "expected_skills": ["build", "verify"],
+      "excluded_skills": ["clarify", "spec", "plan", "explore"],
+      "constraints": ["选择最小技能链", "不为流程完整调用全部技能"]
+    },
+    {
+      "id": "domain-language-update",
+      "prompt": "我们代码里把同一个业务概念同时叫 Record、Acquisition 和 Capture。请统一领域语言，更新对应领域的 CONTEXT.md 和 CONTEXT.MAP.md 导航，不要修改实现。",
+      "expected_skills": ["clarify"],
+      "excluded_skills": ["build", "spec", "plan", "verify"],
+      "constraints": ["用具体场景消除同词多义", "CONTEXT.MAP.md 只做导航，CONTEXT.md 不写实现细节"]
+    },
+    {
+      "id": "architecture-design-only",
+      "prompt": "只设计采集设备模块的公共接口和测试接缝，比较至少两个方案，不要开始实现。",
+      "expected_skills": ["clarify", "spec"],
+      "excluded_skills": ["build", "review", "verify"],
+      "constraints": ["比较深度和局部性", "不为单一实现制造假抽象"]
+    },
+    {
+      "id": "persist-complex-task",
+      "prompt": "这项设备断线重连工作会跨多个会话。先统一 ConnectionAttempt、ReconnectPolicy 等领域术语，再把规格和可恢复计划写入仓库；本次不要实现。",
+      "expected_skills": ["clarify", "spec", "plan"],
+      "excluded_skills": ["build", "review", "verify"],
+      "constraints": ["创建或更新领域 CONTEXT.md 和 CONTEXT.MAP.md", "规格和计划维护在同一份按年月分桶的任务文档中"]
+    },
+    {
+      "id": "pause-and-handoff",
+      "prompt": "这个复杂任务还没做完，我准备换一个新会话。请把当前进度、工作区、验证和下一步保存下来，别继续实现。",
+      "expected_skills": ["plan"],
+      "excluded_skills": ["build", "review", "verify"],
+      "constraints": ["更新现有任务文档", "不创建重复 handoff"]
+    }
+  ]
+}

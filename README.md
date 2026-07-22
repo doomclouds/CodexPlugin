@@ -40,6 +40,16 @@ codex plugin add git-workflow@codex-plugin
 
 然后开启新线程验证。旧的 `local-home` cache 同步脚本不再作为本仓库发布流程使用。
 
+## Python 开发环境
+
+使用 `uv` 安装用户级 Python 3.12，并为仓库创建隔离环境：
+
+```bash
+uv python install 3.12 --default
+uv venv --python 3.12 .venv
+uv pip sync --python .venv/bin/python requirements-dev.txt
+```
+
 ## 仓库结构
 
 ```text

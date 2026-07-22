@@ -1,6 +1,6 @@
 interface:
   display_name: "诊断问题"
-  short_description: "用可复现反馈回路定位真实根因，补回归测试并验证修复结果"
+  short_description: "先复现用户看到的问题，再缩小范围、找到根本原因并验证修复结果"
   default_prompt: "使用 $debug 复现并定位这个问题的根因。"
 policy:
   allow_implicit_invocation: true

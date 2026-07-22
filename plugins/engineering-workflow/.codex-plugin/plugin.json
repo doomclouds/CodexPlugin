@@ -1,6 +1,6 @@
 {
   "name": "engineering-workflow",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Chinese-first engineering workflow plugin for clarification, specification, planning, implementation, debugging, exploration, review, and verification.",
   "author": {
     "name": "doomclouds",
@@ -13,6 +13,8 @@
     "engineering",
     "workflow",
     "specification",
+    "domain-modeling",
+    "project-continuity",
     "debugging",
     "code-review",
     "verification",
@@ -20,9 +22,9 @@
   ],
   "skills": "./skills/",
   "interface": {
-    "displayName": "工程协作流",
+    "displayName": "Engineering Workflow",
     "shortDescription": "面向中文开发者的精简工程闭环。",
-    "longDescription": "用八个渐进式技能覆盖需求澄清、规格、计划、实现、调试、探索、三轴代码审查和独立验收。强模型自行选择最小够用流程，小改动不制造文档，大任务保留可恢复状态，所有交付都以可复现证据收口。",
+    "longDescription": "八个精简工程技能共享同一份项目连续性契约。强模型自行选择最小方法；复杂任务将领域语言、验收、计划、进度、风险和证据维护在少量 Markdown 资产中，确保后续会话可以继续推进。",
     "developerName": "doomclouds",
     "category": "Productivity",
     "capabilities": [
@@ -30,6 +32,8 @@
       "Write"
     ],
     "defaultPrompt": [
+      "使用最小必要的工程技能完成任务，并遵循项目连续性契约。",
+      "把复杂任务维护为可跨会话恢复的领域上下文和任务文档。",
       "澄清这个需求，并判断是否需要规格或计划。",
       "按垂直切片实现这个功能并持续运行验证。",
       "审查并验收当前代码变更，给出可复现证据。"

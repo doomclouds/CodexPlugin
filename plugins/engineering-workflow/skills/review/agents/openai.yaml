@@ -1,6 +1,6 @@
 interface:
   display_name: "审查变更"
-  short_description: "从规格、工程质量、安全与可靠性三个维度审查当前代码变更"
-  default_prompt: "使用 $review 对当前代码变更做三轴审查。"
+  short_description: "检查代码是否满足需求，以及是否存在质量、安全或稳定性问题"
+  default_prompt: "使用 $review 检查当前代码变更并列出可操作问题。"
 policy:
   allow_implicit_invocation: true
