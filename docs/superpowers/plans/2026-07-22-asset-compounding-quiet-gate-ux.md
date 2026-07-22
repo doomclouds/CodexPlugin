@@ -568,14 +568,14 @@ git commit -m "feat(asset-compounding): release quiet gate ux v0.5.1"
 
 - Consumes: committed v0.5.1 source, installed marketplace plugin, Codex Hook lifecycle, and Task 3 automated evidence.
 - Produces: user-observed host acceptance, `asset_gate_present` audit evidence, and the requirement archive.
-- External-action gate: obtain explicit user approval covering both pushes, marketplace refresh, plugin reinstall, and Codex restart before Step 2.
+- External-action gate: obtain explicit user approval covering both pushes, marketplace refresh, plugin reinstall, Codex restart, and creation/deletion of the temporary host-probe file before Step 2.
 
 - [ ] **Step 1: Request the external-action approval**
 
 Ask exactly:
 
 ```text
-自动测试已通过。现在需要把 main 推送两次（宿主验证前和归档后）、刷新 codex-plugin 商城、重新安装插件并重启 Codex。是否继续？
+自动测试已通过。现在需要把 main 推送两次（宿主验证前和归档后）、刷新 codex-plugin 商城、重新安装插件并重启 Codex；宿主探针会临时创建并在验收后删除 `docs/superpowers/inbox/2026-07-22-quiet-gate-host-probe.md`（不入索引、不暂存、不归档）。是否继续？
 ```
 
 Do not run Steps 2 through 6 until the user approves.
@@ -605,7 +605,17 @@ TMPDIR=/private/tmp .venv/bin/python -m unittest \
   plugins.superpowers-asset-compounding.tests.test_asset_scripts.AssetScriptTests.test_emit_asset_gate_hides_none_route_and_remains_valid
 ```
 
-Expected first result: Stop blocks once and shows exactly one visible `资产复利未完成：...` failure with cause, impact, and next step. On the continuation, complete a small legitimate asset write selected for that task and use `emit_asset_gate.py` with the matching asset-writing route and real written path.
+Expected first result: Stop blocks once and shows exactly one visible `资产复利未完成：...` failure with cause, impact, and next step.
+
+On the continuation, create exactly `docs/superpowers/inbox/2026-07-22-quiet-gate-host-probe.md` with this probe-only content:
+
+```markdown
+# Quiet Gate Host Probe
+
+Temporary probe only; do not index or archive.
+```
+
+Do not add the probe to `docs/superpowers/inbox/INDEX.md`; the probe must never be staged or archived. Close the corrected handoff with `emit_asset_gate.py` using route `inbox` and `related_assets` set to that exact path.
 
 Expected corrected result: the later final handoff shows exactly one `资产复利：已更新 ...` receipt for that path, while the hidden gate and HTML comment markers remain invisible. The prior failure and later success receipt are allowed because they belong to separate final handoffs; the corrected handoff must not duplicate its receipt.
 
@@ -616,6 +626,14 @@ Then run:
 ```
 
 Expected audit result: the new session contains one blocked Stop with `reasonCode: missing_asset_gate` or `invalid_asset_gate`, followed by an allowed Stop with `reasonCode: asset_gate_present`.
+
+Delete that exact probe file after the receipt and audit checks, then run:
+
+```bash
+git status --short
+```
+
+Expected cleanup result: output must not list the probe path or `docs/superpowers/inbox/INDEX.md`. If the probe file or an index change remains, stop before creating the archive and clean up only those probe changes.
 
 If the corrected comment is visible, stripped before Stop, blocks again, suppresses the successful write receipt, or duplicates that receipt, stop the release. Do not write the archive; preserve the failing evidence and return to the design.
 

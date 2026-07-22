@@ -188,14 +188,27 @@ def canonical_asset_gate_text(
 def asset_gate_handoff_text(block: str, *, route: str, related_assets: str) -> str:
     if "-->" in block:
         raise ValueError("asset_gate block contains an HTML comment closure")
+    _validate_canonical_scalar("route", route)
+    _validate_canonical_scalar("related_assets", related_assets)
+
+    validation = validate_asset_gate_text(block)
+    if not validation["valid"]:
+        raise ValueError("asset_gate block is invalid")
+    block_fields = validation["fields"]
+    block_route = block_fields["route"]
+    block_assets = block_fields["related_assets"]
+    if _normalize_empty_value(route) != block_route:
+        raise ValueError("route does not match asset_gate block")
+    if _normalize_empty_value(related_assets) != block_assets:
+        raise ValueError("related_assets does not match asset_gate block")
+
     hidden_gate = f"<!-- asset-compounding\n{block}\n-->"
-    if route.strip() == "none":
+    if block_route == "none":
         return hidden_gate
 
-    normalized_assets = _normalize_empty_value(related_assets)
-    if not normalized_assets or normalized_assets == "none":
+    if not block_assets or block_assets == "none":
         raise ValueError("related_assets is required for asset-writing routes")
-    return f"资产复利：已更新 {normalized_assets}\n\n{hidden_gate}"
+    return f"资产复利：已更新 {block_assets}\n\n{hidden_gate}"
 
 
 def asset_gate_template() -> str:

@@ -154,6 +154,18 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("suppressing the side effect is forbidden", plan)
         self.assertIn("Ordinary success does not duplicate receipts within the same handoff.", plan)
         self.assertIn("missing/invalid Stop -> corrected asset-writing host probe", plan)
+        probe_path = "docs/superpowers/inbox/2026-07-22-quiet-gate-host-probe.md"
+        self.assertIn(probe_path, plan)
+        self.assertIn(
+            "# Quiet Gate Host Probe\n\nTemporary probe only; do not index or archive.",
+            plan,
+        )
+        self.assertIn("Do not add the probe to `docs/superpowers/inbox/INDEX.md`", plan)
+        self.assertIn("Delete that exact probe file after the receipt and audit checks", plan)
+        self.assertIn("git status --short", plan)
+        self.assertIn("must not list the probe path", plan)
+        self.assertIn("must never be staged or archived", plan)
+        self.assertIn("临时创建并在验收后删除", plan)
 
     def run_json(self, *args: object) -> dict[str, object]:
         completed = subprocess.run(
@@ -2300,6 +2312,37 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 self.assertIn(flag.removeprefix("--").replace("-", "_"), emitted.stderr)
                 self.assertNotIn("UNSAFE-SECRET", emitted.stderr)
 
+    def test_emit_asset_gate_rejects_raw_evidence_boundary_newlines(self) -> None:
+        for evidence in (
+            "\nLEADING-SECRET",
+            "TRAILING-SECRET\n",
+            "\rLEADING-SECRET",
+            "TRAILING-SECRET\r",
+        ):
+            with self.subTest(evidence=repr(evidence)):
+                emitted = subprocess.run(
+                    [
+                        sys.executable,
+                        str(EMIT_ASSET_GATE),
+                        "--event-type",
+                        "implementation-boundary",
+                        "--route",
+                        "none",
+                        "--reason",
+                        "No reusable asset is needed.",
+                        "--evidence",
+                        evidence,
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+                self.assertEqual(emitted.returncode, 2)
+                self.assertEqual(emitted.stdout, "")
+                self.assertIn("invalid asset_gate arguments: evidence", emitted.stderr)
+                self.assertNotIn("SECRET", emitted.stderr)
+
     def test_asset_gate_handoff_rejects_direct_comment_closure(self) -> None:
         handoff_checks = self.load_handoff_checks()
 
@@ -2309,6 +2352,72 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 route="none",
                 related_assets="none",
             )
+
+    def test_asset_gate_handoff_rejects_invalid_direct_block(self) -> None:
+        handoff_checks = self.load_handoff_checks()
+
+        with self.assertRaisesRegex(ValueError, "asset_gate block is invalid"):
+            handoff_checks.asset_gate_handoff_text(
+                "asset_gate:\n  route: none",
+                route="none",
+                related_assets="none",
+            )
+
+    def test_asset_gate_handoff_rejects_route_mismatch(self) -> None:
+        handoff_checks = self.load_handoff_checks()
+        block = handoff_checks.canonical_asset_gate_text(
+            event_type="implementation-boundary",
+            route="none",
+            reason="No reusable asset is needed.",
+            evidence="Focused tests passed.",
+        )
+
+        with self.assertRaisesRegex(ValueError, "route does not match asset_gate block"):
+            handoff_checks.asset_gate_handoff_text(
+                block,
+                route="update-existing",
+                related_assets="docs/superpowers/problems/example.md",
+            )
+
+    def test_asset_gate_handoff_rejects_related_assets_mismatch(self) -> None:
+        handoff_checks = self.load_handoff_checks()
+        block = handoff_checks.canonical_asset_gate_text(
+            event_type="implementation-boundary",
+            route="update-existing",
+            reason="Updated the reusable note.",
+            evidence="Focused tests passed.",
+            related_assets="docs/superpowers/problems/canonical.md",
+        )
+
+        with self.assertRaisesRegex(ValueError, "related_assets does not match asset_gate block"):
+            handoff_checks.asset_gate_handoff_text(
+                block,
+                route="update-existing",
+                related_assets="docs/superpowers/problems/alternate.md",
+            )
+
+    def test_asset_gate_handoff_rejects_newlines_in_receipt_arguments(self) -> None:
+        handoff_checks = self.load_handoff_checks()
+        block = handoff_checks.canonical_asset_gate_text(
+            event_type="implementation-boundary",
+            route="update-existing",
+            reason="Updated the reusable note.",
+            evidence="Focused tests passed.",
+            related_assets="docs/superpowers/problems/example.md",
+        )
+
+        for field, route, related_assets in (
+            ("route", "update-existing\nnone", "docs/superpowers/problems/example.md"),
+            ("related_assets", "update-existing", "docs/superpowers/problems/example.md\nVISIBLE-SECRET"),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, field) as raised:
+                    handoff_checks.asset_gate_handoff_text(
+                        block,
+                        route=route,
+                        related_assets=related_assets,
+                    )
+                self.assertNotIn("VISIBLE-SECRET", str(raised.exception))
 
     def test_emitter_output_routes_are_accepted_by_real_stop_hook(self) -> None:
         repo = self.create_repo()

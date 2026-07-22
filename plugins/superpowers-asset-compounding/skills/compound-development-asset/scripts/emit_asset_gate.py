@@ -25,6 +25,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def join_values(values: list[str] | None) -> str:
+    for value in values or []:
+        if "\r" in value or "\n" in value or "-->" in value:
+            raise ValueError("evidence contains an unsafe line break or HTML comment closure")
     cleaned = [value.strip() for value in values or [] if value.strip()]
     return "; ".join(cleaned) if cleaned else "none"
 
