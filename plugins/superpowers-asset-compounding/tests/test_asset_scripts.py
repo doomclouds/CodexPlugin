@@ -2073,40 +2073,30 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["issues"], [])
 
-    def test_emit_asset_gate_outputs_valid_canonical_block(self) -> None:
-        repo = self.temp_root / "emit_gate_repo"
+    def test_emit_asset_gate_hides_none_route_and_remains_valid(self) -> None:
+        repo = self.temp_root / "quiet_none_gate_repo"
         repo.mkdir()
-
         emitted = subprocess.run(
             [
                 sys.executable,
                 str(EMIT_ASSET_GATE),
                 "--event-type",
-                "artifact-generation",
+                "implementation-boundary",
                 "--route",
                 "none",
                 "--reason",
-                "Generated external Visio artifact.",
+                "No reusable asset is needed.",
                 "--evidence",
-                "strict validation passed",
-                "--evidence",
-                "exported vsdx",
-                "--related-assets",
-                "none",
-                "--asset-candidates",
-                "none",
-                "--deferred-signals",
-                "none",
-                "--next-step",
-                "none",
+                "Focused tests passed.",
             ],
             text=True,
             capture_output=True,
             check=True,
         )
 
-        self.assertIn("asset_gate:", emitted.stdout)
-        self.assertIn("event_type: artifact-generation", emitted.stdout)
+        self.assertTrue(emitted.stdout.startswith("<!-- asset-compounding\nasset_gate:\n"))
+        self.assertTrue(emitted.stdout.rstrip().endswith("-->"))
+        self.assertNotIn("资产复利：", emitted.stdout)
         result = self.run_json(
             COMPLETION_GATE,
             repo,
@@ -2117,6 +2107,57 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
             "--json",
         )
         self.assertEqual(result["status"], "pass")
+
+    def test_emit_asset_gate_reports_one_successful_asset_write(self) -> None:
+        emitted = subprocess.run(
+            [
+                sys.executable,
+                str(EMIT_ASSET_GATE),
+                "--event-type",
+                "implementation-boundary",
+                "--route",
+                "update-existing",
+                "--reason",
+                "Updated the reusable closeout guidance.",
+                "--evidence",
+                "Focused tests passed.",
+                "--related-assets",
+                "docs/superpowers/problems/example.md",
+            ],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertEqual(
+            emitted.stdout.splitlines()[0],
+            "资产复利：已更新 docs/superpowers/problems/example.md",
+        )
+        self.assertEqual(emitted.stdout.count("资产复利："), 1)
+        self.assertIn("<!-- asset-compounding\nasset_gate:\n", emitted.stdout)
+
+    def test_emit_asset_gate_rejects_asset_write_without_related_path(self) -> None:
+        emitted = subprocess.run(
+            [
+                sys.executable,
+                str(EMIT_ASSET_GATE),
+                "--event-type",
+                "implementation-boundary",
+                "--route",
+                "archive",
+                "--reason",
+                "Archived the accepted requirement.",
+                "--evidence",
+                "Focused tests passed.",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(emitted.returncode, 2)
+        self.assertIn("related_assets is required for asset-writing routes", emitted.stderr)
+        self.assertEqual(emitted.stdout, "")
 
     def test_completion_gate_accepts_asset_candidates_and_asset_gate(self) -> None:
         repo = self.temp_root / "candidate_repo"

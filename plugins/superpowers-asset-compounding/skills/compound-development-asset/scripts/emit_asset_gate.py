@@ -4,7 +4,11 @@ from __future__ import annotations
 import argparse
 import sys
 
-from checks.handoff_checks import canonical_asset_gate_text, validate_asset_gate_text
+from checks.handoff_checks import (
+    asset_gate_handoff_text,
+    canonical_asset_gate_text,
+    validate_asset_gate_text,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,7 +48,16 @@ def main() -> int:
         details = "; ".join(item for item in (f"missing: {missing}" if missing else "", f"invalid: {invalid}" if invalid else "") if item)
         print(f"invalid asset_gate arguments: {details}", file=sys.stderr)
         return 2
-    print(block)
+    try:
+        handoff = asset_gate_handoff_text(
+            block,
+            route=args.route,
+            related_assets=args.related_assets,
+        )
+    except ValueError as exc:
+        print(f"invalid asset_gate arguments: {exc}", file=sys.stderr)
+        return 2
+    print(handoff)
     return 0
 
 

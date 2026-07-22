@@ -177,6 +177,17 @@ def canonical_asset_gate_text(
     )
 
 
+def asset_gate_handoff_text(block: str, *, route: str, related_assets: str) -> str:
+    hidden_gate = f"<!-- asset-compounding\n{block}\n-->"
+    if route == "none":
+        return hidden_gate
+
+    normalized_assets = _normalize_empty_value(related_assets)
+    if not normalized_assets or normalized_assets == "none":
+        raise ValueError("related_assets is required for asset-writing routes")
+    return f"资产复利：已更新 {normalized_assets}\n\n{hidden_gate}"
+
+
 def asset_gate_template() -> str:
     return canonical_asset_gate_text(
         event_type="implementation-boundary",
