@@ -1,0 +1,6 @@
+interface:
+  display_name: "技术探索"
+  short_description: "通过高可信一手资料研究或一次性原型回答明确的工程问题"
+  default_prompt: "使用 $explore 选择研究或原型来回答这个工程问题。"
+policy:
+  allow_implicit_invocation: true

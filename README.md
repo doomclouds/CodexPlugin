@@ -4,9 +4,9 @@
 
 当前包含：
 
+- `engineering-workflow`: 面向中文开发者的需求、实现、审查与验收工程工作流插件。
 - `figure`: 将图像类图表重建为可编辑 Visio 图形的 Codex 插件。
 - `git-workflow`: 清理 stale branches、创建提交、推送并创建 PR 的 Git 工作流插件。
-- `superpowers-asset-compounding`: 将完成的需求、调试经验和复用线索沉淀为仓库内 Superpowers 资产的 Codex 插件。
 
 暂时不用的插件放在 `deprecated-plugins/`，不会出现在当前 marketplace 中。
 
@@ -20,9 +20,9 @@ codex plugin marketplace list
 安装插件：
 
 ```powershell
+codex plugin add engineering-workflow@codex-plugin
 codex plugin add figure@codex-plugin
 codex plugin add git-workflow@codex-plugin
-codex plugin add superpowers-asset-compounding@codex-plugin
 ```
 
 安装或升级后，开启一个新线程再使用插件，确保 Codex 重新加载插件内的 skills、hooks 和工具配置。
@@ -33,9 +33,9 @@ codex plugin add superpowers-asset-compounding@codex-plugin
 
 ```powershell
 codex plugin marketplace upgrade codex-plugin
+codex plugin add engineering-workflow@codex-plugin
 codex plugin add figure@codex-plugin
 codex plugin add git-workflow@codex-plugin
-codex plugin add superpowers-asset-compounding@codex-plugin
 ```
 
 然后开启新线程验证。旧的 `local-home` cache 同步脚本不再作为本仓库发布流程使用。
@@ -55,7 +55,12 @@ docs/
     specs/
 deprecated-plugins/
   drawio/
+  superpowers-asset-compounding/
 plugins/
+  engineering-workflow/
+    .codex-plugin/
+      plugin.json
+    skills/
   figure/
     .codex-plugin/
       plugin.json
@@ -64,12 +69,6 @@ plugins/
     .codex-plugin/
       plugin.json
     skills/
-  superpowers-asset-compounding/
-    .codex-plugin/
-      plugin.json
-    skills/
-    hooks/
-    tests/
 ```
 
 ## License

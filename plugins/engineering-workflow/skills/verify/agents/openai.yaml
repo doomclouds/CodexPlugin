@@ -1,0 +1,6 @@
+interface:
+  display_name: "验收交付"
+  short_description: "逐项核对验收条件并输出可复现的交付证据、剩余风险和限制"
+  default_prompt: "使用 $verify 验收当前实现并给出交付证据。"
+policy:
+  allow_implicit_invocation: true

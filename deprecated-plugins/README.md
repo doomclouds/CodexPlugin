@@ -7,3 +7,4 @@
 当前弃用：
 
 - `drawio`: 暂时不用的 draw.io 图表插件。
+- `superpowers-asset-compounding`: 暂时不用的 Superpowers 资产复利插件。

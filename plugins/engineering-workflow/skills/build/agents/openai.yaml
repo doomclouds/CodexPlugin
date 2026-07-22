@@ -1,0 +1,6 @@
+interface:
+  display_name: "实现需求"
+  short_description: "按关键测试接缝和垂直切片实现需求，并持续运行可复现验证"
+  default_prompt: "使用 $build 实现这个需求并留下可运行的验证。"
+policy:
+  allow_implicit_invocation: true

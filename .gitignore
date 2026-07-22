@@ -12,4 +12,6 @@ Thumbs.db
 .codegraph/
 node_modules/
 dist/
+bin/
+obj/
 .claude

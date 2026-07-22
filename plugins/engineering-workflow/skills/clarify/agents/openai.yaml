@@ -1,0 +1,6 @@
+interface:
+  display_name: "需求澄清"
+  short_description: "澄清会改变实现方案的关键歧义，并沉淀领域术语与重要决策"
+  default_prompt: "使用 $clarify 澄清这个需求，并记录必要的领域决策。"
+policy:
+  allow_implicit_invocation: true

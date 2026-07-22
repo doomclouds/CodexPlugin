@@ -29,10 +29,10 @@
       "category": "Productivity"
     },
     {
-      "name": "superpowers-asset-compounding",
+      "name": "engineering-workflow",
       "source": {
         "source": "local",
-        "path": "./plugins/superpowers-asset-compounding"
+        "path": "./plugins/engineering-workflow"
       },
       "policy": {
         "installation": "AVAILABLE",

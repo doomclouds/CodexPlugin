@@ -1,0 +1,6 @@
+interface:
+  display_name: "制定计划"
+  short_description: "按任务规模生成可执行计划、垂直切片或大型工程决策地图"
+  default_prompt: "使用 $plan 为这项工作制定与规模匹配的执行计划。"
+policy:
+  allow_implicit_invocation: true

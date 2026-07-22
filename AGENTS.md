@@ -5,7 +5,7 @@
 - Plugin packages live under `plugins/`; each plugin owns its `.codex-plugin/plugin.json`, skills, hooks, and README.
 - Marketplace metadata lives under `.agents/plugins/`; keep plugin source paths relative to that marketplace root.
 - Superpowers assets live under `docs/superpowers/`; search specs, plans, archives, problems, and inbox notes before guessing from memory.
-- Validate asset-compounding changes with `python -m unittest plugins.superpowers-asset-compounding.tests.test_asset_scripts`.
+- Validate archived asset-compounding changes with `python deprecated-plugins/superpowers-asset-compounding/tests/test_asset_scripts.py`.
 - After changing plugin hooks or manifests, restart Codex and review `/hooks` before judging runtime behavior.
 
 <!-- asset-compounding-guidance:start -->

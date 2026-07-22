@@ -1,0 +1,39 @@
+{
+  "name": "engineering-workflow",
+  "version": "0.1.0",
+  "description": "Chinese-first engineering workflow plugin for clarification, specification, planning, implementation, debugging, exploration, review, and verification.",
+  "author": {
+    "name": "doomclouds",
+    "url": "https://github.com/doomclouds"
+  },
+  "homepage": "https://github.com/doomclouds/CodexPlugin/tree/main/plugins/engineering-workflow#readme",
+  "repository": "https://github.com/doomclouds/CodexPlugin",
+  "license": "MIT",
+  "keywords": [
+    "engineering",
+    "workflow",
+    "specification",
+    "debugging",
+    "code-review",
+    "verification",
+    "chinese"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "工程协作流",
+    "shortDescription": "面向中文开发者的精简工程闭环。",
+    "longDescription": "用八个渐进式技能覆盖需求澄清、规格、计划、实现、调试、探索、三轴代码审查和独立验收。强模型自行选择最小够用流程，小改动不制造文档，大任务保留可恢复状态，所有交付都以可复现证据收口。",
+    "developerName": "doomclouds",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "澄清这个需求，并判断是否需要规格或计划。",
+      "按垂直切片实现这个功能并持续运行验证。",
+      "审查并验收当前代码变更，给出可复现证据。"
+    ],
+    "brandColor": "#0F766E"
+  }
+}
