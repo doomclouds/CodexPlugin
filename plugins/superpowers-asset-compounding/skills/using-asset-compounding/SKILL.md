@@ -167,20 +167,19 @@ Use writer skills only after the route is clear:
 
 ## Minimal Output
 
-For the route decision, keep the output compact and auditable. Before final
-handoff, prefer `emit_asset_gate.py`. Its output is already ready to append to
-the response:
+For the route decision, keep the output compact and auditable. Run
+`emit_asset_gate.py` as the final tool before handoff. `PostToolUse` records its
+validated output internally; never copy the gate into the response:
 
-- `route: none` emits only a Markdown HTML comment and stays invisible.
-- Asset-writing routes require `related_assets` and emit one
-  `资产复利：已更新 ...` receipt followed by the hidden comment.
+- `route: none` produces no user-facing output.
+- Asset-writing routes require `related_assets`; report one
+  `资产复利：已更新 ...` receipt with that path.
 - A recovered pre-handoff formatting error stays internal.
 - A Stop block or unrecovered Hook failure remains visible with cause, impact,
   and next step.
 
-When the emitter is unavailable, wrap the canonical flat gate in
-`<!-- asset-compounding` and `-->`. Do not expose the flat gate as ordinary
-response text.
+When the emitter is unavailable, do not leak the canonical gate into the
+handoff. Let an unrecovered Stop failure explain the missing internal record.
 
 Use the deterministic emitter when the script is available:
 
@@ -188,7 +187,7 @@ Use the deterministic emitter when the script is available:
 python <compound-development-asset>/scripts/emit_asset_gate.py --event-type implementation-boundary --route none --reason "<one concrete sentence>" --evidence "<tests, command, user feedback, or manual validation>"
 ```
 
-Otherwise use this canonical flat shape inside that HTML comment:
+The emitter records this canonical flat shape internally:
 
 ```text
 asset_gate:

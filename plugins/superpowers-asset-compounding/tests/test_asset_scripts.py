@@ -96,13 +96,13 @@ class AssetScriptTests(unittest.TestCase):
             debt_agent_text,
         )
 
-    def test_asset_compounding_plugin_metadata_mentions_v051_quiet_gate_ux(self) -> None:
+    def test_asset_compounding_plugin_metadata_mentions_v052_internal_gate_ux(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["version"], "0.5.1")
+        self.assertEqual(manifest["version"], "0.5.2")
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("Version `0.5.1`", readme)
-        self.assertIn("hidden HTML comment", readme)
+        self.assertIn("Version `0.5.2`", readme)
+        self.assertIn("records routine gates internally", readme)
         self.assertIn("资产复利：已更新", readme)
         hooks = json.loads(HOOKS_CONFIG.read_text(encoding="utf-8"))["hooks"]
         self.assertTrue(all("commandWindows" in registrations[0]["hooks"][0] for registrations in hooks.values()))
@@ -2107,7 +2107,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["issues"], [])
 
-    def test_emit_asset_gate_hides_none_route_and_remains_valid(self) -> None:
+    def test_emit_asset_gate_outputs_internal_none_gate_and_remains_valid(self) -> None:
         repo = self.temp_root / "quiet_none_gate_repo"
         repo.mkdir()
         emitted = subprocess.run(
@@ -2128,8 +2128,8 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
             check=True,
         )
 
-        self.assertTrue(emitted.stdout.startswith("<!-- asset-compounding\nasset_gate:\n"))
-        self.assertTrue(emitted.stdout.rstrip().endswith("-->"))
+        self.assertTrue(emitted.stdout.startswith("asset_gate:\n"))
+        self.assertNotIn("<!--", emitted.stdout)
         self.assertNotIn("资产复利：", emitted.stdout)
         result = self.run_json(
             COMPLETION_GATE,
@@ -2142,7 +2142,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         )
         self.assertEqual(result["status"], "pass")
 
-    def test_emit_asset_gate_hides_whitespace_padded_none_route(self) -> None:
+    def test_emit_asset_gate_normalizes_whitespace_padded_none_route(self) -> None:
         emitted = subprocess.run(
             [
                 sys.executable,
@@ -2161,10 +2161,10 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
             check=True,
         )
 
-        self.assertTrue(emitted.stdout.startswith("<!-- asset-compounding\nasset_gate:\n"))
+        self.assertTrue(emitted.stdout.startswith("asset_gate:\n"))
         self.assertNotIn("资产复利：", emitted.stdout)
 
-    def test_emit_asset_gate_reports_one_successful_asset_write(self) -> None:
+    def test_emit_asset_gate_records_asset_write_path_without_receipt(self) -> None:
         emitted = subprocess.run(
             [
                 sys.executable,
@@ -2185,12 +2185,13 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
             check=True,
         )
 
-        self.assertEqual(
-            emitted.stdout.splitlines()[0],
-            "资产复利：已更新 docs/superpowers/problems/example.md",
+        self.assertTrue(emitted.stdout.startswith("asset_gate:\n"))
+        self.assertIn(
+            "related_assets: docs/superpowers/problems/example.md",
+            emitted.stdout,
         )
-        self.assertEqual(emitted.stdout.count("资产复利："), 1)
-        self.assertIn("<!-- asset-compounding\nasset_gate:\n", emitted.stdout)
+        self.assertNotIn("资产复利：", emitted.stdout)
+        self.assertNotIn("<!--", emitted.stdout)
 
     def test_emit_asset_gate_rejects_asset_write_without_related_path(self) -> None:
         emitted = subprocess.run(
@@ -2424,9 +2425,13 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         plugin_data = self.temp_root / "plugin-data"
         handoff_checks = self.load_handoff_checks()
 
-        for route, related_assets, has_receipt in (
-            ("none", "none", False),
-            ("update-existing", "docs/superpowers/problems/example.md", True),
+        for route, related_assets, expected_handoff in (
+            ("none", "none", "完成验证。"),
+            (
+                "update-existing",
+                "docs/superpowers/problems/example.md",
+                "资产复利：已更新 docs/superpowers/problems/example.md",
+            ),
         ):
             with self.subTest(route=route):
                 session_id = f"emitter-stop-{route}"
@@ -2461,6 +2466,18 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                     capture_output=True,
                     check=True,
                 )
+                self.run_hook(
+                    {
+                        "hook_event_name": "PostToolUse",
+                        "session_id": session_id,
+                        "turn_id": "turn-1",
+                        "cwd": str(repo),
+                        "tool_name": "Bash",
+                        "tool_input": {"command": f"{sys.executable} {EMIT_ASSET_GATE}"},
+                        "tool_response": {"exit_code": 0, "output": emitted.stdout},
+                    },
+                    plugin_data=plugin_data,
+                )
 
                 code, stdout, stderr = self.run_hook(
                     {
@@ -2468,7 +2485,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                         "session_id": session_id,
                         "turn_id": "turn-1",
                         "cwd": str(repo),
-                        "last_assistant_message": emitted.stdout,
+                        "last_assistant_message": expected_handoff,
                     },
                     plugin_data=plugin_data,
                 )
@@ -2478,7 +2495,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 validation = handoff_checks.validate_asset_gate_text(emitted.stdout)
                 self.assertTrue(validation["valid"])
                 self.assertEqual(validation["fields"]["route"], route)
-                self.assertEqual("资产复利：已更新" in emitted.stdout, has_receipt)
+                self.assertNotIn("asset_gate:", expected_handoff)
                 events = [
                     json.loads(line)
                     for line in (
@@ -2486,6 +2503,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                     ).read_text(encoding="utf-8").splitlines()
                 ]
                 self.assertEqual(events[-1]["reasonCode"], "asset_gate_present")
+                self.assertEqual(events[-1]["gateSource"], "tool")
 
     def test_completion_gate_accepts_asset_candidates_and_asset_gate(self) -> None:
         repo = self.temp_root / "candidate_repo"
@@ -2713,7 +2731,8 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         context = payload["hookSpecificOutput"]["additionalContext"]
         self.assertIn("hook-assisted asset compounding", context)
         self.assertIn("asset_gate", context)
-        self.assertIn("HTML comment", context)
+        self.assertIn("record the gate internally", context)
+        self.assertIn("never copy the gate into the handoff", context)
         self.assertIn("route none silent", context)
         self.assertIn("report successful asset writes once", context)
         self.assertIn("expose unrecovered failures", context)
@@ -2961,7 +2980,8 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertIn("asset", payload["systemMessage"])
         self.assertIn("before starting the next planned task", payload["systemMessage"].lower())
         message = payload["systemMessage"]
-        self.assertIn("HTML comment", message)
+        self.assertIn("record the gate internally", message)
+        self.assertIn("never copy the gate into the handoff", message)
         self.assertIn("route none silent", message)
         self.assertIn("report successful asset writes once", message)
         self.assertIn("expose unrecovered failures", message)
@@ -5057,7 +5077,7 @@ Old managed block.
         archive_root = Path(str(result["archivePath"]))
         manifest = json.loads((archive_root / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["archiveHash"], dry_run["archiveHash"])
-        self.assertEqual(manifest["files"][0]["archivedPath"], f"{archive_root.relative_to(plugin_data).as_posix()}/RepoA--old-session")
+        self.assertEqual(manifest["files"][0]["archivedPath"], f"{archive_root.resolve().relative_to(plugin_data.resolve()).as_posix()}/RepoA--old-session")
 
     def test_hook_jsonl_append_helper_serializes_concurrent_writers(self) -> None:
         spec = importlib.util.spec_from_file_location("asset_hook_under_test", HOOK_SCRIPT)

@@ -2,12 +2,11 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.5.1` combines six skills with plugin-bundled Codex lifecycle hooks.
-This v0.5.1 release adds quiet closeout UX: routine gates travel in a hidden
-HTML comment, `route: none` stays invisible, successful asset writes show one
-`资产复利：已更新 ...` receipt with the written path, and unrecovered Stop or
-Hook failures remain visible and actionable. It preserves the v0.5.0 runtime
-reliability, structured gate schema, routes, audit privacy, and session state.
+Version `0.5.2` combines six skills with plugin-bundled Codex lifecycle hooks.
+This v0.5.2 release records routine gates internally from the final
+`emit_asset_gate.py` tool call. `route: none` produces no handoff text,
+successful asset writes show one `资产复利：已更新 ...` receipt with the written
+path, and unrecovered Stop or Hook failures remain visible and actionable.
 
 The plugin provides six skills:
 
@@ -21,15 +20,15 @@ The plugin provides six skills:
 The plugin also bundles hooks under `hooks/hooks.json`:
 
 - `SessionStart`: injects a short asset-compounding protocol when a repository has `docs/superpowers/`.
-- `PostToolUse`: records compact lifecycle signals from edits, verification commands, git closeout commands, and main-agent plan updates.
+- `PostToolUse`: records compact lifecycle signals and captures validated output from the final `emit_asset_gate.py` call.
 - `Stop`: asks the main agent for one continuation when meaningful work is ending without an `asset_gate` block.
 - `PreCompact` / `PostCompact`: preserve and restore compact pending asset state across compaction.
 
-The `Stop` hook reads the raw final assistant message, where the canonical gate
-is carried inside a hidden HTML comment. `route: none` therefore stays invisible
-in the rendered response while audit validation remains unchanged. Successful
-asset-writing routes show one `资产复利：已更新 ...` receipt before the hidden
-comment. Legacy plain gates remain accepted for compatibility.
+The `Stop` hook validates the gate captured internally by `PostToolUse`, so the
+canonical block never needs to appear in the final assistant message. `route:
+none` therefore produces no user-facing output. Successful asset-writing routes
+show one `资产复利：已更新 ...` receipt. Legacy message-carried gates remain
+accepted for compatibility.
 
 `UserPromptSubmit` is intentionally not part of the asset lifecycle. It is better suited for prompt risk checks than workflow routing.
 
@@ -42,8 +41,7 @@ Codex skips plugin-bundled command hooks until the current hook definition has
 been trusted.
 
 After any quiet-closeout Hook or guidance change, restart Codex and review
-`/hooks` before host acceptance. Unit tests cannot prove that the desktop
-renderer hides the comment while Stop still receives the raw message.
+`/hooks` before host acceptance.
 
 The POSIX launcher resolves the hook from the host-provided `PLUGIN_ROOT` first
 and does not require Git's `dirname` or `tr` utilities to be present on `PATH`.
@@ -78,14 +76,15 @@ Before final handoff, merge, PR, or cleanup, run:
 python <plugin>\skills\compound-development-asset\scripts\check_completion_gate.py . --json
 ```
 
-To generate a validated, response-ready closeout, run:
+As the final tool call before handoff, record a validated closeout:
 
 ```powershell
 python <plugin>\skills\compound-development-asset\scripts\emit_asset_gate.py --event-type implementation-boundary --route none --reason "No reusable asset is needed for this boundary." --evidence "Focused tests passed."
 ```
 
-The `none` route emits only the hidden gate. Asset-writing routes also require
-`--related-assets` and emit one visible receipt containing the written path.
+Do not copy the command output into the handoff. The `none` route stays fully
+silent. Asset-writing routes also require `--related-assets`; report one visible
+receipt containing that path.
 
 For completed requirement work, include the topic so spec+plan without archive
 coverage becomes a blocking issue:
@@ -123,10 +122,11 @@ Hook usage events are written under `PLUGIN_DATA` as per-session `events.jsonl`
 files in `<project>--<session-id>` directories. State changes use a per-session
 lock transaction plus atomic replacement; JSONL appends use the same lock
 discipline so concurrent hook processes do not lose state or interleave lines.
-Persisted state keeps only repository name/hash, command kind/hash/length, and
-safe bootstrap actions or known relative directories; it does not retain a raw
-working directory, full verification command, bootstrap path, exception text,
-or tool response.
+Persisted state keeps repository name/hash, command kind/hash/length, safe
+bootstrap actions or known relative directories, and the validated gate fields
+transiently until `Stop` closes the session. It does not retain a raw working
+directory, full verification command, bootstrap path, exception text, or raw
+tool response.
 Events record structured metadata such as hook event name, decision, reason
 code, command kind, command hash/length, hook duration, exit code, signal
 names, per-tool signal deltas, asset-write markers, candidate counts,

@@ -202,13 +202,9 @@ def asset_gate_handoff_text(block: str, *, route: str, related_assets: str) -> s
     if _normalize_empty_value(related_assets) != block_assets:
         raise ValueError("related_assets does not match asset_gate block")
 
-    hidden_gate = f"<!-- asset-compounding\n{block}\n-->"
-    if block_route == "none":
-        return hidden_gate
-
-    if not block_assets or block_assets == "none":
+    if block_route != "none" and (not block_assets or block_assets == "none"):
         raise ValueError("related_assets is required for asset-writing routes")
-    return f"资产复利：已更新 {block_assets}\n\n{hidden_gate}"
+    return block
 
 
 def asset_gate_template() -> str:

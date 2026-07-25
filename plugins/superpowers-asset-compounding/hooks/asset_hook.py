@@ -168,8 +168,9 @@ def handle_session_start(event: dict[str, Any]) -> dict[str, Any] | None:
             "This repository uses hook-assisted asset compounding. Keep asset "
             "workflow concise: subagents report candidates, the main agent owns "
             "route decisions and writes, and meaningful closeout needs an "
-            "auditable asset_gate block. Put the auditable asset_gate in an HTML "
-            "comment before final handoff; keep route none silent, report "
+            "auditable asset_gate block. Run emit_asset_gate.py as the final tool "
+            "to record the gate internally; never copy the gate into the handoff. "
+            "Keep route none silent, report "
             "successful asset writes once with the written path, and expose "
             "unrecovered failures. "
             f"{workspace_context(event)}"
@@ -188,6 +189,7 @@ def handle_post_tool_use(event: dict[str, Any]) -> dict[str, Any] | None:
     verification_result = verification_status(exit_code) if verification_command else None
     asset_files_changed_this_tool = asset_files_changed(tool_name, tool_input, command)
     command_kind = "plan-update" if is_plan_update_tool(tool_name) else classify_command_kind(command, tool_name)
+    recorded_asset_gate = extract_recorded_asset_gate(command, event.get("tool_response"))
     asset_bootstrap_this_tool: dict[str, Any] | None = None
     if asset_files_changed_this_tool:
         bootstrap_result = bootstrap_asset_guidance(event)
@@ -200,6 +202,10 @@ def handle_post_tool_use(event: dict[str, Any]) -> dict[str, Any] | None:
         signals_before = set(signals)
         plan_update_gate_due_before = bool(state.get("assetGateDue"))
         plan_update_reminder_due = False
+        if recorded_asset_gate is None:
+            state.pop("assetGate", None)
+        else:
+            state["assetGate"] = recorded_asset_gate
 
         if tool_name == "apply_patch":
             signals.add("edited-files")
@@ -235,6 +241,7 @@ def handle_post_tool_use(event: dict[str, Any]) -> dict[str, Any] | None:
         state_asset_files_changed = bool(state.get("assetFilesChanged"))
         state_asset_bootstrap = state.get("assetBootstrap")
         state_asset_gate_due = bool(state.get("assetGateDue"))
+        state_asset_gate = state.get("assetGate")
 
     append_usage_event(
         event,
@@ -260,6 +267,10 @@ def handle_post_tool_use(event: dict[str, Any]) -> dict[str, Any] | None:
         if isinstance(asset_bootstrap_this_tool, dict)
         else None,
         assetGateDue=state_asset_gate_due,
+        assetGateRecorded=isinstance(state_asset_gate, dict),
+        assetGateRoute=state_asset_gate.get("route")
+        if isinstance(state_asset_gate, dict)
+        else None,
         assetGateReminder=plan_update_reminder_due if is_plan_update_tool(tool_name) else None,
     )
     if plan_update_reminder_due:
@@ -269,8 +280,9 @@ def handle_post_tool_use(event: dict[str, Any]) -> dict[str, Any] | None:
                 "Before starting the next planned task, run the main-agent asset "
                 "gate: decide route none, inbox, update-existing, archive, "
                 "new-problem, or both; use the asset-compounding scripts when "
-                "you need deterministic evidence. Put the auditable asset_gate "
-                "in an HTML comment before final handoff; keep route none silent, "
+                "you need deterministic evidence. Run emit_asset_gate.py as the "
+                "final tool to record the gate internally; never copy the gate "
+                "into the handoff. Keep route none silent, "
                 "report successful asset writes once with the written path, and "
                 "expose unrecovered failures."
             )
@@ -283,6 +295,7 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
         return None
     message = str(event.get("last_assistant_message") or "")
     with state_transaction(event) as state:
+        recorded_asset_gate = sanitize_recorded_asset_gate(state.get("assetGate"))
         if not has_stop_closeout_work(state):
             append_usage_event(
                 event,
@@ -294,9 +307,13 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
             )
             close_session_state(state)
             return None
-        if "asset_gate:" in message:
+        if "asset_gate:" in message or recorded_asset_gate is not None:
             handoff_checks = import_handoff_checks_module()
-            validation = handoff_checks.validate_asset_gate_text(message, allow_defaults=True)
+            gate_source = "handoff" if "asset_gate:" in message else "tool"
+            gate_text = message
+            if gate_source == "tool":
+                gate_text = handoff_checks.canonical_asset_gate_text(**recorded_asset_gate)
+            validation = handoff_checks.validate_asset_gate_text(gate_text, allow_defaults=True)
             if not validation.get("valid"):
                 sanitized_validation = sanitize_validation_for_audit(validation)
                 if event.get("stop_hook_active") or state.get("stopContinuationUsed"):
@@ -310,6 +327,7 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
                         signals=state.get("meaningfulWorkSignals", []),
                         candidateCount=len(state.get("subagentCandidates", [])),
                         validation=sanitized_validation,
+                        gateSource=gate_source,
                     )
                     return {
                         "systemMessage": (
@@ -327,6 +345,7 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
                     signals=state.get("meaningfulWorkSignals", []),
                     candidateCount=len(state.get("subagentCandidates", [])),
                     validation=sanitized_validation,
+                    gateSource=gate_source,
                 )
                 return {
                     "decision": "block",
@@ -348,6 +367,8 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
                 signals=state.get("meaningfulWorkSignals", []),
                 candidateCount=len(state.get("subagentCandidates", [])),
                 defaultedFields=defaulted_fields or None,
+                gateSource=gate_source,
+                assetGateRoute=validation["fields"].get("route"),
             )
             close_session_state(state)
             return None
@@ -792,6 +813,65 @@ def stable_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
+ASSET_GATE_COMMAND_MARKER = "emit_asset_gate.py"
+MAX_ASSET_GATE_RESPONSE_DEPTH = 6
+MAX_ASSET_GATE_RESPONSE_NODES = 256
+MAX_ASSET_GATE_RESPONSE_CHARS = 65536
+
+
+def extract_recorded_asset_gate(command: str, tool_response: Any) -> dict[str, str] | None:
+    if ASSET_GATE_COMMAND_MARKER not in command.lower():
+        return None
+    exit_code, _ = extract_exit_code(tool_response)
+    if exit_code not in (None, 0):
+        return None
+
+    fragments: list[str] = []
+    stack: list[tuple[Any, int]] = [(tool_response, 0)]
+    remaining_chars = MAX_ASSET_GATE_RESPONSE_CHARS
+    nodes = 0
+    while stack and nodes < MAX_ASSET_GATE_RESPONSE_NODES and remaining_chars > 0:
+        value, depth = stack.pop()
+        nodes += 1
+        if depth > MAX_ASSET_GATE_RESPONSE_DEPTH:
+            continue
+        if isinstance(value, str):
+            fragment = value[:remaining_chars]
+            fragments.append(fragment)
+            remaining_chars -= len(fragment)
+        elif isinstance(value, dict):
+            stack.extend((item, depth + 1) for item in reversed(list(value.values())))
+        elif isinstance(value, (list, tuple)):
+            stack.extend((item, depth + 1) for item in reversed(value))
+
+    handoff_checks = import_handoff_checks_module()
+    validation = handoff_checks.validate_asset_gate_text("\n".join(fragments))
+    if not validation.get("valid"):
+        return None
+    return dict(validation["fields"])
+
+
+def sanitize_recorded_asset_gate(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    handoff_checks = import_handoff_checks_module()
+    try:
+        block = handoff_checks.canonical_asset_gate_text(
+            event_type=value["event_type"],
+            route=value["route"],
+            reason=value["reason"],
+            evidence=value["evidence"],
+            related_assets=value["related_assets"],
+            asset_candidates=value["asset_candidates"],
+            deferred_signals=value["deferred_signals"],
+            next_step=value["next_step"],
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+    validation = handoff_checks.validate_asset_gate_text(block)
+    return dict(validation["fields"]) if validation.get("valid") else None
+
+
 def repo_identity(event: dict[str, Any]) -> dict[str, str]:
     cwd = str(event.get("cwd") or "")
     return {
@@ -897,6 +977,11 @@ def sanitize_asset_bootstrap(value: Any) -> dict[str, Any] | None:
 def sanitize_state_for_storage(state: dict[str, Any]) -> None:
     state.pop("cwd", None)
     state["verificationEvidence"] = sanitize_verification_evidence(state.get("verificationEvidence"))
+    asset_gate = sanitize_recorded_asset_gate(state.get("assetGate"))
+    if asset_gate is None:
+        state.pop("assetGate", None)
+    else:
+        state["assetGate"] = asset_gate
     asset_bootstrap = sanitize_asset_bootstrap(state.get("assetBootstrap"))
     if asset_bootstrap is None:
         state.pop("assetBootstrap", None)
@@ -1286,6 +1371,7 @@ def clear_closeout_state(state: dict[str, Any]) -> None:
     state["stopContinuationUsed"] = False
     state["assetGateDue"] = False
     state["lastGitCloseoutKind"] = ""
+    state.pop("assetGate", None)
 
 
 def close_session_state(state: dict[str, Any]) -> None:
