@@ -104,6 +104,9 @@ class AssetScriptTests(unittest.TestCase):
         self.assertIn("Version `0.5.2`", readme)
         self.assertIn("records routine gates internally", readme)
         self.assertIn("资产复利：已更新", readme)
+        router_skill = (SKILLS / "using-asset-compounding" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("a task boundary has been reached", router_skill)
+        self.assertIn("Do not trigger merely because the current assistant turn is ending", router_skill)
         hooks = json.loads(HOOKS_CONFIG.read_text(encoding="utf-8"))["hooks"]
         self.assertTrue(all("commandWindows" in registrations[0]["hooks"][0] for registrations in hooks.values()))
 
@@ -2731,6 +2734,8 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         context = payload["hookSpecificOutput"]["additionalContext"]
         self.assertIn("hook-assisted asset compounding", context)
         self.assertIn("asset_gate", context)
+        self.assertIn("task-level closeout", context)
+        self.assertIn("ongoing work remains silent", context)
         self.assertIn("record the gate internally", context)
         self.assertIn("never copy the gate into the handoff", context)
         self.assertIn("route none silent", context)
@@ -2920,6 +2925,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(stdout, "")
         state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["meaningfulWorkSignals"], ["plan-boundary"])
+        self.assertFalse(state["assetGateDue"])
 
         events = [
             json.loads(line)
@@ -2929,11 +2935,11 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(events[-1]["commandKind"], "plan-update")
         self.assertEqual(events[-1]["signalsAdded"], ["plan-boundary"])
 
-    def test_post_tool_use_update_plan_reminds_before_next_task_when_gate_due(self) -> None:
+    def test_stop_keeps_in_progress_task_pending_without_asset_gate(self) -> None:
         repo = self.create_repo()
         plugin_data = self.temp_root / "plugin-data"
 
-        code, stdout, stderr = self.run_hook(
+        self.run_hook(
             {
                 "hook_event_name": "PostToolUse",
                 "session_id": "session-1",
@@ -2942,7 +2948,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 "tool_name": "update_plan",
                 "tool_input": {
                     "plan": [
-                        {"step": "Implement hook change", "status": "completed"},
+                        {"step": "Implement hook change", "status": "in_progress"},
                         {"step": "Run validation", "status": "pending"},
                     ]
                 },
@@ -2950,13 +2956,84 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
             },
             plugin_data=plugin_data,
         )
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "apply_patch",
+                "tool_input": {"patch": "*** Update File: src/demo.py"},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "实现仍在继续。",
+            },
+            plugin_data=plugin_data,
+        )
 
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout, "")
         state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
-        self.assertTrue(state["assetGateDue"])
+        self.assertEqual(state["lifecycle"], "active")
+        self.assertEqual(state["meaningfulWorkSignals"], ["edited-files", "plan-boundary"])
+        self.assertFalse(state["assetGateDue"])
 
+    def test_completed_plan_requires_one_gate_and_git_push_does_not_repeat_it(self) -> None:
+        repo = self.create_repo()
+        plugin_data = self.temp_root / "plugin-data"
+
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "update_plan",
+                "tool_input": {
+                    "plan": [
+                        {"step": "Implement hook change", "status": "in_progress"},
+                        {"step": "Run validation", "status": "pending"},
+                    ]
+                },
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "apply_patch",
+                "tool_input": {"patch": "*** Update File: src/demo.py"},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
         code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "实现仍在继续。",
+            },
+            plugin_data=plugin_data,
+        )
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+
+        self.run_hook(
             {
                 "hook_event_name": "PostToolUse",
                 "session_id": "session-1",
@@ -2966,25 +3043,80 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 "tool_input": {
                     "plan": [
                         {"step": "Implement hook change", "status": "completed"},
-                        {"step": "Run validation", "status": "in_progress"},
+                        {"step": "Run validation", "status": "completed"},
                     ]
                 },
                 "tool_response": {"ok": True},
             },
             plugin_data=plugin_data,
         )
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
+        self.assertTrue(state["assetGateDue"])
 
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-2",
+                "cwd": str(repo),
+                "last_assistant_message": "任务已经完成。",
+            },
+            plugin_data=plugin_data,
+        )
         self.assertEqual(code, 0, stderr)
-        payload = json.loads(stdout)
-        self.assertIn("systemMessage", payload)
-        self.assertIn("asset", payload["systemMessage"])
-        self.assertIn("before starting the next planned task", payload["systemMessage"].lower())
-        message = payload["systemMessage"]
-        self.assertIn("record the gate internally", message)
-        self.assertIn("never copy the gate into the handoff", message)
-        self.assertIn("route none silent", message)
-        self.assertIn("report successful asset writes once", message)
-        self.assertIn("expose unrecovered failures", message)
+        self.assertEqual(json.loads(stdout)["decision"], "block")
+
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-2",
+                "cwd": str(repo),
+                "last_assistant_message": (
+                    "asset_gate:\n"
+                    "  event_type: implementation-boundary\n"
+                    "  route: none\n"
+                    "reason: task-level closeout complete\n"
+                    "evidence: focused tests passed\n"
+                    "related_assets: none\n"
+                    "asset_candidates: none\n"
+                    "deferred_signals: none\n"
+                    "next_step: none"
+                ),
+            },
+            plugin_data=plugin_data,
+        )
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
+        self.assertTrue(state["assetGateSatisfied"])
+
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-3",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": "git push"},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
+        code, stdout, stderr = self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-3",
+                "cwd": str(repo),
+                "last_assistant_message": "已推送，没有新增工作。",
+            },
+            plugin_data=plugin_data,
+        )
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stdout, "")
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
+        self.assertTrue(state["assetGateSatisfied"])
 
     def test_stop_allows_plan_boundary_only_without_asset_gate(self) -> None:
         repo = self.create_repo()
@@ -3010,6 +3142,8 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
 
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout, "")
+        state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
+        self.assertFalse(state["assetGateDue"])
 
         code, stdout, stderr = self.run_hook(
             {
@@ -3135,7 +3269,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(reopened["lifecycle"], "active")
         self.assertIsNone(reopened["closedAtUtc"])
 
-    def test_stop_blocks_invalid_asset_gate_without_clearing_state(self) -> None:
+    def test_stop_allows_invalid_asset_gate_while_task_is_in_progress(self) -> None:
         repo = self.create_repo()
         plugin_data = self.temp_root / "plugin-data"
         self.run_hook(
@@ -3163,19 +3297,15 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         )
 
         self.assertEqual(code, 0, stderr)
-        payload = json.loads(stdout)
-        self.assertEqual(payload["decision"], "block")
-        self.assertIn("资产复利未完成：", payload["reason"])
-        self.assertIn("主要任务结果不受影响", payload["reason"])
-        self.assertIn("下一步：", payload["reason"])
-        self.assertNotIn("Use this flat template", payload["reason"])
+        self.assertEqual(stdout, "")
         events = [
             json.loads(line)
             for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
-        self.assertEqual(events[-1]["reasonCode"], "invalid_asset_gate")
+        self.assertEqual(events[-1]["reasonCode"], "invalid_gate_while_task_in_progress")
         state = json.loads((self.audit_dir(plugin_data, repo) / "state.json").read_text(encoding="utf-8"))
         self.assertIn("verification-ran", state["meaningfulWorkSignals"])
+        self.assertEqual(state["lifecycle"], "active")
 
     def test_stop_invalid_gate_retry_does_not_consume_a_second_continuation(self) -> None:
         repo = self.create_repo()
@@ -3188,6 +3318,18 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 "cwd": str(repo),
                 "tool_name": "apply_patch",
                 "tool_input": {"patch": "*** Begin Patch\n*** End Patch"},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "invalid-retry-session",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "update_plan",
+                "tool_input": {"plan": [{"step": "Finish the task", "status": "completed"}]},
                 "tool_response": {"ok": True},
             },
             plugin_data=plugin_data,
@@ -3233,6 +3375,18 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 "cwd": str(repo),
                 "tool_name": "apply_patch",
                 "tool_input": {"patch": "*** Begin Patch\n*** End Patch"},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "missing-invalid-retry-session",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "update_plan",
+                "tool_input": {"plan": [{"step": "Finish the task", "status": "completed"}]},
                 "tool_response": {"ok": True},
             },
             plugin_data=plugin_data,
@@ -3286,6 +3440,18 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 "cwd": str(repo),
                 "tool_name": "apply_patch",
                 "tool_input": {"patch": "*** Begin Patch\n*** End Patch"},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "valid-retry-session",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "update_plan",
+                "tool_input": {"plan": [{"step": "Finish the task", "status": "completed"}]},
                 "tool_response": {"ok": True},
             },
             plugin_data=plugin_data,
@@ -3447,7 +3613,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
             ["related_assets", "asset_candidates", "deferred_signals", "next_step"],
         )
 
-    def test_stop_blocks_missing_reason_or_evidence_when_hard_work_exists(self) -> None:
+    def test_stop_blocks_missing_reason_or_evidence_when_gate_is_due(self) -> None:
         repo = self.create_repo()
         plugin_data = self.temp_root / "plugin-data"
         self.run_hook(
@@ -3458,6 +3624,18 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 "cwd": str(repo),
                 "tool_name": "apply_patch",
                 "tool_input": {"patch": "*** Begin Patch\n*** End Patch"},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "update_plan",
+                "tool_input": {"plan": [{"step": "Finish the task", "status": "completed"}]},
                 "tool_response": {"ok": True},
             },
             plugin_data=plugin_data,
@@ -3495,6 +3673,18 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
                 "cwd": str(repo),
                 "tool_name": "apply_patch",
                 "tool_input": {"patch": "*** Begin Patch\n*** End Patch"},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "update_plan",
+                "tool_input": {"plan": [{"step": "Finish the task", "status": "completed"}]},
                 "tool_response": {"ok": True},
             },
             plugin_data=plugin_data,
@@ -3609,7 +3799,7 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
         self.assertEqual(code, 0, stderr)
         self.assertEqual(json.loads(stdout)["decision"], "block")
 
-    def test_post_tool_use_marks_meaningful_work_and_stop_requires_asset_gate(self) -> None:
+    def test_git_commit_after_meaningful_work_requires_asset_gate(self) -> None:
         repo = self.create_repo()
         plugin_data = self.temp_root / "plugin-data"
 
@@ -3628,6 +3818,18 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
 
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout, "")
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": 'git commit -m "Finish task"'},
+                "tool_response": {"exit_code": 0},
+            },
+            plugin_data=plugin_data,
+        )
 
         code, stdout, stderr = self.run_hook(
             {
@@ -3782,6 +3984,18 @@ Demo feature has inbox context, but the spec and plan still need requirement arc
 
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout, "")
+        self.run_hook(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "update_plan",
+                "tool_input": {"plan": [{"step": "Finish cleanup", "status": "completed"}]},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
 
         code, stdout, stderr = self.run_hook(
             {
@@ -4318,7 +4532,7 @@ Old managed block.
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout, "")
 
-    def test_post_compact_records_pending_state_without_stdout(self) -> None:
+    def test_post_compact_ignores_completed_plan_without_work(self) -> None:
         repo = self.create_repo()
         plugin_data = self.temp_root / "plugin-data"
         self.run_hook(
@@ -4353,10 +4567,8 @@ Old managed block.
         ]
         post_compact_event = events[-1]
         self.assertEqual(post_compact_event["hookEventName"], "PostCompact")
-        self.assertEqual(post_compact_event["decision"], "recorded")
-        self.assertEqual(post_compact_event["reasonCode"], "pending_state_restored")
-        self.assertEqual(post_compact_event["candidateCount"], 0)
-        self.assertEqual(post_compact_event["signals"], ["plan-boundary"])
+        self.assertEqual(post_compact_event["decision"], "allow")
+        self.assertEqual(post_compact_event["reasonCode"], "no_pending_state")
 
     def test_hook_writes_sanitized_usage_events(self) -> None:
         repo = self.create_repo()
@@ -4376,6 +4588,18 @@ Old managed block.
         )
         self.run_hook(
             {
+                "hook_event_name": "PostToolUse",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "tool_name": "update_plan",
+                "tool_input": {"plan": [{"step": "Review failed verification", "status": "completed"}]},
+                "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+        self.run_hook(
+            {
                 "hook_event_name": "Stop",
                 "session_id": "session-1",
                 "turn_id": "turn-1",
@@ -4390,9 +4614,9 @@ Old managed block.
             for line in (self.audit_dir(plugin_data, repo) / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
 
-        self.assertGreaterEqual(len(events), 2)
+        self.assertGreaterEqual(len(events), 3)
         post_tool_event = events[0]
-        stop_event = events[1]
+        stop_event = events[-1]
         self.assertEqual(post_tool_event["hookEventName"], "PostToolUse")
         self.assertEqual(post_tool_event["commandKind"], "dotnet-test")
         self.assertTrue(post_tool_event["commandPresent"])
@@ -4429,23 +4653,23 @@ Old managed block.
         )
         self.run_hook(
             {
-                "hook_event_name": "Stop",
-                "session_id": "session-1",
-                "turn_id": "turn-1",
-                "cwd": str(repo),
-                "last_assistant_message": "Verification failed.",
-            },
-            plugin_data=plugin_data,
-        )
-        self.run_hook(
-            {
                 "hook_event_name": "PostToolUse",
                 "session_id": "session-1",
                 "turn_id": "turn-1",
                 "cwd": str(repo),
                 "tool_name": "functions.update_plan",
-                "tool_input": {"plan": [{"step": "Review failed verification", "status": "in_progress"}]},
+                "tool_input": {"plan": [{"step": "Review failed verification", "status": "completed"}]},
                 "tool_response": {"ok": True},
+            },
+            plugin_data=plugin_data,
+        )
+        self.run_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": str(repo),
+                "last_assistant_message": "Verification failed.",
             },
             plugin_data=plugin_data,
         )

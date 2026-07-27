@@ -21,7 +21,7 @@ The plugin also bundles hooks under `hooks/hooks.json`:
 
 - `SessionStart`: injects a short asset-compounding protocol when a repository has `docs/superpowers/`.
 - `PostToolUse`: records compact lifecycle signals and captures validated output from the final `emit_asset_gate.py` call.
-- `Stop`: asks the main agent for one continuation when meaningful work is ending without an `asset_gate` block.
+- `Stop`: asks the main agent for one continuation only when task-level closeout is due without an `asset_gate` block.
 - `PreCompact` / `PostCompact`: preserve and restore compact pending asset state across compaction.
 
 The `Stop` hook validates the gate captured internally by `PostToolUse`, so the
@@ -59,16 +59,12 @@ The bootstrap step is idempotent. It creates the standard asset directories and
 adds or refreshes the versioned managed `AGENTS.md` retrieval block before later
 archive/problem work.
 
-At meaningful development task boundaries, the hooks assist the main agent by
-recording plan-update checkpoints and enforcing an explicit closeout decision.
-The main agent owns route decisions and repository asset writes. Weak but
-potentially reusable problem signals should go to `inbox` first instead of being
-dropped or prematurely promoted.
-
-When an `update_plan` call contains a completed step, the hook marks
-`assetGateDue`. The next plan update returns a lightweight reminder to run the
-main-agent asset gate before starting the next planned task. This reminder does
-not block tool execution; the hard gate remains the final `Stop` check.
+The hook keeps edits and verification as pending evidence without interrupting
+brainstorming or intermediate turns. A fully completed plan with pending
+evidence, or an explicit commit/closeout command, marks `assetGateDue`; only
+that state can make `Stop` request one continuation. A valid gate marks the
+boundary satisfied, so a later merge or push does not ask again unless new work
+appears. The main agent still owns route decisions and repository asset writes.
 
 Before final handoff, merge, PR, or cleanup, run:
 
@@ -123,8 +119,9 @@ files in `<project>--<session-id>` directories. State changes use a per-session
 lock transaction plus atomic replacement; JSONL appends use the same lock
 discipline so concurrent hook processes do not lose state or interleave lines.
 Persisted state keeps repository name/hash, command kind/hash/length, safe
-bootstrap actions or known relative directories, and the validated gate fields
-transiently until `Stop` closes the session. It does not retain a raw working
+bootstrap actions or known relative directories, and pending task evidence
+across intermediate `Stop` events until a task-level gate closes the state. It
+does not retain a raw working
 directory, full verification command, bootstrap path, exception text, or raw
 tool response.
 Events record structured metadata such as hook event name, decision, reason

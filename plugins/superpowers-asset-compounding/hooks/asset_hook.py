@@ -167,8 +167,9 @@ def handle_session_start(event: dict[str, Any]) -> dict[str, Any] | None:
         (
             "This repository uses hook-assisted asset compounding. Keep asset "
             "workflow concise: subagents report candidates, the main agent owns "
-            "route decisions and writes, and meaningful closeout needs an "
-            "auditable asset_gate block. Run emit_asset_gate.py as the final tool "
+            "route decisions and writes, and task-level closeout needs an "
+            "auditable asset_gate block; ongoing work remains silent. Run "
+            "emit_asset_gate.py as the final tool "
             "to record the gate internally; never copy the gate into the handoff. "
             "Keep route none silent, report "
             "successful asset writes once with the written path, and expose "
@@ -200,8 +201,8 @@ def handle_post_tool_use(event: dict[str, Any]) -> dict[str, Any] | None:
         reopen_session_state(state)
         signals = set(state.get("meaningfulWorkSignals", []))
         signals_before = set(signals)
-        plan_update_gate_due_before = bool(state.get("assetGateDue"))
-        plan_update_reminder_due = False
+        plan_completed = False
+        work_observed_this_tool = False
         if recorded_asset_gate is None:
             state.pop("assetGate", None)
         else:
@@ -209,14 +210,13 @@ def handle_post_tool_use(event: dict[str, Any]) -> dict[str, Any] | None:
 
         if tool_name == "apply_patch":
             signals.add("edited-files")
+            work_observed_this_tool = True
         if is_plan_update_tool(tool_name):
             signals.add("plan-boundary")
-            if plan_update_gate_due_before:
-                plan_update_reminder_due = True
-            if plan_has_completed_step(tool_input):
-                state["assetGateDue"] = True
+            plan_completed = plan_is_completed(tool_input)
         if verification_command:
             signals.add(verification_signal(str(verification_result)))
+            work_observed_this_tool = True
             evidence = {
                 "commandKind": command_kind,
                 "commandHash": stable_hash(command),
@@ -233,8 +233,18 @@ def handle_post_tool_use(event: dict[str, Any]) -> dict[str, Any] | None:
             state["lastGitCloseoutKind"] = classify_command_kind(command)
         if asset_files_changed_this_tool:
             state["assetFilesChanged"] = True
+            work_observed_this_tool = True
             if asset_bootstrap_this_tool is not None:
                 state["assetBootstrap"] = asset_bootstrap_this_tool
+
+        if work_observed_this_tool:
+            state["assetGateSatisfied"] = False
+        if plan_completed and has_pending_asset_work(state, signals):
+            state["assetGateDue"] = True
+        if is_git_closeout_command(command) and not state.get("assetGateSatisfied"):
+            git_kind = str(state.get("lastGitCloseoutKind") or "")
+            if git_kind == "git-commit" or has_pending_asset_work(state, signals):
+                state["assetGateDue"] = True
 
         state["meaningfulWorkSignals"] = sorted(signals)
         state_signals = list(state["meaningfulWorkSignals"])
@@ -271,22 +281,8 @@ def handle_post_tool_use(event: dict[str, Any]) -> dict[str, Any] | None:
         assetGateRoute=state_asset_gate.get("route")
         if isinstance(state_asset_gate, dict)
         else None,
-        assetGateReminder=plan_update_reminder_due if is_plan_update_tool(tool_name) else None,
+        assetGateSatisfied=bool(state.get("assetGateSatisfied")),
     )
-    if plan_update_reminder_due:
-        return {
-            "systemMessage": (
-                "Asset-compounding checkpoint is due from a completed plan step. "
-                "Before starting the next planned task, run the main-agent asset "
-                "gate: decide route none, inbox, update-existing, archive, "
-                "new-problem, or both; use the asset-compounding scripts when "
-                "you need deterministic evidence. Run emit_asset_gate.py as the "
-                "final tool to record the gate internally; never copy the gate "
-                "into the handoff. Keep route none silent, "
-                "report successful asset writes once with the written path, and "
-                "expose unrecovered failures."
-            )
-        }
     return None
 
 
@@ -296,18 +292,10 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
     message = str(event.get("last_assistant_message") or "")
     with state_transaction(event) as state:
         recorded_asset_gate = sanitize_recorded_asset_gate(state.get("assetGate"))
-        if not has_stop_closeout_work(state):
-            append_usage_event(
-                event,
-                "Stop",
-                decision="allow",
-                reason_code="no_meaningful_work",
-                hasAssetGate="asset_gate:" in message,
-                hasMeaningfulWork=False,
-            )
-            close_session_state(state)
-            return None
-        if "asset_gate:" in message or recorded_asset_gate is not None:
+        pending_work = has_pending_asset_work(state)
+        gate_due = has_stop_closeout_work(state)
+        gate_present = "asset_gate:" in message or recorded_asset_gate is not None
+        if gate_present and (pending_work or gate_due):
             handoff_checks = import_handoff_checks_module()
             gate_source = "handoff" if "asset_gate:" in message else "tool"
             gate_text = message
@@ -316,6 +304,21 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
             validation = handoff_checks.validate_asset_gate_text(gate_text, allow_defaults=True)
             if not validation.get("valid"):
                 sanitized_validation = sanitize_validation_for_audit(validation)
+                if not gate_due:
+                    append_usage_event(
+                        event,
+                        "Stop",
+                        decision="allow",
+                        reason_code="invalid_gate_while_task_in_progress",
+                        hasAssetGate=True,
+                        hasMeaningfulWork=True,
+                        signals=state.get("meaningfulWorkSignals", []),
+                        candidateCount=len(state.get("subagentCandidates", [])),
+                        validation=sanitized_validation,
+                        gateSource=gate_source,
+                    )
+                    state["stopContinuationUsed"] = False
+                    return None
                 if event.get("stop_hook_active") or state.get("stopContinuationUsed"):
                     append_usage_event(
                         event,
@@ -323,7 +326,7 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
                         decision="warn",
                         reason_code="continuation_already_used",
                         hasAssetGate=True,
-                        hasMeaningfulWork=has_stop_closeout_work(state),
+                        hasMeaningfulWork=pending_work or gate_due,
                         signals=state.get("meaningfulWorkSignals", []),
                         candidateCount=len(state.get("subagentCandidates", [])),
                         validation=sanitized_validation,
@@ -341,7 +344,7 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
                     decision="block",
                     reason_code="invalid_asset_gate",
                     hasAssetGate=True,
-                    hasMeaningfulWork=has_stop_closeout_work(state),
+                    hasMeaningfulWork=pending_work or gate_due,
                     signals=state.get("meaningfulWorkSignals", []),
                     candidateCount=len(state.get("subagentCandidates", [])),
                     validation=sanitized_validation,
@@ -363,7 +366,7 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
                 decision="allow",
                 reason_code="asset_gate_present",
                 hasAssetGate=True,
-                hasMeaningfulWork=has_stop_closeout_work(state),
+                hasMeaningfulWork=pending_work or gate_due,
                 signals=state.get("meaningfulWorkSignals", []),
                 candidateCount=len(state.get("subagentCandidates", [])),
                 defaultedFields=defaulted_fields or None,
@@ -371,7 +374,44 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
                 assetGateRoute=validation["fields"].get("route"),
             )
             close_session_state(state)
+            state["assetGateSatisfied"] = True
             return None
+        if gate_due:
+            if event.get("stop_hook_active") or state.get("stopContinuationUsed"):
+                append_usage_event(
+                    event,
+                    "Stop",
+                    decision="warn",
+                    reason_code="continuation_already_used",
+                    hasAssetGate=False,
+                    hasMeaningfulWork=True,
+                    signals=state.get("meaningfulWorkSignals", []),
+                    candidateCount=len(state.get("subagentCandidates", [])),
+                )
+                return {
+                    "systemMessage": (
+                        "Asset compounding still lacks a valid hidden asset gate after one Stop retry."
+                    )
+                }
+
+            state["stopContinuationUsed"] = True
+            append_usage_event(
+                event,
+                "Stop",
+                decision="block",
+                reason_code="missing_asset_gate",
+                hasAssetGate=False,
+                hasMeaningfulWork=True,
+                signals=state.get("meaningfulWorkSignals", []),
+                candidateCount=len(state.get("subagentCandidates", [])),
+            )
+            return {
+                "decision": "block",
+                "reason": (
+                    "资产复利未完成：缺少隐藏门限；主要任务结果不受影响，"
+                    "但本轮知识尚未完成沉淀。下一步：生成有效的隐藏门限后重试。"
+                ),
+            }
         if is_push_only_closeout(state):
             append_usage_event(
                 event,
@@ -396,41 +436,30 @@ def handle_stop(event: dict[str, Any]) -> dict[str, Any] | None:
             )
             close_session_state(state)
             return None
-        if event.get("stop_hook_active") or state.get("stopContinuationUsed"):
+        if pending_work:
             append_usage_event(
                 event,
                 "Stop",
-                decision="warn",
-                reason_code="continuation_already_used",
+                decision="allow",
+                reason_code="task_in_progress",
                 hasAssetGate=False,
                 hasMeaningfulWork=True,
                 signals=state.get("meaningfulWorkSignals", []),
                 candidateCount=len(state.get("subagentCandidates", [])),
             )
-            return {
-                "systemMessage": (
-                    "Asset compounding still lacks a valid hidden asset gate after one Stop retry."
-                )
-            }
+            state["stopContinuationUsed"] = False
+            return None
 
-        state["stopContinuationUsed"] = True
         append_usage_event(
             event,
             "Stop",
-            decision="block",
-            reason_code="missing_asset_gate",
-            hasAssetGate=False,
-            hasMeaningfulWork=True,
-            signals=state.get("meaningfulWorkSignals", []),
-            candidateCount=len(state.get("subagentCandidates", [])),
+            decision="allow",
+            reason_code="no_meaningful_work",
+            hasAssetGate="asset_gate:" in message,
+            hasMeaningfulWork=False,
         )
-        return {
-            "decision": "block",
-            "reason": (
-                "资产复利未完成：缺少隐藏门限；主要任务结果不受影响，"
-                "但本轮知识尚未完成沉淀。下一步：生成有效的隐藏门限后重试。"
-            ),
-        }
+        close_session_state(state)
+        return None
 
 
 def handle_pre_compact(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -976,6 +1005,8 @@ def sanitize_asset_bootstrap(value: Any) -> dict[str, Any] | None:
 
 def sanitize_state_for_storage(state: dict[str, Any]) -> None:
     state.pop("cwd", None)
+    state["assetGateDue"] = bool(state.get("assetGateDue"))
+    state["assetGateSatisfied"] = bool(state.get("assetGateSatisfied"))
     state["verificationEvidence"] = sanitize_verification_evidence(state.get("verificationEvidence"))
     asset_gate = sanitize_recorded_asset_gate(state.get("assetGate"))
     if asset_gate is None:
@@ -1021,6 +1052,7 @@ def default_state(event: dict[str, Any]) -> dict[str, Any]:
         "assetFilesChanged": False,
         "stopContinuationUsed": False,
         "assetGateDue": False,
+        "assetGateSatisfied": False,
         "lastGitCloseoutKind": "",
     }
 
@@ -1058,6 +1090,7 @@ def save_state_path_atomic(path: Path, state: dict[str, Any], event: dict[str, A
     state.setdefault("assetFilesChanged", False)
     state.setdefault("stopContinuationUsed", False)
     state.setdefault("assetGateDue", False)
+    state.setdefault("assetGateSatisfied", False)
     state.setdefault("lastGitCloseoutKind", "")
     sanitize_state_for_storage(state)
     temp_path = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
@@ -1191,18 +1224,18 @@ def is_plan_update_tool(tool_name: str) -> bool:
     return tool_name in {"functions.update_plan", "update_plan"}
 
 
-def plan_has_completed_step(tool_input: Any) -> bool:
+def plan_is_completed(tool_input: Any) -> bool:
     if not isinstance(tool_input, dict):
         return False
     plan = tool_input.get("plan")
-    if not isinstance(plan, list):
+    if not isinstance(plan, list) or not plan:
         return False
     for item in plan:
         if not isinstance(item, dict):
-            continue
-        if str(item.get("status") or "").lower() == "completed":
-            return True
-    return False
+            return False
+        if str(item.get("status") or "").lower() != "completed":
+            return False
+    return True
 
 
 def classify_command_kind(command: str, tool_name: str = "") -> str:
@@ -1297,19 +1330,23 @@ def normalized_tool_input(tool_input: Any) -> str:
 
 def has_meaningful_work(state: dict[str, Any]) -> bool:
     return bool(
-        state.get("meaningfulWorkSignals")
+        has_pending_asset_work(state)
+        or state.get("assetGateDue")
+    )
+
+
+def has_pending_asset_work(state: dict[str, Any], signals: set[str] | None = None) -> bool:
+    pending_signals = set(signals if signals is not None else state.get("meaningfulWorkSignals") or [])
+    pending_signals -= {"plan-boundary", "git-closeout"}
+    return bool(
+        pending_signals
         or state.get("subagentCandidates")
         or state.get("assetFilesChanged")
     )
 
 
 def has_stop_closeout_work(state: dict[str, Any]) -> bool:
-    hard_stop_signals = set(state.get("meaningfulWorkSignals") or []) - {"plan-boundary"}
-    return bool(
-        hard_stop_signals
-        or state.get("subagentCandidates")
-        or state.get("assetFilesChanged")
-    )
+    return bool(state.get("assetGateDue"))
 
 
 def validation_reason(result: dict[str, Any]) -> str:

@@ -10,6 +10,6 @@
 
 - [2026-06-13-windowsapps-python-alias-hook-hang-problem.md](./2026-06/2026-06-13-windowsapps-python-alias-hook-hang-problem.md): Windows hook 不能裸调用 `python`，否则 WindowsApps alias 可能让 hook 卡在脚本启动层且没有审计失败事件。
 - [2026-06-06-jsonl-hook-event-concurrent-append-corruption-problem.md](./2026-06/2026-06-06-jsonl-hook-event-concurrent-append-corruption-problem.md): 多个 hook 进程并发追加同一个 `events.jsonl` 时必须加锁，否则少量审计事件会变成无法解析的 JSONL 碎片。
-- [2026-06-03-stop-plan-boundary-closeout-noise-problem.md](./2026-06/2026-06-03-stop-plan-boundary-closeout-noise-problem.md): Stop hook 不应把单独的 `plan-boundary` checklist 进度当成硬 closeout 信号，否则 brainstorming/design 分段确认会反复要求 `asset_gate`。
+- [2026-06-03-stop-plan-boundary-closeout-noise-problem.md](./2026-06/2026-06-03-stop-plan-boundary-closeout-noise-problem.md): Stop hook 必须区分进行中证据、任务级 due 和已满足 gate，否则 brainstorming、跨轮实现及后续 git 收尾会反复要求 `asset_gate`。
 - [2026-06-03-subagent-lifecycle-asset-protocol-conflict-problem.md](./2026-06/2026-06-03-subagent-lifecycle-asset-protocol-conflict-problem.md): 子代理生命周期 hook 不应强加资产复利 handoff 字段，资产信号应由主代理在计划边界和最终 closeout 中收拢。
 - [2026-06-02-postcompact-hook-output-schema-problem.md](./2026-06/2026-06-02-postcompact-hook-output-schema-problem.md): PostCompact hook 不能复用 SessionStart 风格的 `additionalContext` 输出，pending state 应只写审计日志而不向 stdout 返回 JSON。

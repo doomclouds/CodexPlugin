@@ -1,6 +1,6 @@
 ---
 name: using-asset-compounding
-description: Use when meaningful work may produce reusable feature history, root-cause lessons, or uncertain signals. Acts as the lightweight gate before finish/commit/merge and routes to archive, problem, inbox, update-existing, both, or none.
+description: Use when a task boundary has been reached, a coherent requirement was accepted, or stable reusable evidence has already emerged. Do not use during ongoing brainstorming, exploration, or intermediate plan steps.
 ---
 
 # Using Asset Compounding
@@ -93,12 +93,19 @@ premature `new-problem`.
 
 ## When To Trigger
 
-Mid-session: trigger once per emerging lesson when a root cause, reusable
-debugging pattern, or durable requirement thread appears. Do not repeat the same
-check unless new evidence changes the route.
+Do not trigger merely because the current assistant turn is ending. A `Stop`
+event is a turn boundary, not evidence that the task or requirement is complete.
+Ongoing brainstorming, clarification, investigation, implementation, and
+intermediate verification keep their signals pending without a route decision.
 
-End-session: for non-trivial work, trigger before final response, commit, merge,
-PR, cleanup, or any claim that the work is complete.
+Mid-task: trigger once when a stable root cause, reusable debugging pattern, or
+accepted requirement thread has actually emerged. Do not repeat the same check
+unless new evidence changes the route.
+
+End-task: for non-trivial work, trigger before a final task handoff, accepted
+completion, commit, PR, release, cleanup, or another explicit closeout boundary.
+Git add, merge, or push after a satisfied gate does not create another boundary
+unless new implementation or verification evidence appeared.
 
 Main-agent problem gate: after a development task has been implemented,
 spec-reviewed, code-quality-reviewed, and verified, the main agent must run this
@@ -108,10 +115,10 @@ test failures, provider/tool quirks, subagent reports, and plan-boundary
 checkpoints. Subagents should follow their own workflow handoff format; the main
 agent owns extracting any reusable asset signal from that output.
 
-When hook state says an asset gate is due because a completed plan step was
-observed, run this gate before starting the next planned task. The update-plan
-reminder is a checkpoint, not a route decision; use this skill to choose
-`none`, `inbox`, `update-existing`, `archive`, `new-problem`, or `both`.
+When hook state says an asset gate is due because a plan transitioned from open
+work to fully completed work, use this skill to choose `none`, `inbox`,
+`update-existing`, `archive`, `new-problem`, or `both`. A completed intermediate
+step does not make the gate due.
 
 Hard completion gate: before merge/PR/cleanup/final handoff on meaningful work,
 the main agent must produce an auditable `asset_gate:` block. Route or
