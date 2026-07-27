@@ -2,9 +2,10 @@
 
 Local Codex plugin for turning completed work and reusable debugging lessons into repository assets.
 
-Version `0.5.2` combines six skills with plugin-bundled Codex lifecycle hooks.
-This v0.5.2 release records routine gates internally from the final
-`emit_asset_gate.py` tool call. `route: none` produces no handoff text,
+Version `0.5.3` combines six skills with plugin-bundled Codex lifecycle hooks.
+This v0.5.3 bugfix release keeps ongoing work pending and gates only at task-level closeout.
+It avoids repeat gates after a satisfied boundary. Routine gates are recorded internally
+from the final `emit_asset_gate.py` tool call. `route: none` produces no handoff text,
 successful asset writes show one `资产复利：已更新 ...` receipt with the written
 path, and unrecovered Stop or Hook failures remain visible and actionable.
 

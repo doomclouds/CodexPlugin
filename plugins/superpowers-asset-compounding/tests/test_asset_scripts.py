@@ -96,13 +96,14 @@ class AssetScriptTests(unittest.TestCase):
             debt_agent_text,
         )
 
-    def test_asset_compounding_plugin_metadata_mentions_v052_internal_gate_ux(self) -> None:
+    def test_asset_compounding_plugin_metadata_mentions_v053_task_boundary_bugfix(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["version"], "0.5.2")
+        self.assertEqual(manifest["version"], "0.5.3")
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("Version `0.5.2`", readme)
-        self.assertIn("records routine gates internally", readme)
+        self.assertIn("Version `0.5.3`", readme)
+        self.assertIn("gates only at task-level closeout", readme)
+        self.assertIn("Routine gates are recorded internally", readme)
         self.assertIn("资产复利：已更新", readme)
         router_skill = (SKILLS / "using-asset-compounding" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("a task boundary has been reached", router_skill)
