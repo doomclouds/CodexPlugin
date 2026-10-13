@@ -17,8 +17,23 @@ const built = await build({
   logLevel: "info",
 });
 
+const uiBuild = await build({
+  absWorkingDir: pluginRoot,
+  entryPoints: ["prototypes/app-bridge.ts"],
+  bundle: true,
+  platform: "browser",
+  format: "iife",
+  target: "es2022",
+  minify: true,
+  write: false,
+  metafile: true,
+});
+const panelFragment = await readFile(path.join(pluginRoot, "prototypes", "workflow-panel.html"), "utf8");
+const bridge = uiBuild.outputFiles[0].text.replaceAll("</script", "<\\/script");
+await writeFile(path.join(pluginRoot, "runtime", "panel.html"), `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workflows prototype</title><style>:root{color-scheme:light dark}body{margin:0}</style></head><body>${panelFragment}<script>${bridge}</script></body></html>`);
+
 const packageDirectories = new Set();
-for (const input of Object.keys(built.metafile.inputs)) {
+for (const input of [...Object.keys(built.metafile.inputs), ...Object.keys(uiBuild.metafile.inputs)]) {
   const normalized = input.replaceAll("\\", "/");
   const start = normalized.lastIndexOf("node_modules/");
   if (start < 0) continue;

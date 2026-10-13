@@ -22,9 +22,9 @@ export async function getTemplate(id: string) {
 export function getCapabilities() {
   return {
     stage: "scaffold",
-    available: ["list-templates", "read-template", "inspect-capabilities"],
+    available: ["list-templates", "read-template", "inspect-capabilities", "open-panel-prototype"],
     execution: { available: false, adapter: null },
-    ui: { available: false, hostIntegration: "not-verified" },
+    ui: { available: true, stage: "prototype", hostIntegration: "not-verified", exampleDataOnly: true },
     pendingDesign: ["execution-backend", "context-and-permissions", "cancellation-and-resume", "workflow-ui"],
   };
 }

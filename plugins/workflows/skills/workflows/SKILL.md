@@ -7,6 +7,8 @@ Use `workflow_get_capabilities` to establish which features this plugin currentl
 
 Use `workflow_list_templates` to find examples and `workflow_get_template` to read a selected script. The example follows Claude-style `meta`, `agent`, `parallel`, `pipeline`, and `phase` syntax as a discussion draft, not a committed runtime contract.
 
+Use `workflow_open_panel` to show the MCP App panel prototype when the user wants to inspect the interface. Clearly identify its example data and simulated controls; its start, stop, resume, and apply buttons do not execute workers or change project files. Prefer a supported host panel entrypoint over the development-only localhost preview.
+
 When designing or drafting a workflow, read the [design record](../../docs/design.md) for the accepted execution, stopping, and recovery rules. Distinguish these design targets from implemented features. Describe the workflow's input, stages, agent outputs, completion condition, and failure handling. Keep intermediate results within the intended workflow runtime and return a useful final result to the conversation.
 
 For execution requests, report that the adapter is not yet connected and explain the missing capability. Do not execute the script as an unrestricted Node program or substitute an unrelated agent run while claiming this plugin executed it. Normal user-authorized work can still proceed separately with existing tools.

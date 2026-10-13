@@ -22,9 +22,10 @@ docs/codex-extension-boundaries.md  宿主能力与产品讨论依据
 npm ci --ignore-scripts
 npm run check
 npm run dev:workflows
+npm run prototype:workflows
 ```
 
-`dev:workflows` 启动 stdio MCP 服务，等待 MCP 客户端发送请求，没有网页界面。`npm run check` 执行类型检查、构建、仓库结构检查及插件的协议冒烟验证。
+`dev:workflows` 启动 stdio MCP 服务。`prototype:workflows` 是开发用的面板预览，使用示例数据，不执行真实任务。正式宿主入口通过 MCP App 资源与插件面板接入，不以临时 localhost 网页作为默认形式。`npm run check` 执行类型检查、构建、仓库结构检查及插件的协议冒烟验证。
 
 单独构建插件：
 
@@ -61,6 +62,6 @@ codex plugin add workflows@codex-plugin-workspace
 
 ## Workflows
 
-目标是动态工作流：根据任务生成脚本，并按执行结果动态分支、循环和调度 worker。当前只实现模板列表、脚本读取和能力查询；真实代理执行、恢复日志和 UI 尚未接入。
+目标是动态工作流：根据任务生成脚本，并按执行结果动态分支、循环和调度 worker。当前实现模板查询与示例数据面板原型；真实代理执行、持久化和恢复尚未接入。
 
 使用方式见 [插件说明](plugins/workflows/README.md)，已确认的产品方向见 [设计记录](plugins/workflows/docs/design.md)，宿主扩展边界见 [能力核对](docs/codex-extension-boundaries.md)。

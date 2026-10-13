@@ -1,0 +1,230 @@
+<!-- PROTOTYPE: inspect panel layout and local state transitions with example data; no agents or file mutations. -->
+<div id="workflow-panel-prototype" class="viz-dotted-background">
+  <section class="wf-window" aria-label="Workflows 任务面板交互原型">
+    <header class="wf-header">
+      <div class="wf-brand"><span class="wf-title">Workflows</span><span class="wf-prototype-label">交互原型 · 示例数据</span></div>
+      <div class="wf-project">当前项目 / 示例项目</div>
+    </header>
+    <div class="wf-run-picker">
+      <label for="wf-run-select">运行记录</label>
+      <select id="wf-run-select" aria-label="查看示例运行记录"></select>
+    </div>
+    <div class="wf-run-header">
+      <div><h2 id="wf-run-title"></h2><div id="wf-run-meta" class="wf-muted"></div></div>
+      <div id="wf-actions" class="wf-actions"></div>
+    </div>
+    <div class="wf-status-row" aria-live="polite">
+      <span id="wf-execution-status" class="wf-badge"></span>
+      <span id="wf-change-status" class="wf-badge"></span>
+      <span id="wf-progress" class="wf-progress-text"></span>
+    </div>
+    <nav class="wf-tabs" role="tablist" aria-label="工作流详情">
+      <button type="button" id="wf-tab-overview" class="cursor-interaction" role="tab" aria-controls="wf-panel-overview" aria-selected="true" data-tab="overview">概览</button>
+      <button type="button" id="wf-tab-tasks" class="cursor-interaction" role="tab" aria-controls="wf-panel-tasks" aria-selected="false" data-tab="tasks">任务 <span id="wf-task-count">0</span></button>
+      <button type="button" id="wf-tab-diff" class="cursor-interaction" role="tab" aria-controls="wf-panel-diff" aria-selected="false" data-tab="diff">差异</button>
+      <button type="button" id="wf-tab-logs" class="cursor-interaction" role="tab" aria-controls="wf-panel-logs" aria-selected="false" data-tab="logs">日志</button>
+    </nav>
+    <div class="wf-content">
+      <section id="wf-panel-overview" role="tabpanel" aria-labelledby="wf-tab-overview"></section>
+      <section id="wf-panel-tasks" role="tabpanel" aria-labelledby="wf-tab-tasks" hidden></section>
+      <section id="wf-panel-diff" role="tabpanel" aria-labelledby="wf-tab-diff" hidden></section>
+      <section id="wf-panel-logs" role="tabpanel" aria-labelledby="wf-tab-logs" hidden></section>
+    </div>
+    <footer class="wf-footer"><span>只读任务可并行 · 写入任务上限 1</span><span>示例交互不会执行代理或修改文件</span></footer>
+  </section>
+</div>
+<style>
+#workflow-panel-prototype{padding:12px;color-scheme:light dark;--wf-bg:light-dark(#fff,#18191b);--wf-surface:light-dark(#f6f7f8,#222428);--wf-text:light-dark(#202326,#eceef0);--wf-muted:light-dark(#616870,#aeb4bd);--wf-border:light-dark(#e0e3e7,#36393e);--wf-selected:light-dark(#e9edf2,#303640);--wf-strong:light-dark(#252a32,#edf0f4);--wf-on-strong:light-dark(#fff,#20242b);--wf-blue:light-dark(#275cc2,#aac6ff);--wf-blue-bg:light-dark(#edf3ff,#26364f);--wf-green:light-dark(#216140,#a1d6b5);--wf-green-bg:light-dark(#ecf6ef,#243c2e);--wf-amber:light-dark(#80541b,#efc482);--wf-amber-bg:light-dark(#fff4df,#413421);--wf-red:light-dark(#a23737,#ffb0b0);--wf-red-bg:light-dark(#fdeeee,#47292b);font:13px/1.55 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:var(--wf-text)}
+#workflow-panel-prototype *{box-sizing:border-box}
+#workflow-panel-prototype [hidden]{display:none!important}
+#workflow-panel-prototype button,#workflow-panel-prototype select{font:inherit;color:inherit}
+#workflow-panel-prototype button{border:1px solid var(--wf-border);background:var(--wf-bg);border-radius:7px;padding:7px 12px;min-height:34px}
+#workflow-panel-prototype button:hover:not(:disabled){background:var(--wf-surface)}
+#workflow-panel-prototype button:disabled{opacity:.55}
+#workflow-panel-prototype .wf-primary{background:var(--wf-strong);color:var(--wf-on-strong);border-color:transparent}
+#workflow-panel-prototype .wf-primary:hover:not(:disabled){background:var(--wf-strong);opacity:.9}
+#workflow-panel-prototype .wf-window{background:var(--wf-bg);border:1px solid var(--wf-border);border-radius:12px;overflow:clip;min-width:0}
+#workflow-panel-prototype .wf-header{padding:18px 20px 12px;border-bottom:1px solid var(--wf-border);padding-right:100px}
+#workflow-panel-prototype .wf-brand{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+#workflow-panel-prototype .wf-title{font-size:18px;font-weight:500;letter-spacing:-.3px}
+#workflow-panel-prototype .wf-prototype-label{color:var(--wf-muted);font-size:11px}
+#workflow-panel-prototype .wf-project{color:var(--wf-muted);margin-top:3px;font-size:12px}
+#workflow-panel-prototype .wf-run-picker{padding:16px 20px 0;display:flex;align-items:center;gap:12px}
+#workflow-panel-prototype .wf-run-picker label{color:var(--wf-muted);white-space:nowrap}
+#workflow-panel-prototype select{border:1px solid var(--wf-border);background:var(--wf-bg);border-radius:7px;padding:6px 10px;min-width:0;max-width:100%;flex:1}
+#workflow-panel-prototype .wf-run-header{padding:18px 20px 10px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+#workflow-panel-prototype h2{font-size:17px;font-weight:500;margin:0 0 4px;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-muted{color:var(--wf-muted);font-size:12px;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-actions{display:flex;gap:7px;flex-wrap:wrap}
+#workflow-panel-prototype .wf-status-row{padding:0 20px 15px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:38px}
+#workflow-panel-prototype .wf-badge{background:var(--wf-surface);color:var(--wf-muted);border-radius:5px;padding:3px 8px;font-size:12px;white-space:nowrap}
+#workflow-panel-prototype .wf-badge[data-tone="blue"]{color:var(--wf-blue);background:var(--wf-blue-bg)}
+#workflow-panel-prototype .wf-badge[data-tone="green"]{color:var(--wf-green);background:var(--wf-green-bg)}
+#workflow-panel-prototype .wf-badge[data-tone="amber"]{color:var(--wf-amber);background:var(--wf-amber-bg)}
+#workflow-panel-prototype .wf-badge[data-tone="red"]{color:var(--wf-red);background:var(--wf-red-bg)}
+#workflow-panel-prototype .wf-progress-text{color:var(--wf-muted);font-size:12px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-tabs{display:flex;border-bottom:1px solid var(--wf-border);padding:0 20px;gap:8px;flex-wrap:wrap}
+#workflow-panel-prototype .wf-tabs button{border:0;border-radius:0;padding:9px 13px;background:transparent;color:var(--wf-muted);border-bottom:2px solid transparent}
+#workflow-panel-prototype .wf-tabs button[aria-selected="true"]{color:var(--wf-text);border-bottom-color:var(--wf-strong)}
+#workflow-panel-prototype #wf-task-count{font-variant-numeric:tabular-nums;font-size:11px;margin-left:4px}
+#workflow-panel-prototype .wf-content{padding:20px;min-height:285px}
+#workflow-panel-prototype .wf-section-title{margin:0 0 10px;font-weight:500;font-size:13px}
+#workflow-panel-prototype .wf-goal{margin:0 0 18px;font-size:14px;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-facts{display:flex;gap:16px;flex-wrap:wrap;color:var(--wf-muted);font-size:12px;padding:0 0 18px}
+#workflow-panel-prototype .wf-phase-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:18px}
+#workflow-panel-prototype .wf-phase{padding:11px 12px;background:var(--wf-surface);border-radius:7px;min-width:0}
+#workflow-panel-prototype .wf-phase-label{font-weight:500;margin-bottom:4px}
+#workflow-panel-prototype .wf-phase-detail{font-size:11px;color:var(--wf-muted);overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-notice{padding:10px 12px;background:var(--wf-surface);border-radius:7px;color:var(--wf-muted);font-size:12px;margin:12px 0}
+#workflow-panel-prototype details{margin-top:15px}
+#workflow-panel-prototype summary{font-weight:500;user-select:none;padding:7px 0}
+#workflow-panel-prototype pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0;padding:13px;background:var(--wf-surface);border-radius:7px;font:12px/1.65 Consolas,monospace;color:var(--wf-text);max-width:100%}
+#workflow-panel-prototype .wf-worker{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;border-top:1px solid var(--wf-border);padding:12px 0}
+#workflow-panel-prototype .wf-worker:first-of-type{border-top:0}
+#workflow-panel-prototype .wf-worker button{border:0;text-align:left;padding:0;background:transparent;min-height:35px;min-width:0;border-radius:0}
+#workflow-panel-prototype .wf-worker button:hover:not(:disabled){background:transparent;color:var(--wf-blue)}
+#workflow-panel-prototype .wf-worker-name{font-weight:500;display:block;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-worker-meta{font-size:11px;color:var(--wf-muted);display:block;margin-top:3px;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-worker-detail{background:var(--wf-surface);border-radius:7px;padding:13px;margin-top:15px;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-empty{color:var(--wf-muted);padding:30px 8px;text-align:center}
+#workflow-panel-prototype .wf-file-header{display:flex;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--wf-surface);border-radius:7px 7px 0 0;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-diff{margin:0 0 15px;border:1px solid var(--wf-border);border-radius:7px;overflow:clip}
+#workflow-panel-prototype .wf-diff-line{padding:3px 12px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.65 Consolas,monospace}
+#workflow-panel-prototype .wf-diff-line.add{background:var(--wf-green-bg);color:var(--wf-green)}
+#workflow-panel-prototype .wf-diff-line.remove{background:var(--wf-red-bg);color:var(--wf-red)}
+#workflow-panel-prototype .wf-test-result{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 0;margin-bottom:13px}
+#workflow-panel-prototype .wf-alert{padding:12px;background:var(--wf-red-bg);color:var(--wf-red);border-radius:7px;margin:12px 0;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-log{display:grid;grid-template-columns:50px minmax(0,1fr);gap:10px;padding:8px 0;border-bottom:1px solid var(--wf-border);font-size:12px;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-log-time{color:var(--wf-muted);font-variant-numeric:tabular-nums}
+#workflow-panel-prototype .wf-footer{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px 20px;border-top:1px solid var(--wf-border);font-size:11px;color:var(--wf-muted)}
+@media(max-width:520px){#workflow-panel-prototype{padding:6px}#workflow-panel-prototype .wf-header{padding:14px 14px 12px}#workflow-panel-prototype .wf-run-picker{padding:12px 14px 0;align-items:stretch;flex-direction:column;gap:5px}#workflow-panel-prototype .wf-run-header{padding:15px 14px 10px;align-items:flex-start}#workflow-panel-prototype .wf-status-row{padding:0 14px 12px}#workflow-panel-prototype .wf-tabs{padding:0 8px;gap:0}#workflow-panel-prototype .wf-tabs button{padding:9px 11px}#workflow-panel-prototype .wf-content{padding:15px 14px}#workflow-panel-prototype .wf-phase-grid{grid-template-columns:repeat(2,minmax(0,1fr))}#workflow-panel-prototype .wf-footer{padding:12px 14px}#workflow-panel-prototype .wf-worker{gap:5px}#workflow-panel-prototype .wf-brand{gap:5px}#workflow-panel-prototype .wf-prototype-label{width:100%}}
+@media(pointer:coarse){#workflow-panel-prototype button,#workflow-panel-prototype select{min-height:44px}#workflow-panel-prototype .wf-worker button{min-height:44px}}
+</style>
+<script>
+(() => {
+  const root = document.getElementById('workflow-panel-prototype');
+  const $ = selector => root.querySelector(selector);
+  const escape = value => String(value).replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
+  const phases = ['审查','核实','修复','验证'];
+  const executionLabels = {ready:'待开始',running:'运行中',stopping:'正在停止',stopped:'已停止',failed:'执行失败',completed:'执行已完成'};
+  const taskLabels = {queued:'等待中',running:'运行中',stopping:'正在停止',stopped:'已中断',completed:'已完成',failed:'失败'};
+  const tone = state => ({running:'blue',stopping:'amber',stopped:'amber',failed:'red',completed:'green',pending:'amber',applying:'blue',applied:'green',conflict:'red'}[state] || 'neutral');
+  const worker = (id,title,phase,mode,status,detail) => ({id,title,phase,mode,status,detail,attempt:1,cached:false});
+  const completedWorkers = () => [worker('w1','定位变更文件','审查','只读','completed','找到 2 个相关文件'),worker('w2','审查会话刷新逻辑','审查','只读','completed','发现一个边界问题'),worker('w3','检查测试覆盖','审查','只读','completed','定位缺失的回归用例'),worker('w4','复核发现的问题','核实','只读','completed','确认问题可以复现'),worker('w5','修复并补充测试','修复','写入','completed','隔离工作区中的 2 个文件已修改'),worker('w6','运行测试并复核差异','验证','写入','completed','示例测试 12 项通过')];
+  const runs = [
+    {id:'review',title:'审查会话刷新逻辑并修复问题',execution:'ready',change:'none',tick:-1,workers:[],logs:['动态脚本已生成，等待用户开始'],dirty:false},
+    {id:'stopped',title:'上次运行：修复会话刷新逻辑',execution:'stopped',change:'none',tick:3,workers:completedWorkers().slice(0,6).map((item,index)=>({...item,status:index<4?'completed':index===4?'stopped':'queued',detail:index===4?'停止时保留了工作区中的修改':item.detail})),logs:['用户开始执行','发现问题，创建修复任务','用户停止：中断写入 worker，保留已有进度'],dirty:true},
+    {id:'reviewable',title:'已完成：会话刷新边界检查',execution:'completed',change:'pending',tick:5,workers:completedWorkers(),logs:['工作流执行已完成','差异与测试结果已汇总，等待用户审查'],dirty:true},
+    {id:'conflict',title:'待审查：当前项目已有新改动',execution:'completed',change:'pending',tick:5,workers:completedWorkers(),logs:['隔离工作区中的执行已完成','等待审查，本次应用将演示工作区冲突'],dirty:true},
+    {id:'failed',title:'执行失败：检查接口返回类型',execution:'failed',change:'none',tick:0,workers:[worker('w1','检查测试入口','审查','只读','failed','测试入口未找到（示例错误）')],logs:['用户开始执行','测试入口未找到，脚本未处理此错误，执行结束'],dirty:false}
+  ];
+  let selectedRun = runs[0].id;
+  let selectedTab = 'overview';
+  let selectedWorker = null;
+  let scriptOpen = false;
+  const timers = new Map();
+  const run = () => runs.find(item => item.id === selectedRun);
+  const code = ["export const meta = { name: 'review-session',", "  description: '审查会话刷新边界，必要时修复',", "  phases: [{title:'审查'}, {title:'核实'},", "           {title:'修复'}, {title:'验证'}] };", "", "const schema = {type:'array', items:{type:'string'}};", "const files = await agent('找出相关变更文件', {schema});", "const findings = await pipeline(files ?? [],", "  file => agent(`审查 ${file}，返回问题列表`,", "    {schema, phase:'审查'}),", "  issues => agent(`复核 ${JSON.stringify(issues)}`,", "    {schema, phase:'核实'}));", "const issues = findings.flatMap(result => result ?? []);", "", "if (issues.length > 0) {", "  await agent(`修复 ${JSON.stringify(issues)}`,", "    {phase:'修复'});", "  await agent('运行测试并复核最终差异', {phase:'验证'});", "}", "return issues;"].join('\n');
+  function persistSelection() {
+    const host = window.openai;
+    if (host?.setWidgetState) host.setWidgetState({modelContent:{prototype:true,selectedRun,selectedTab,execution:run().execution,change:run().change},privateContent:{selectedRun,selectedTab}}).catch(()=>{});
+  }
+  function restoreSelection(state) {
+    const saved = state?.privateContent;
+    if (runs.some(item=>item.id===saved?.selectedRun)) selectedRun=saved.selectedRun;
+    if (['overview','tasks','diff','logs'].includes(saved?.selectedTab)) selectedTab=saved.selectedTab;
+  }
+  restoreSelection(window.openai?.widgetState);
+  window.addEventListener('openai:set_globals',event=>{restoreSelection(event.detail?.globals?.widgetState);render();});
+  function log(item,text) { item.logs.push(text); }
+  function badge(text,state) {return `<span class="wf-badge" data-tone="${tone(state)}">${escape(text)}</span>`;}
+  function counts(item) {
+    return {completed:item.workers.filter(w=>w.status==='completed').length,running:item.workers.filter(w=>w.status==='running'||w.status==='stopping').length,queued:item.workers.filter(w=>w.status==='queued').length,interrupted:item.workers.filter(w=>w.status==='stopped').length,failed:item.workers.filter(w=>w.status==='failed').length,cached:item.workers.filter(w=>w.cached).length};
+  }
+  function drawOverview(item) {
+    const phaseCards=phases.map(phase=>{const group=item.workers.filter(w=>w.phase===phase);const done=group.filter(w=>w.status==='completed').length;const active=group.filter(w=>w.status==='running'||w.status==='stopping').length;return `<div class="wf-phase"><div class="wf-phase-label">${phase}</div><div class="wf-phase-detail">${group.length?`${done} 已完成 · ${active} 运行中`:'任务由脚本动态生成'}</div></div>`;}).join('');
+    const note=item.execution==='ready'?'计划已生成，尚未启动 worker。':item.execution==='stopped'?'示例进度和工作区改动已保留，等待用户恢复。':item.execution==='completed'?'执行已完成；当前项目是否应用改动，仍由用户决定。':item.execution==='failed'?'执行错误见日志；失败重试规则仍待设计。':'脚本可根据发现继续创建任务，最终任务总数尚未确定。';
+    return `<h3 class="wf-section-title">任务目标</h3><p class="wf-goal">检查会话刷新逻辑，复核发现的问题，必要时修复并运行测试。</p><div class="wf-facts"><span>输入：本次变更文件</span><span>写入位置：隔离工作区</span></div><h3 class="wf-section-title">编排计划</h3><div class="wf-phase-grid">${phaseCards}</div><div class="wf-notice">${note}</div><details ${scriptOpen?'open':''}><summary class="cursor-interaction">查看动态脚本（示例）</summary><pre>${escape(code)}</pre></details>`;
+  }
+  function drawTasks(item) {
+    if (!item.workers.length) return '<div class="wf-empty">等待用户开始。任务将随脚本执行生成。</div>';
+    const groups=phases.map(phase=>{const items=item.workers.filter(w=>w.phase===phase);if(!items.length)return '';return `<section><h3 class="wf-section-title">${phase}</h3>${items.map(w=>`<div class="wf-worker"><button type="button" class="cursor-interaction" data-worker="${w.id}" aria-pressed="${selectedWorker===w.id}"><span class="wf-worker-name">${escape(w.title)}</span><span class="wf-worker-meta">${w.id} · ${w.mode} · 第 ${w.attempt} 次执行${w.cached?' · 复用结果':''}</span></button>${badge(taskLabels[w.status],w.status)}</div>`).join('')}</section>`;}).join('');
+    const selected=item.workers.find(w=>w.id===selectedWorker);
+    return groups+(selected?`<div class="wf-worker-detail"><h3 class="wf-section-title">${escape(selected.title)}</h3><div>${escape(selected.detail)}</div><div class="wf-muted">${selected.mode==='写入'?'使用隔离工作区；当前项目未因此自动修改':'只读任务'}${selected.cached?' · 恢复时复用了已完成结果':''}</div></div>`:'');
+  }
+  function drawDiff(item) {
+    if(item.execution!=='completed') return `<div class="wf-empty">整个工作流执行完成后统一汇总差异。${item.dirty?'已有的示例工作区改动保留。':''}</div>`;
+    return `${item.change==='conflict'?'<div class="wf-alert" role="alert">当前项目已有新改动，存在应用冲突。需要处理冲突，不自动覆盖。</div>':''}<div class="wf-test-result"><span>验证结果（示例）</span>${badge('12 项测试通过','completed')}</div><div class="wf-diff"><div class="wf-file-header"><span>src/session.ts</span><span>+2 −1</span></div><div class="wf-diff-line">  async function refreshSession() {</div><div class="wf-diff-line remove">−   return await refresh();</div><div class="wf-diff-line add">+   if (refreshPromise) return refreshPromise;</div><div class="wf-diff-line add">+   return refreshPromise = refresh();</div><div class="wf-diff-line">  }</div></div><div class="wf-diff"><div class="wf-file-header"><span>src/session.test.ts</span><span>+4</span></div><div class="wf-diff-line add">+ it('reuses a concurrent refresh request', async () =&gt; {</div><div class="wf-diff-line add">+   await Promise.all([refreshSession(), refreshSession()]);</div><div class="wf-diff-line add">+   expect(refresh).toHaveBeenCalledTimes(1);</div><div class="wf-diff-line add">+ });</div></div><div class="wf-notice">${item.change==='applied'?'示例改动已应用。原型未修改真实文件。':item.change==='applying'?'正在演示应用过程……':item.change==='conflict'?'当前改动未应用。冲突解决操作仍待设计。':'所有示例差异统一审查；点击“应用改动”后才进入应用阶段。'}</div>`;
+  }
+  function render() {
+    const item=run(), c=counts(item);
+    $('#wf-run-select').innerHTML=runs.map(r=>`<option value="${r.id}" ${r.id===selectedRun?'selected':''}>${escape(r.title)} — ${executionLabels[r.execution]}</option>`).join('');
+    $('#wf-run-title').textContent=item.title;
+    $('#wf-run-meta').textContent=`review-session.js · 运行记录 ${item.id} · 示例项目`;
+    $('#wf-execution-status').textContent=executionLabels[item.execution];$('#wf-execution-status').dataset.tone=tone(item.execution);
+    const changeText={none:item.dirty?'改动已保留 · 尚未汇总':'差异尚未汇总',pending:'改动待审查',applying:'正在应用',applied:'已应用 · 示例',conflict:'应用冲突'}[item.change];
+    $('#wf-change-status').textContent=changeText;$('#wf-change-status').dataset.tone=tone(item.change);
+    $('#wf-progress').textContent=item.workers.length?`已完成 ${c.completed} · 运行中 ${c.running} · 等待 ${c.queued}${c.interrupted?` · 已中断 ${c.interrupted}`:''}${c.failed?` · 失败 ${c.failed}`:''}${c.cached?` · 复用 ${c.cached}`:''}`:'任务数量将在执行中确定';
+    $('#wf-task-count').textContent=item.workers.length;
+    let action='';
+    if(item.execution==='ready')action='<button class="wf-primary cursor-interaction" type="button" data-action="start">开始</button>';
+    else if(item.execution==='running')action='<button class="cursor-interaction" type="button" data-action="stop">停止</button>';
+    else if(item.execution==='stopping')action='<button type="button" disabled>正在停止…</button>';
+    else if(item.execution==='stopped')action='<button class="wf-primary cursor-interaction" type="button" data-action="resume">恢复 / 继续</button>';
+    else if(item.execution==='failed')action='<button class="cursor-interaction" type="button" data-action="error">查看错误</button>';
+    else if(item.change==='pending')action=selectedTab==='diff'?'<button class="wf-primary cursor-interaction" type="button" data-action="apply">应用改动</button>':'<button class="wf-primary cursor-interaction" type="button" data-action="review">查看差异</button>';
+    else if(item.change==='applying')action='<button type="button" disabled>正在应用…</button>';
+    else if(item.change==='conflict')action='<button class="cursor-interaction" type="button" data-action="review">查看冲突</button>';
+    $('#wf-actions').innerHTML=action;
+    root.querySelectorAll('[data-tab]').forEach(button=>{const active=button.dataset.tab===selectedTab;button.setAttribute('aria-selected',String(active));$('#wf-panel-'+button.dataset.tab).hidden=!active;});
+    $('#wf-panel-overview').innerHTML=drawOverview(item);
+    $('#wf-panel-tasks').innerHTML=drawTasks(item);
+    $('#wf-panel-diff').innerHTML=drawDiff(item);
+    $('#wf-panel-logs').innerHTML=item.logs.map((text,index)=>`<div class="wf-log"><span class="wf-log-time">${String(index*2).padStart(2,'0')}s</span><span>${escape(text)}</span></div>`).join('');
+    const details=$('#wf-panel-overview details');details.addEventListener('toggle',()=>{scriptOpen=details.open;});
+    root.dataset.execution=item.execution;root.dataset.change=item.change;
+  }
+  function advance(item) {
+    if(item.execution!=='running')return;
+    item.tick++;
+    if(item.tick===0){item.workers=[worker('w1','定位变更文件','审查','只读','running','查找本次变更范围')];log(item,'启动扫描任务，任务数量由结果决定');}
+    if(item.tick===1){item.workers[0].status='completed';item.workers.push(worker('w2','审查会话刷新逻辑','审查','只读','running','检查刷新逻辑的并发边界'),worker('w3','检查测试覆盖','审查','只读','running','查找相关回归用例'));log(item,'发现 2 个相关文件，动态创建 2 个并行审查任务');}
+    if(item.tick===2){item.workers.find(w=>w.id==='w2').status='completed';item.workers.push(worker('w4','复核发现的问题','核实','只读','running','根据审查结果核实问题'));log(item,'一个审查任务发现问题，新增核实任务；其他审查继续执行');}
+    if(item.tick===3){item.workers.forEach(w=>w.status='completed');item.workers.push(worker('w5','修复并补充测试','修复','写入','running','在隔离工作区修改 2 个文件'),worker('w6','运行测试并复核差异','验证','写入','queued','等待修复完成'));item.dirty=true;log(item,'确认问题，创建写入任务；验证任务等待修复完成');}
+    if(item.tick===4){item.workers.find(w=>w.id==='w5').status='completed';item.workers.find(w=>w.id==='w6').status='running';log(item,'修复完成，释放写入槽位，开始验证');}
+    if(item.tick===5){item.workers.forEach(w=>w.status='completed');item.execution='completed';item.change='pending';clearInterval(timers.get(item.id));timers.delete(item.id);log(item,'执行已完成，统一汇总差异和验证结果；等待用户审查并应用');}
+    render();
+  }
+  function start(item,resume=false) {
+    item.execution='running';
+    if(resume){const reused=item.workers.filter(w=>w.status==='completed');reused.forEach(w=>w.cached=true);item.workers.filter(w=>w.status==='stopped').forEach(w=>{w.status='running';w.attempt++;});log(item,`用户恢复：复用 ${reused.length} 个已完成结果，重新启动被中断任务`);}
+    else {log(item,'用户点击开始，执行动态脚本');advance(item);}
+    timers.set(item.id,setInterval(()=>advance(item),2200));render();
+  }
+  function stop(item) {
+    clearInterval(timers.get(item.id));timers.delete(item.id);
+    item.execution='stopping';item.workers.filter(w=>w.status==='running').forEach(w=>w.status='stopping');log(item,'用户停止：停止派发新任务，请求中断全部活跃 worker');render();
+    setTimeout(()=>{item.workers.filter(w=>w.status==='stopping').forEach(w=>w.status='stopped');item.execution='stopped';log(item,'worker 已结束；示例进度、结果和工作区改动保留');render();persistSelection();},750);
+  }
+  function apply(item) {
+    item.change='applying';log(item,'用户点击应用，检查当前项目与工作区差异');render();
+    setTimeout(()=>{item.change=item.id==='conflict'?'conflict':'applied';log(item,item.change==='conflict'?'发现应用冲突，保留当前项目，等待处理':'示例应用完成；没有修改真实文件');render();persistSelection();},900);
+  }
+  $('#wf-run-select').addEventListener('change',event=>{selectedRun=event.target.value;selectedWorker=null;render();persistSelection();});
+  root.addEventListener('click',event=>{
+    const tab=event.target.closest('[data-tab]');if(tab){selectedTab=tab.dataset.tab;render();persistSelection();return;}
+    const task=event.target.closest('[data-worker]');if(task){selectedWorker=task.dataset.worker;render();persistSelection();return;}
+    const action=event.target.closest('[data-action]')?.dataset.action;const item=run();
+    if(action==='start'&&item.execution==='ready')start(item);
+    if(action==='resume'&&item.execution==='stopped')start(item,true);
+    if(action==='stop'&&item.execution==='running')stop(item);
+    if(action==='review'){selectedTab='diff';render();}
+    if(action==='error'){selectedTab='logs';render();}
+    if(action==='apply'&&item.execution==='completed'&&item.change==='pending'&&selectedTab==='diff')apply(item);
+    if(action)persistSelection();
+  });
+  window.addEventListener('pagehide',()=>{for(const timer of timers.values())clearInterval(timer);timers.clear();});
+  window.addEventListener('workflows-prototype-teardown',()=>{for(const timer of timers.values())clearInterval(timer);timers.clear();});
+  render();
+})();
+</script>

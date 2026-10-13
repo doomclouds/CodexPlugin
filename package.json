@@ -13,7 +13,8 @@
     "validate": "node scripts/validate-plugins.mjs",
     "smoke": "npm run smoke --workspaces --if-present",
     "check": "npm run typecheck && npm run build && npm run validate && npm run smoke",
-    "dev:workflows": "npm run dev --workspace=@codex-plugin/workflows"
+    "dev:workflows": "npm run dev --workspace=@codex-plugin/workflows",
+    "prototype:workflows": "npm run prototype --workspace=@codex-plugin/workflows"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

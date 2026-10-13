@@ -30,8 +30,16 @@ try {
   assert.equal(client.getServerVersion()?.version, manifest.version);
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map(tool => tool.name).sort(), [
-    "workflow_get_capabilities", "workflow_get_template", "workflow_list_templates",
+    "workflow_get_capabilities", "workflow_get_template", "workflow_list_templates", "workflow_open_panel",
   ]);
+  const panelTool = tools.find(tool => tool.name === "workflow_open_panel");
+  assert.deepEqual(panelTool._meta["openai/ui"].entrypoints, [{ type: "thread" }, { type: "global" }]);
+  const panelResult = await client.callTool({ name: "workflow_open_panel", arguments: {} });
+  assert.equal(panelResult.structuredContent.prototype, true);
+  assert.equal(panelResult.structuredContent.executionAvailable, false);
+  const panelResource = await client.readResource({ uri: panelTool._meta.ui.resourceUri });
+  assert.equal(panelResource.contents[0].mimeType, "text/html;profile=mcp-app");
+  assert.match(panelResource.contents[0].text, /workflow-panel-prototype/);
 
   const capabilities = await client.callTool({ name: "workflow_get_capabilities", arguments: {} });
   assert.equal(capabilities.isError, undefined);

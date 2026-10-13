@@ -1,18 +1,18 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "workflows",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Inspect and draft Codex workflow templates. Execution is not connected in this scaffold.",
   "license": "MIT",
   "extensions": {
     "com.openai": {
       "interface": {
         "displayName": "Workflows",
-        "shortDescription": "查看和起草工作流模板",
-        "longDescription": "工作流插件的开发骨架。目前提供模板目录、脚本查看和能力查询；真实代理执行尚未接入。",
+        "shortDescription": "动态工作流模板与面板原型",
+        "longDescription": "工作流插件开发骨架，包含模板查询和使用示例数据的面板原型。真实代理执行尚未接入。",
         "category": "Productivity",
-        "capabilities": ["Read"],
-        "defaultPrompt": "查看 workflows 模板，讨论我们需要的执行和交互方式。"
+        "capabilities": ["Read", "Interactive"],
+        "defaultPrompt": "打开 Workflows 面板原型，讨论动态编排和任务状态。"
       }
     }
   }
