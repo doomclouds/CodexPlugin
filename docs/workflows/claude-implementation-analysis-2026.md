@@ -1,6 +1,6 @@
 # Claude Code 动态工作流实现分析
 
-状态：研究中的开发记录。不是发布 Skill，不是插件执行依赖。研究结果必须先落实到可验证的契约与真实测试，不能用这份记录代替验收。
+状态：本次限定样本的静态研究已收敛，通用执行契约已经真实测试验证。这是开发记录，不是发布 Skill，也不是插件执行依赖。静态研究不证明 Claude 的运行行为，不能用这份记录代替执行验收。
 
 ## 样本与证据边界
 
@@ -51,4 +51,4 @@ MCP 服务名白名单不能替代每工具权限，文件 sandbox 也不能限�
 - 安装的新包与当前 App 已加载的包分开验证；配置修改和活动 MCP 连接刷新也分开验证。只有当前连接身份确实更新才能报告已生效，否则记录 `pending_restart`。
 - 在脱离开发仓库的发布包中验证，所有引用只能依赖包内文件。开发研究文档不得成为发布 Skill 的运行前置条件。
 
-官方接口依据：[Codex App Server](https://learn.chatgpt.com/docs/app-server)、[Codex 配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)、[Claude 动态工作流](https://code.claude.com/docs/en/workflows)。本记录的实现结论还需要专项报告与真实测试收敛后确认。
+官方接口依据：[Codex App Server](https://learn.chatgpt.com/docs/app-server)、[Codex 配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)、[Claude 动态工作流](https://code.claude.com/docs/en/workflows)。专项研究和真实验证记录已完成；静态事实、推断、未知及未启用分支仍分别保留，不作超出证据范围的兼容承诺。
