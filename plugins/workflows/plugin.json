@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "workflows",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Inspect and draft Codex workflow templates. Execution is not connected in this scaffold.",
   "license": "MIT",
   "extensions": {
