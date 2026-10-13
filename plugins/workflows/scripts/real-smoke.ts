@@ -118,7 +118,7 @@ return { report, echo: args.echo };
 }
 
 if (!process.argv.includes("--real-workers")) {
-  console.error("手工真实验证会调用已登录 Codex 的默认模型。运行：node --experimental-strip-types plugins/workflows/scripts/real-smoke.ts --real-workers");
+  console.error("手工真实验证会调用已登录 Codex 的默认模型。在插件目录运行 npm run smoke:real。");
   process.exitCode = 2;
 } else {
   try { await realSmoke(); }

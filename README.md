@@ -64,7 +64,7 @@ codex plugin add workflows@codex-plugin-workspace
 
 ## Workflows
 
-`workflows 0.2.2` 已接入第一版动态执行器：预览 JavaScript 后在插件面板开始，按结果分支、循环并调度真实 Codex worker；停止后保存并手动恢复。写入在独立快照完成，全部结束后统一审查，用户点击应用才修改项目。
+`workflows 0.2.3` 已接入第一版动态执行器：预览 JavaScript 后在插件面板开始，按结果分支、循环并调度真实 Codex worker；停止后保存并手动恢复。写入在独立快照完成，全部结束后统一审查，用户点击应用才修改项目。
 
 独立工作流库保存脚本和默认输入，不绑定项目；同一定义可以为多个项目创建独立运行。面板按宿主上下文继承主题、样式变量、字体与字号。
 
