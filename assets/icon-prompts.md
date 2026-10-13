@@ -42,4 +42,3 @@ Constraints: Actual transparent background, no backdrop, no outer tile, no shado
 Text: none.
 Avoid: Letters, words, labels, watermark, screenshots, UI controls, gradients fading into background, glossy 3D plastic, mascots, OpenAI logos, Claude logos, or other existing brand marks.
 ```
-
