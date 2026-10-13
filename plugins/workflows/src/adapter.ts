@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 
 export interface WorkerRequest {
   id: string;
@@ -331,13 +331,8 @@ export class CodexAdapter implements WorkerAdapter {
     if (request.networkAccess !== undefined && typeof request.networkAccess !== "boolean") return Promise.reject(new Error("Command network authorization must be boolean."));
     if (request.timeoutMs !== undefined && (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 1 || request.timeoutMs > 86_400_000)) return Promise.reject(new Error("Command timeout must be a positive integer of at most 24 hours."));
     if (request.retries !== undefined && (!Number.isSafeInteger(request.retries) || request.retries < 0 || request.retries > 2)) return Promise.reject(new Error("Command retries must be an integer between zero and two."));
-    for (const argument of request.command.slice(1)) {
-      const value = argument.includes("=") && argument.startsWith("-") ? argument.slice(argument.indexOf("=") + 1) : argument;
-      if (!path.isAbsolute(value) && !/^[.]{1,2}[\\/]/.test(value)) continue;
-      const target = path.resolve(request.cwd, value);
-      const relative = path.relative(request.cwd, target);
-      if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return Promise.reject(new Error("Command argv references a path outside the declared working directory."));
-    }
+    // Absolute argv may be read-only toolchain inputs. The OS sandbox, not argv
+    // syntax, enforces writes to the owned workspace and its own Git metadata.
     const controller = new AbortController();
     const relay = () => controller.abort();
     signal.addEventListener("abort", relay, { once: true });
@@ -355,23 +350,35 @@ export class CodexAdapter implements WorkerAdapter {
       if (!git.isDirectory() || git.isSymbolicLink() || await realpath(gitPath) !== gitPath) throw new Error("Command working directory must not use linked or external Git metadata.");
       hasOwnedGit = true;
     } catch (error) { if (object(error).code !== "ENOENT") throw error; }
-    const attempts = (request.retries ?? 0) + 1;
-    for (let attempt = 1; attempt <= attempts; attempt++) {
-      if (signal.aborted) throw abortError();
-      const result = await this.commandAttempt({ ...request, cwd }, signal, onEvent, attempt, hasOwnedGit);
-      if (attempt === attempts || !request.networkAccess || !transientNetworkFailure(result)) return result;
-      onEvent({ type: "log", message: "Retrying command after a temporary network failure." });
-      await new Promise<void>((resolve, reject) => {
-        const abort = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); reject(abortError()); };
-        const timer = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, 100 * attempt);
-        signal.addEventListener("abort", abort, { once: true });
-        if (signal.aborted) abort();
-      });
-    }
-    throw new Error("Command did not produce a result.");
+    if (signal.aborted) throw abortError();
+    const scratch = await mkdtemp(path.join(hasOwnedGit ? gitPath : cwd, ".workflows-command-"));
+    try {
+      const temporary = path.join(scratch, "tmp");
+      const cache = path.join(scratch, "cache");
+      await mkdir(temporary);
+      await mkdir(cache);
+      // These per-command defaults keep standard cache/temp writes in the same
+      // sandbox. HOME, PATH, login and user configuration remain inherited.
+      const env = { TMPDIR: temporary, TMP: temporary, TEMP: temporary, XDG_CACHE_HOME: cache, npm_config_cache: cache, NPM_CONFIG_CACHE: cache };
+      onEvent({ type: "log", message: "Command cache and temporary directories are isolated inside its workspace; argv is unchanged." });
+      const attempts = (request.retries ?? 0) + 1;
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        if (signal.aborted) throw abortError();
+        const result = await this.commandAttempt({ ...request, cwd }, signal, onEvent, attempt, hasOwnedGit, env);
+        if (attempt === attempts || !request.networkAccess || !transientNetworkFailure(result)) return result;
+        onEvent({ type: "log", message: "Retrying command after a temporary network failure." });
+        await new Promise<void>((resolve, reject) => {
+          const abort = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); reject(abortError()); };
+          const timer = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, 100 * attempt);
+          signal.addEventListener("abort", abort, { once: true });
+          if (signal.aborted) abort();
+        });
+      }
+      throw new Error("Command did not produce a result.");
+    } finally { await rm(scratch, { recursive: true, force: true }); }
   }
 
-  private async commandAttempt(request: CommandRequest, signal: AbortSignal, onEvent: (event: WorkerEvent) => void, attempt: number, hasOwnedGit: boolean): Promise<CommandResult> {
+  private async commandAttempt(request: CommandRequest, signal: AbortSignal, onEvent: (event: WorkerEvent) => void, attempt: number, hasOwnedGit: boolean, env: Record<string, string>): Promise<CommandResult> {
     const processId = `${request.id}_attempt_${attempt}`;
     const timeoutMs = request.timeoutMs ?? 10 * 60_000;
     const output = { stdout: "", stderr: "" };
@@ -411,7 +418,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.3.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.3.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer); startupTimer = undefined;
       if (canceled || signal.aborted) throw canceled ?? abortError();
@@ -419,7 +426,7 @@ export class CodexAdapter implements WorkerAdapter {
       executionTimer = setTimeout(() => cancel(timeoutError("Codex command execution timed out.")), timeoutMs);
       const sandboxPolicy = { type: "workspaceWrite", writableRoots: [request.cwd, ...(hasOwnedGit ? [path.join(request.cwd, ".git")] : [])], networkAccess: request.networkAccess === true, excludeTmpdirEnvVar: true, excludeSlashTmp: true };
       emit("Command execution started.");
-      const response = object(await Promise.race([session.request("command/exec", { command: request.command, cwd: request.cwd, processId, sandboxPolicy, timeoutMs, streamStdoutStderr: true, outputBytesCap: maxOutputBytes }, timeoutMs + this.options.interruptTimeoutMs), session.failure.promise]));
+      const response = object(await Promise.race([session.request("command/exec", { command: request.command, cwd: request.cwd, env, processId, sandboxPolicy, timeoutMs, streamStdoutStderr: true, outputBytesCap: maxOutputBytes }, timeoutMs + this.options.interruptTimeoutMs), session.failure.promise]));
       if (canceled) throw canceled;
       if (!Number.isSafeInteger(response.exitCode) || typeof response.stdout !== "string" || typeof response.stderr !== "string") throw new Error("Codex returned an invalid command result.");
       for (const stream of ["stdout", "stderr"] as const) append(stream, decoders[stream].end() + response[stream], true);
@@ -541,7 +548,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.3.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.3.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object(object(await session.request("config/read", { cwd: request.cwd })).config);
       const authorizedMcps = new Set(request.mcpServers ?? []);

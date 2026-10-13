@@ -22,7 +22,7 @@
 
 `workflow_panel_lease` 仅供面板维护生命周期。聊天启动不需要面板租约，不借用其他面板租约。
 
-`args` 可为任意 JSON 值，默认对象。写入需要 Git 仓库根目录、`allowWrite: true` 和对应任务 `mode: "write"`。`networkAccess` 默认 `false`，`workspaceMode` 默认 `"snapshot"`；`"git-worktree"` 用于需要 Git 元数据的隔离维护。网络与写入授权相互独立：只读任务可以用 `allowWrite: false`、`networkAccess: true` 进行已授权 native fetch/search，仍不能写文件。联网须有用户授权且预览显式声明。`allowedMcpServers` 默认空数组，仅列出用户已配置且本任务授权的 MCP 服务名称，不包含 Workflows；`allowedMcpTools` 按服务映射到实际工具名称数组，与用户已有配置取交集并保留审批。只读 worker 仅允许明确 readOnlyHint=true 的 MCP 工具，写入按工具授权限制。不继承父聊天专有 apps/连接器。
+`args` 可为任意 JSON 值，默认对象。写入需要 Git 仓库根目录、`allowWrite: true` 和对应任务 `mode: "write"`。`networkAccess` 默认 `false`，`workspaceMode` 默认 `"snapshot"`；`"git-worktree"` 用于需要 Git 元数据的隔离维护，也支持子模块及嵌套模块的提交、初始化状态、独立副本与产物检查点。未初始化模块不会自动下载，初始化须显式计划和授权。快照写入含子模块时提示改用 Git 模式。网络与写入授权相互独立：只读任务可以用 `allowWrite: false`、`networkAccess: true` 进行已授权 native fetch/search，仍不能写文件。联网须有用户授权且预览显式声明。`allowedMcpServers` 默认空数组，仅列出用户已配置且本任务授权的 MCP 服务名称，不包含 Workflows；`allowedMcpTools` 按服务映射到实际工具名称数组，与用户已有配置取交集并保留审批。只读 worker 仅允许明确 readOnlyHint=true 的 MCP 工具，写入按工具授权限制。不继承父聊天专有 apps/连接器。
 
 `limits` 支持 `maxReadWorkers`、`maxCalls`、`timeoutMs`、`maxTokens`。默认只读并发 4，最多 16；写入同时最多一个。默认调用上限 1000、总时限 1 小时，token 门槛 0 表示不限。token 门槛控制后续派发，不代表账单上限。
 
@@ -81,9 +81,9 @@ const maintenance = {
 };
 ```
 
-此配置是接口用法示例；代理应按用户项目的真实命令生成计划，不能将示例当作未经检查的操作。`command` 是 argv 数组，不由 shell 解释。步骤的 `networkAccess: true` 还要求整个运行 `networkAccess: true`。`timeoutMs` 与 `retries` 为每步设置，retries 为 0—2。`idempotent` 默认 false；显式 true 是调用者检查真实操作后的声明，引擎不会根据命令名称猜测幂等性。自动重试要求 idempotent=true；运行中断、退出或丢失响应后，已经开始且未确认结果的非幂等步骤拒绝在恢复中自动重发。先检查既有副作用，再决定继续或另建计划。脚本按步骤 ID 调用，例如 `await operation("build")`，按实际错误决定停止或有限重试。
+此配置是接口用法示例；代理应按用户项目的真实命令生成计划，不能将示例当作未经检查的操作。`command` 是 argv 数组，不由 shell 解释；绝对工具／脚本路径可以读取，不能据此扩大写权限。每次命令的临时目录和 npm/XDG 缓存默认位于隔离工作区并在退出后清理；argv、HOME、PATH 与全局配置保持原值，显式缓存参数仍由真实沙箱检查。步骤的 `networkAccess: true` 还要求整个运行 `networkAccess: true`。`timeoutMs` 与 `retries` 为每步设置，retries 为 0—2。`idempotent` 默认 false；显式 true 是调用者检查真实操作后的声明，引擎不会根据命令名称猜测幂等性。自动重试要求 idempotent=true；运行中断、退出或丢失响应后，已经开始且未确认结果的非幂等步骤拒绝在恢复中自动重发。先检查既有副作用，再决定继续或另建计划。脚本按步骤 ID 调用，例如 `await operation("build")`，按实际错误决定停止或有限重试。
 
-激活 `command` 是可执行文件，`args` 为数组；`${WORKSPACE}` 替换为本次保留的工作区。配置中的其他目录必须来自本次授权输入，不能引用发布者私有位置。只有完成审查并按授权应用后才处理激活配置。结果 `pending_restart` 表示等待宿主重载；`failed` 表示失败；仓库已应用但激活失败时 application 为 `partial`，以当前 revision 重试 apply 只重试激活并核对配置版本；`verified` 表示已通过实际验证。不能把配置更新当作当前聊天已经加载目标版本。
+激活 `command` 是可执行文件，`args` 为数组；`${WORKSPACE}` 替换为本次保留的工作区。配置中的其他目录必须来自本次授权输入，不能引用发布者私有位置。只有完成审查并按授权应用后才处理激活配置。激活结果 `pending_restart` 表示等待宿主重载；`failed` 表示失败；`verified` 表示已通过实际验证。不能把配置更新当作当前聊天已经加载目标版本。
 
 ## 停止、恢复与应用
 
@@ -94,3 +94,5 @@ const maintenance = {
 恢复按调用序校验输入、任务和执行范围，复用有效完成结果；第一个失败或指纹变化使后续缓存失效。跨项目复用必须创建新运行。项目变化、工作区缺失、锁和版本冲突按实际工具错误处理。
 
 完成后统一检查差异、维护审查、测试输出和报告。聊天可在已有应用授权时调用 `workflow_apply`，无需再进入编辑器；面板按钮仍保留。冲突时不覆盖。应用成功、激活配置更新、宿主重新加载、工具版本验证、提交和发布是不同结果，分别核对与报告。
+
+`application: "partial"` 表示已有部分应用，但仍有阶段未完成；可能是子模块应用尚未完成，也可能是仓库及子模块均已应用后激活失败。先用 `workflow_get_run` 核对应用记录、实际错误和当前项目状态，再以新读取的 revision 按已有授权重试 `workflow_apply`，核验已完成部分并继续未完成阶段。只有仓库及子模块均已应用、仅激活失败时，重试才只处理激活并核对配置版本。

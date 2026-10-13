@@ -23,11 +23,11 @@ description: 根据用户任务生成、保存并执行 Workflows 动态工作�
 
 `networkAccess` 默认 `false`，与 `allowWrite` 独立。只读联网研究可保持 `allowWrite: false` 和 `agent` 默认只读模式，仅按授权打开 `networkAccess: true`；这不会开放文件写入。只有用户任务已授权相应网络访问时设置 `true`；维护步骤仍须声明自己的 `networkAccess: true` 才能联网。不能用命令、临时环境或其他工具绕过关闭的网络。worker 不隐式继承外部工具或父聊天能力。需要已配置的 MCP 时，在 `allowedMcpServers` 明确列出授权服务名称，并以 `allowedMcpTools` 按服务列出授权的实际工具名称；默认服务和工具均未开放。只使用现有配置工具的交集，不绕过审批。只读 worker 仅使用明确 `readOnlyHint: true` 的工具；写入 worker 也按工具授权限制。不包含 Workflows 自身，避免递归调度。父聊天专有 apps/连接器不属于用户 MCP 配置，不能声称已继承或可调用。
 
-工作区默认 `workspaceMode: "snapshot"`。需要 Git 元数据的维护任务使用 `"git-worktree"`，并明确 Git 仓库根目录。写入首先在隔离工作区完成；已有工作区的运行不能通过更新输入扩大或改变执行范围，需要另建预览。
+工作区默认 `workspaceMode: "snapshot"`。需要 Git 元数据的维护任务使用 `"git-worktree"`，并明确 Git 仓库根目录。写入首先在隔离工作区完成；已有工作区的运行不能通过更新输入扩大或改变执行范围，需要另建预览。包含 Git 子模块的写入使用 Git 模式；已初始化模块保留独立副本，未初始化模块保留提交和未初始化状态，不自动联网下载。确需初始化时，在计划中明确声明操作及网络授权。
 
 `agent` 用于通用分析、编程及已授权 MCP 任务，不要求为每种需求修改插件或添加维护命令。`operation` 是可选的确定性维护能力，shell/build 维护需要 `allowWrite: true` 与 `workspaceMode: "git-worktree"`。通用只读联网任务不需要维护步骤。维护命令必须在 `maintenance.steps` 中预声明 `id` 和 `command` argv 数组。脚本只调用 `operation(stepId)`，不能提供新命令或拼接 shell。每步可声明网络访问、超时和有限重试。`idempotent` 默认 `false`，只有核对实际命令后才能显式声明重复执行不会新增副作用。`retries > 0` 需要 `idempotent: true`。已开始却未确认结果的非幂等 operation，恢复时拒绝自动重发；先核验实际效果，不能把“没有收到结果”当作“没有发生副作用”。以实际退出、输出、日志与审查结果判断完成，不把启动进程当作成功。
 
-需要应用后激活 MCP 时，在 `maintenance.activation` 声明 `serverName`、可执行文件 `command` 和 `args`。插件路径参数使用 `${WORKSPACE}`，由运行时替换为本次保留工作区；不能固化开发者机器目录。只运行已声明的激活配置。配置更新或进程启动不等于当前宿主已经重载；`pending_restart` 仍需宿主重新加载及实际版本核对，只有 `verified` 才可称激活已验证。`application: "partial"` 表示仓库已应用但激活失败；读取新的 revision 后可重试 apply，仅重试激活阶段，不再应用仓库修改。
+需要应用后激活 MCP 时，在 `maintenance.activation` 声明 `serverName`、可执行文件 `command` 和 `args`。插件路径参数使用 `${WORKSPACE}`，由运行时替换为本次保留工作区；不能固化开发者机器目录。只运行已声明的激活配置。配置更新或进程启动不等于当前宿主已经重载；`pending_restart` 仍需宿主重新加载及实际版本核对，只有 `verified` 才可称激活已验证。
 
 ## 保存、复用与恢复
 
@@ -38,6 +38,8 @@ description: 根据用户任务生成、保存并执行 Workflows 动态工作�
 ## 审查、应用与交付
 
 执行完成后检查真实 worker 报告、维护输出、测试结果和统一差异，保留未验证事项。用户已授权应用改动时，用当前 `revision` 调用 `workflow_apply`；授权仅涵盖规划或执行时，先提供具体差异再请求应用授权。面板也可审查和应用。
+
+`application: "partial"` 表示已有部分应用，但仍有阶段未完成；可能是子模块应用尚未完成，也可能是仓库及子模块均已应用后激活失败。用 `workflow_get_run` 核对应用记录、实际错误和当前项目状态，读取新的 revision 后按已有授权重试 `workflow_apply`，核验已完成部分并继续未完成阶段。只有仓库及子模块均已应用、仅激活失败时，重试才只处理激活。
 
 基线、范围或审查指纹变化时按工具冲突处理，不自动覆盖。应用、激活配置更新、宿主重载和版本验证分别报告。提交、推送、发布和部署按用户具体授权执行；已有授权不重复询问。
 

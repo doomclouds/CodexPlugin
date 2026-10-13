@@ -31,6 +31,7 @@ export interface MaintenanceReview {
   base: string; target: string; branch: string; upstream?: string;
   diff: Diff; artifacts: MaintenanceArtifact[]; artifactFingerprint: string;
   fingerprint: string; preparedClean: boolean;
+  submodules?: Array<{ path: string; commit: string; initialized: boolean; head?: string }>;
 }
 export interface ActivationResult {
   status: "pending_restart" | "verified" | "failed"; serverName: string;

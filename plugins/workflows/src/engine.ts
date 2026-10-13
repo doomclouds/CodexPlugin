@@ -4,6 +4,7 @@ import { CodexAdapter } from "./adapter.ts";
 import type { WorkerAdapter } from "./adapter.ts";
 import { executeScript, validateScript } from "./script.ts";
 import { RunStore } from "./store.ts";
+import { listGitlinks, gitAwareContextDigest } from "./submodules.ts";
 import { applyWorkspace, contextDigest, createWorkspace, workspaceDiff } from "./workspace.ts";
 import { createGitWorkspace, validateMaintenance, reviewMaintenance, applyMaintenance, maintenanceFingerprint, validateGitWorkspace } from "./maintenance.ts";
 import type { Attempt, Limits, Task, WorkflowRun, MaintenancePlan } from "./types.ts";
@@ -221,7 +222,11 @@ export class WorkflowEngine {
       this.assertRevision(run, input.revision);
       if (resume ? !["stopped", "failed"].includes(run.execution) : run.execution !== "draft") throw new Error("Workflow state changed before start");
       let context: string;
-      try { context = await contextDigest(run.projectPath); } catch (error) { if (run.allowWrite) throw error; context = randomBytes(16).toString("hex"); }
+      try {
+        const gitlinks = await listGitlinks(run.projectPath);
+        if (gitlinks.length && run.allowWrite && run.workspaceMode !== "git-worktree") throw new Error("Snapshot writing does not copy Git submodules. Create a new preview with workspaceMode: git-worktree to retain their commit and initialization state.");
+        context = gitlinks.length ? await gitAwareContextDigest(run.projectPath) : await contextDigest(run.projectPath);
+      } catch (error) { if (run.allowWrite) throw error; context = randomBytes(16).toString("hex"); }
       if (run.contextDigest && run.contextDigest !== context) {
         if (run.workspace) throw new Error("Project changed since the workspace snapshot. Create a new preview to preserve those changes.");
         for (const task of run.tasks) task.status = "interrupted";
@@ -468,16 +473,19 @@ export class WorkflowEngine {
       releaseProject = await this.store.acquireNamed(`apply_${digest(run.projectPath)}`);
       applicationStarted = true;
       run.application = "applying"; await this.persist(run);
-      let result: { applied: boolean; conflicts: string[] };
+      let result: { applied: boolean; conflicts: string[]; partial?: boolean; error?: string };
       if (run.workspace.kind === "git-worktree") {
         if (!run.maintenanceReview) throw new Error("Maintenance review is missing");
         const maintenance = await applyMaintenance(run.workspace, run.maintenanceReview, run.maintenance ?? { steps: [] });
         if (maintenance.activation) run.activation = maintenance.activation;
         result = maintenance;
       } else result = await applyWorkspace(run.workspace, run.diff);
-      run.application = result.applied ? run.activation?.status === "failed" ? "partial" : "applied" : "conflict";
+      run.application = result.partial ? "partial" : result.applied ? run.activation?.status === "failed" ? "partial" : "applied" : "conflict";
+      if (result.error) run.error = result.error;
+      else if (run.application === "applied") delete run.error;
       if (!result.applied) run.diff.conflicts = result.conflicts;
-      this.log(run, result.applied ? run.application === "partial" ? "Repository updated, but activation failed. Review activation before retrying application." : run.activation?.status === "pending_restart" ? "Repository and configuration updated. The current desktop connection still requires restart verification." : "Reviewed changes applied to the project." : "Project conflicts detected; changes were not applied.");
+      else if (run.application === "applied") delete run.diff.conflicts;
+      this.log(run, run.application === "partial" ? "Repository partially updated. Review the unfinished submodule or activation stage before retrying application." : result.applied ? run.activation?.status === "pending_restart" ? "Repository and configuration updated. The current desktop connection still requires restart verification." : "Reviewed changes applied to the project." : "Project conflicts detected; changes were not applied.");
     } catch (error) { if (!applicationStarted) throw error; run.application = "failed"; run.error = message(error); this.log(run, run.error, undefined, "error"); }
     finally { try { if (applicationStarted) await this.persist(run); } finally { try { await releaseProject?.(); } finally { await release(); } } }
     return structuredClone(run);

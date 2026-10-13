@@ -2,7 +2,7 @@
 
 <img src="assets/workflows-icon.png" alt="Workflows 产品图标" width="64" height="64">
 
-`0.3.0` 让 Agent 根据任务创建和执行动态工作流。JavaScript 表达分支、循环、并行和按结果调度；真实 Codex worker 使用原生文件、命令和修改工具，以及本次授权的 MCP。运行可保存、停止、恢复、审查和跨项目复用。
+`0.3.1` 让 Agent 根据任务创建和执行动态工作流。JavaScript 表达分支、循环、并行和按结果调度；真实 Codex worker 使用原生文件、命令和修改工具，以及本次授权的 MCP。运行可保存、停止、恢复、审查和跨项目复用。
 
 需要 Node.js 22 或更新版本、支持 `app-server` 的 Codex CLI 和已有登录。安装版本与当前聊天实际加载的版本分别核对。插件不接管用户登录。
 
@@ -49,13 +49,13 @@ return await agent(`核实并汇总：${JSON.stringify(findings.filter(Boolean))
 
 默认 `workspaceMode: "snapshot"`：写入先在独立文件快照进行，最终按基线检查并应用文件改动。该模式保留已有编辑，不保留完整 Git 历史，不用来拉取分支。
 
-`workspaceMode: "git-worktree"`：为干净 Git 仓库创建包含历史、分支与远端配置的独立 checkout。它拥有自己的 `.git`，不共享原仓库的可写元数据。维护操作使用此模式；完成后核对原分支与 HEAD 基线，只快进到已经验证的提交，不重新查询浮动远端。未提交的源码改动不会被插件自动提交。
+`workspaceMode: "git-worktree"`：为干净 Git 仓库创建包含历史、分支与远端配置的独立 checkout。它拥有自己的 `.git`，不共享原仓库的可写元数据。维护操作使用此模式；完成后核对原分支与 HEAD 基线，只快进到已经验证的提交，不重新查询浮动远端。未提交的源码改动不会被插件自动提交。 Git 子模块按 gitlink 提交和初始化状态记录；已初始化的子模块及嵌套模块在隔离目录保留独立元数据，未初始化的模块保持该状态。需要初始化时由计划声明对应操作和网络范围。文件快照模式遇到子模块会提示使用 Git 模式。审查和恢复覆盖子模块源码、提交与产物；部分应用失败可核验后重试。
 
-可选的 `maintenance.steps` 定义精确 argv、联网范围、超时和最多两次临时网络重试。脚本用 `await operation("step-id")` 执行；未声明的操作拒绝执行。自动重试须明确声明 `idempotent: true`。已开始但结果不确定的非幂等命令不会在恢复时重新发送，须核对实际效果后调整计划。此 API 用于需要确定命令的步骤，普通代理任务不要求声明全部 shell 命令。
+可选的 `maintenance.steps` 定义精确 argv、联网范围、超时和最多两次临时网络重试。脚本用 `await operation("step-id")` 执行；未声明的操作拒绝执行。自动重试须明确声明 `idempotent: true`。已开始但结果不确定的非幂等命令不会在恢复时重新发送，须核对实际效果后调整计划。此 API 用于需要确定命令的步骤，普通代理任务不要求声明全部 shell 命令。绝对路径的工具和只读脚本参数按计划执行，写入边界由真实沙箱限制；每次命令的临时目录和 npm/XDG 缓存默认放在隔离工作区，结束后清理，argv、HOME、PATH 和全局配置不被改写。
 
 `maintenance.activation` 可在审查后更新一个已有 stdio MCP 的 command/args。`${WORKSPACE}` 解析为保留的独立 checkout，构建产物经指纹检查。配置前像与私有备份保存在运行目录，以版本 CAS 写入，保留该服务器其他字段；不能安全回滚时明确失败。
 
-仓库快进与配置激活是两个阶段。激活失败时状态为 `partial`，审查后可以重试尚未完成的激活。配置写入成功不代表当前桌面连接已刷新，状态为 `pending_restart`；应重新加载并核对实际服务身份，再判断是否生效。插件不把新进程探测当成父聊天已更新。
+仓库及子模块应用、配置激活依次完成。`application: "partial"` 表示已有部分应用，但仍有阶段未完成；可能是子模块应用尚未完成，也可能是仓库及子模块已应用后激活失败。先核对应用记录、实际错误和当前项目状态，再用新读取的 revision 按已有授权重试 `workflow_apply`，核验已完成部分并继续未完成阶段。只有仓库及子模块均已应用、仅激活失败时，重试才只处理激活。配置写入成功不代表当前桌面连接已刷新，状态为 `pending_restart`；应重新加载并核对实际服务身份，再判断是否生效。插件不把新进程探测当成父聊天已更新。
 
 任意外部副作用无法承诺恰好执行一次。中断时应检查实际后置条件、固定提交与产物；非幂等远端写入需使用服务端幂等机制或明确核验，不能盲目重试。
 
@@ -77,6 +77,7 @@ npm run build
 npm run smoke
 npm run smoke:real
 node --experimental-strip-types scripts/real-protocol-smoke.ts --real-workers
+node --experimental-strip-types scripts/real-repository-smoke.ts --project <repository> --real-commands
 ```
 
 普通检查不调用模型。两个真实验证入口显式调用已登录 Codex 的默认模型；协议验证使用一次性仓库与私有临时配置，检查原生工具、授权 MCP、拉取、联网安装、构建、停止恢复、持久化和审查应用，不修改用户真实 MCP 配置。测试环境目录按系统 API 创建，没有固化开发者目录。

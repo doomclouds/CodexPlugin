@@ -287,8 +287,15 @@ test("a write task changes only the snapshot until the completed diff is explici
   assert.equal(complete.execution, "completed", complete.error);
   assert.equal(await readFile(path.join(project, "source.txt"), "utf8"), "original\n");
   assert.deepEqual(complete.diff?.files, [{ path: "source.txt", status: "modified" }]);
-  const applied = await engine.apply(run.id, complete.revision);
+  await writeFile(path.join(project, "source.txt"), "user changed during review\n");
+  const conflicted = await engine.apply(run.id, complete.revision);
+  assert.equal(conflicted.application, "conflict");
+  assert.deepEqual(conflicted.diff?.conflicts, ["source.txt"]);
+  assert.equal(await readFile(path.join(project, "source.txt"), "utf8"), "user changed during review\n");
+  await writeFile(path.join(project, "source.txt"), "original\n");
+  const applied = await engine.apply(run.id, conflicted.revision);
   assert.equal(applied.application, "applied", applied.error);
+  assert.equal(applied.diff?.conflicts, undefined);
   assert.equal(await readFile(path.join(project, "source.txt"), "utf8"), "edited in snapshot\n");
 });
 

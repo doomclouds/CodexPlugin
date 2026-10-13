@@ -104,7 +104,7 @@ export interface PanelState {
 
 const executionLabels: Record<string, string> = { draft: "待开始", running: "运行中", stopping: "正在停止", stopped: "已停止", completed: "执行已完成", failed: "执行失败" };
 const taskLabels: Record<string, string> = { queued: "等待中", running: "运行中", stopping: "正在停止", interrupted: "已中断", completed: "已完成", failed: "失败" };
-const applicationLabels: Record<string, string> = { none: "改动未应用", applying: "正在应用", applied: "已应用", partial: "改动已应用 · 激活待重试", conflict: "应用冲突", failed: "应用失败" };
+const applicationLabels: Record<string, string> = { none: "改动未应用", applying: "正在应用", applied: "已应用", partial: "部分改动已应用，等待重试", conflict: "应用冲突", failed: "应用失败" };
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 export interface HostStyleEffects {
@@ -119,6 +119,16 @@ export function applyPanelHostStyles(context: Record<string, unknown>, effects: 
   const styles = context.styles as { variables?: Record<string, string | undefined>; css?: { fonts?: string } } | undefined;
   if (styles?.variables) effects.variables(styles.variables);
   if (typeof styles?.css?.fonts === "string") effects.fonts(styles.css.fonts);
+}
+
+function actionError(prefix: string, error: unknown, action?: UserAction): string {
+  const detail = errorMessage(error).trim();
+  if (/REVISION[_ -]?CONFLICT|Workflow changed; refresh the preview|revision (?:mismatch|conflict)|stale (?:preview|revision)/i.test(detail)) return `${prefix}：${detail}。请刷新记录并核对当前版本后重试。`;
+  if (/Unsupported workspace entry/i.test(detail)) {
+    const state = action === "start" || action === "resume" ? "隔离工作区准备未完成，本次未启动新 worker。" : "工作区条目检查未通过。";
+    return `${prefix}：${detail}。${state}请核对执行器支持情况和具体修复方案。`;
+  }
+  return `${prefix}：${detail}`;
 }
 
 export function escapeHtml(value: unknown): string {
@@ -145,6 +155,13 @@ function parseRun(value: unknown): WorkflowRun {
 
 export function canApply(run: WorkflowRun, tab: PanelTab): boolean {
   return tab === "diff" && run.execution === "completed" && (!!run.diff?.files.length || run.maintenanceReview !== undefined || run.activation !== undefined) && ["none", "partial", "conflict", "failed"].includes(run.application);
+}
+
+export function partialApplicationMessage(run: WorkflowRun): string {
+  if (run.application !== "partial") return "";
+  return run.activation?.status === "failed"
+    ? "仓库改动已应用，激活失败。重试仅处理激活，不重复应用仓库改动。"
+    : "部分改动已应用，子模块工作区仍需核验与补齐。重试仅处理未完成步骤，请先核对实际结果。";
 }
 
 // Every timer reads the server; no timer invents execution state.
@@ -293,7 +310,7 @@ export class WorkflowPanelController {
       this.state.selectedTemplate = template.id;
       await this.refreshTemplates();
       return template;
-    } catch (error) { this.state.error = `保存工作流定义失败：${errorMessage(error)}。同名定义已存在时，请从工作流库载入后再修改。`; return undefined; }
+    } catch (error) { this.state.error = actionError("保存工作流定义失败", error); if (/already exists|changed\. Load it before saving|no longer exists/i.test(errorMessage(error))) this.state.error += "。请从工作流库载入当前定义后再修改。"; return undefined; }
     finally { this.state.busy = false; this.changed(); }
   }
 
@@ -319,7 +336,7 @@ export class WorkflowPanelController {
       this.state.tab = "overview";
       this.setProjectPath(run.projectPath);
       return run;
-    } catch (error) { this.state.error = `保存失败：${errorMessage(error)}。若版本已变化，请刷新记录后重新编辑。`; return undefined; }
+    } catch (error) { this.state.error = actionError("保存失败", error); return undefined; }
     finally { this.state.busy = false; this.changed(); }
   }
 
@@ -345,7 +362,7 @@ export class WorkflowPanelController {
     try {
       const updated = parseRun((await this.request(action === "cancel" ? "workflow_cancel_task" : `workflow_${action}`, args)).run);
       this.replace(updated);
-    } catch (error) { this.state.error = `操作失败：${errorMessage(error)}。若记录版本已变化，请刷新后重试。`; }
+    } catch (error) { this.state.error = actionError("操作失败", error, action); }
     finally { this.state.busy = false; this.changed(); }
   }
 
@@ -436,7 +453,7 @@ function diff(run: WorkflowRun): string {
   const conflicts = run.diff?.conflicts?.length ? `<div class="wf-alert" role="alert">存在应用冲突：${run.diff.conflicts.map(escapeHtml).join("、")}</div>` : "";
   const changes = run.diff?.files.length ? `<h3 class="wf-section-title">变更文件</h3>${run.diff.files.map(file => `<div class="wf-file-header"><span>${escapeHtml(file.path)}</span><span>${escapeHtml(file.status)}</span></div>`).join("")}<pre aria-label="统一差异">${escapeHtml(run.diff.text)}</pre>` : '<div class="wf-empty">本次执行没有文件改动。</div>';
   const verification = run.logs.filter(log => /test|验证|测试|command|命令|operation|维护|activation|激活/i.test(log.message));
-  return `${run.application === "partial" ? '<div class="wf-alert" role="alert">仓库改动已应用，激活失败。重试仅处理激活，不重复应用仓库改动。</div>' : ""}${conflicts}${changes}${maintenanceReview(run)}${activationSummary(run)}<h3 class="wf-section-title">验证日志</h3>${verification.length ? verification.map(log => `<div class="wf-log"><span class="wf-log-time">${escapeHtml(displayTime(log.at))}</span><span>${escapeHtml(log.message)}</span></div>`).join("") : '<p class="wf-muted">运行记录没有报告测试或命令结果。</p>'}<div class="wf-notice">${escapeHtml(applicationLabels[run.application] ?? run.application)}。${run.activation?.status === "pending_restart" ? "配置已更新；宿主仍需重新加载并核对实际版本，脚本完成不代表新版服务已生效。" : "应用前会检查当前项目；冲突时保留工作区供你处理。"}</div>`;
+  return `${run.application === "partial" ? `<div class="wf-alert" role="alert">${escapeHtml(partialApplicationMessage(run))}</div>` : ""}${conflicts}${changes}${maintenanceReview(run)}${activationSummary(run)}<h3 class="wf-section-title">验证日志</h3>${verification.length ? verification.map(log => `<div class="wf-log"><span class="wf-log-time">${escapeHtml(displayTime(log.at))}</span><span>${escapeHtml(log.message)}</span></div>`).join("") : '<p class="wf-muted">运行记录没有报告测试或命令结果。</p>'}<div class="wf-notice">${escapeHtml(applicationLabels[run.application] ?? run.application)}。${run.activation?.status === "pending_restart" ? "配置已更新；宿主仍需重新加载并核对实际版本，脚本完成不代表新版服务已生效。" : "应用前会检查当前项目；冲突时保留工作区供你处理。"}</div>`;
 }
 
 export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPanelController {
@@ -514,7 +531,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     else if (run?.execution === "stopping") actions = '<button type="button" disabled>等待 worker 停止…</button>';
     else if (run && ["stopped", "failed"].includes(run.execution)) actions = action("edit", "编辑") + action("resume", "恢复 / 继续", true);
     else if (run?.application === "applying") actions = '<button type="button" disabled>正在应用…</button>';
-    else if (run?.execution === "completed" && (run.diff?.files.length || run.maintenanceReview !== undefined || run.activation !== undefined) && run.application !== "applied") actions = canApply(run, state.tab) ? action("apply", run.application === "partial" ? "重试激活" : "应用改动", true) : action("review", "查看差异", true);
+    else if (run?.execution === "completed" && (run.diff?.files.length || run.maintenanceReview !== undefined || run.activation !== undefined) && run.application !== "applied") actions = canApply(run, state.tab) ? action("apply", run.application === "partial" ? "重试未完成步骤" : "应用改动", true) : action("review", "查看差异", true);
     element("#wf-actions").innerHTML = actions;
     root.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach(button => {
       const selected = button.dataset.tab === state.tab;

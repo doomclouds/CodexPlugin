@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowPanelController, applyPanelHostStyles, canApply, escapeHtml, jsonInput, parseToolGrants, summarizeMaintenanceReview, toolPayload } from "../prototypes/panel.ts";
+import { WorkflowPanelController, applyPanelHostStyles, canApply, escapeHtml, jsonInput, parseToolGrants, partialApplicationMessage, summarizeMaintenanceReview, toolPayload } from "../prototypes/panel.ts";
 import type { WorkflowRun, ToolCaller } from "../prototypes/panel.ts";
 
 function draft(): WorkflowRun {
@@ -113,7 +113,7 @@ test("revision errors remain actionable and do not overwrite the saved run", asy
   fail("REVISION_CONFLICT: expected revision 7");
   await panel.perform("start", true);
   assert.equal(panel.selected?.revision, 7);
-  assert.match(panel.state.error, /刷新后重试/);
+  assert.match(panel.state.error, /刷新记录并核对当前版本后重试/);
   fail();
   await panel.teardown();
 });
@@ -220,7 +220,7 @@ test("a duplicate definition name asks for loading the existing revision before 
   }, () => {}, () => () => {});
   await panel.connected();
   assert.equal(await panel.saveTemplate({ script: "return args", args: null, allowWrite: false }), undefined);
-  assert.match(panel.state.error, /从工作流库载入后再修改/);
+  assert.match(panel.state.error, /从工作流库载入当前定义后再修改/);
   assert.equal(panel.state.runs.length, 0);
   await panel.teardown();
 });
@@ -281,6 +281,15 @@ test("activation failure after repository application remains reviewable for an 
   assert.equal(canApply({ ...run, application: "applied" }, "diff"), false);
 });
 
+test("partial application without an activation failure reports unfinished submodule steps", () => {
+  const run = { ...draft(), execution: "completed" as const, application: "partial" as const, maintenanceReview: { submodules: [] } };
+  assert.equal(canApply(run, "diff"), true);
+  assert.match(partialApplicationMessage(run), /子模块.*未完成步骤/);
+  assert.doesNotMatch(partialApplicationMessage(run), /激活失败|仅处理激活/);
+  assert.match(partialApplicationMessage({ ...run, activation: { status: "failed", serverName: "target" } }), /激活失败.*仅处理激活/);
+  assert.equal(partialApplicationMessage({ ...run, application: "applied" }), "");
+});
+
 test("MCP grant input accepts exact name arrays and rejects malformed or prototype keys", () => {
   assert.deepEqual(parseToolGrants('{"rea":["binary_session"],"other":[]}'), { rea: ["binary_session"], other: [] });
   for (const value of ['[]', 'null', '{"rea":"all"}', '{"rea":[" "]}', '{"__proto__":["unsafe"]}']) assert.throws(() => parseToolGrants(value), /MCP/);
@@ -297,4 +306,28 @@ test("maintenance presentation bounds large artifact manifests while preserving 
   assert.equal(JSON.stringify(summary).includes("pkg-99999"), false);
   assert.equal(JSON.stringify(summary).includes("full-manifest-hash"), false);
   assert.ok(JSON.stringify(summary).length < 5000);
+});
+
+test("unsupported workspace preparation reports the actual boundary without a misleading refresh suggestion", async () => {
+  const { panel, fail } = fixture();
+  await panel.connected();
+  fail("Unsupported workspace entry: third_party/binwalk");
+  await panel.perform("start");
+  assert.match(panel.state.error, /third_party\/binwalk/);
+  assert.match(panel.state.error, /准备未完成.*未启动新 worker/);
+  assert.doesNotMatch(panel.state.error, /刷新|重试/);
+  fail();
+  await panel.teardown();
+});
+
+test("ordinary validation failures do not suggest refreshing or reloading an unrelated saved definition", async () => {
+  const { panel, fail } = fixture();
+  await panel.connected();
+  fail("Maintenance operations require git-worktree isolation and allowWrite");
+  await panel.save({ projectPath: "/project", script: "return args", args: {}, allowWrite: false });
+  assert.doesNotMatch(panel.state.error, /刷新|重试/);
+  await panel.saveTemplate({ script: "return args", args: {}, allowWrite: false });
+  assert.doesNotMatch(panel.state.error, /刷新|重试|从工作流库载入/);
+  fail();
+  await panel.teardown();
 });

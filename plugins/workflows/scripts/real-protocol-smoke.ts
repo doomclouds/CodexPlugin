@@ -16,6 +16,7 @@ const codexHome = path.join(root, "codex-home");
 let client: Client | undefined;
 let transport: StdioClientTransport | undefined;
 const pluginRoot = path.resolve(process.env.WORKFLOWS_PLUGIN_ROOT ?? path.join(import.meta.dirname, ".."));
+const pluginVersion = JSON.parse(await readFile(path.join(pluginRoot, "plugin.json"), "utf8")).version as string;
 const git = (cwd: string, args: string[]) => exec("git", ["-c", "user.name=Workflow Smoke", "-c", "user.email=workflow-smoke@example.invalid", ...args], { cwd, timeout: 30000 });
 const safeError = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/https?:\/\/\S+/g, "[url]").replace(/((?:token|secret|password|api[-_ ]?key)\s*[:=]\s*)\S+/gi, "$1[redacted]").slice(0, 1200);
 
@@ -34,12 +35,12 @@ async function finish(id: string) {
   throw new Error("Real workflow timed out");
 }
 async function connect() {
-  client = new Client({ name: "workflows-real-protocol-smoke", version: "0.3.0" });
+  client = new Client({ name: "workflows-real-protocol-smoke", version: pluginVersion });
   transport = new StdioClientTransport({ command: process.execPath, args: [path.join(pluginRoot, "runtime", "index.js")], cwd: tmpdir(), env: { ...process.env, CODEX_HOME: codexHome, WORKFLOWS_DATA_DIR: path.join(root, "state") } as Record<string, string>, stderr: "pipe" });
   // Raw diagnostics are deliberately not copied into the test report.
   transport.stderr?.on("data", () => {});
   await client.connect(transport);
-  assert.equal((await call("workflow_get_capabilities")).version, "0.3.0");
+  assert.equal((await call("workflow_get_capabilities")).version, pluginVersion);
 }
 async function main() {
   if (!process.argv.includes("--real-workers")) throw new Error("Pass --real-workers to opt in to real model calls and temporary configuration tests");
@@ -115,7 +116,7 @@ phase("Verify");await operation("test");await operation("build");await operation
   const applied=(await call("workflow_apply",{id:latest.id,revision:latest.revision})).run;assert.equal(applied.application,"applied",applied.error);
   assert.equal((await git(project,["rev-parse","HEAD"])).stdout.trim(),complete.maintenanceReview.target);
   await exec("npm",["test"],{cwd:project,timeout:30000});
-  console.log(JSON.stringify({test:"real-MCP-workflow-protocol",success:true,version:"0.3.0",baselineFailed,toolCreated:true,chatStartWithoutLease:true,nativeWorker:true,mcpCalled:true,scopedMcpTools:true,gitPull:true,networkInstall:true,buildArtifactsRetained:true,originalUntouchedBeforeApply:true,persistence:true,realStopWaited:true,resumeFromDisk:true,completedStepCached:true,appliedGitTarget:true,independentTestsPassed:true,tasks:complete.tasks.length,toolsUsed:complete.tasks.find((task:any)=>task.mode==="write"&&!task.options.operation)?.attempts.at(-1)?.toolsUsed,usage:complete.tasks.find((task:any)=>!task.options.operation)?.attempts.at(-1)?.usage}));
+  console.log(JSON.stringify({test:"real-MCP-workflow-protocol",success:true,version:pluginVersion,baselineFailed,toolCreated:true,chatStartWithoutLease:true,nativeWorker:true,mcpCalled:true,scopedMcpTools:true,gitPull:true,networkInstall:true,buildArtifactsRetained:true,originalUntouchedBeforeApply:true,persistence:true,realStopWaited:true,resumeFromDisk:true,completedStepCached:true,appliedGitTarget:true,independentTestsPassed:true,tasks:complete.tasks.length,toolsUsed:complete.tasks.find((task:any)=>task.mode==="write"&&!task.options.operation)?.attempts.at(-1)?.toolsUsed,usage:complete.tasks.find((task:any)=>!task.options.operation)?.attempts.at(-1)?.usage}));
 }
 try {await main();}catch(error){console.error(JSON.stringify({test:"real-MCP-workflow-protocol",success:false,error:safeError(error)}));process.exitCode=1;}
 finally {await client?.close();await transport?.close();await rm(root,{recursive:true,force:true});}

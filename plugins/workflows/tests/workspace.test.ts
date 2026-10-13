@@ -161,3 +161,16 @@ test("stored paths cannot escape the workspace or address Git metadata", async t
     await assert.rejects(workspaceDiff(workspace), /unsafe.*path|escapes root/i);
   }
 });
+
+test("snapshot mode refuses a real Git submodule before creating an incomplete workspace", async t => {
+  const {root,project,data}=await fixture(t);
+  const child=path.join(root,"child-source");await mkdir(child);
+  await exec("git",["init","--quiet"],{cwd:child});
+  await writeFile(path.join(child,"component.txt"),"real child source\n");
+  await exec("git",["add","-A"],{cwd:child});
+  await exec("git",["-c","user.name=Workflow Test","-c","user.email=workflow-test@example.invalid","commit","--quiet","-m","Add child fixture"],{cwd:child});
+  await exec("git",["-c","protocol.file.allow=always","submodule","add","--quiet",child,"third_party/component"],{cwd:project});
+  await assert.rejects(createWorkspace(project,data),/Snapshot writing.*submodules.*git-worktree/);
+  await assert.rejects(access(path.join(data,"workspace")),{code:"ENOENT"});
+  assert.equal(await readFile(path.join(project,"third_party/component/component.txt"),"utf8"),"real child source\n");
+});

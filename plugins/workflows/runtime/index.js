@@ -269,10 +269,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path6) {
-  if (!path6)
+function getElementAtPath(obj, path7) {
+  if (!path7)
     return obj;
-  return path6.reduce((acc, key) => acc?.[key], obj);
+  return path7.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -531,11 +531,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path6, issues) {
+function prefixIssues(path7, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path6);
+    iss.path.unshift(path7);
     return iss;
   });
 }
@@ -939,7 +939,7 @@ function $constructor(name, initializer3, proto, params) {
   }
   Internals.prototype = zodProto;
   const protoMembers = proto;
-  const initialized = protoMembers && /* @__PURE__ */ new WeakSet();
+  const initialized2 = protoMembers && /* @__PURE__ */ new WeakSet();
   function init(inst, def) {
     if (!inst._zod) {
       _zodDesc.value = new Internals(def);
@@ -953,15 +953,15 @@ function $constructor(name, initializer3, proto, params) {
     }
     inst._zod.traits.add(name);
     initializer3(inst, def);
-    if (initialized) {
+    if (initialized2) {
       const own2 = Object.getPrototypeOf(inst);
       const ctorProto = inst._zod.constr.prototype;
       let up = own2;
       while (up && up !== ctorProto)
         up = Object.getPrototypeOf(up);
       const target = up ?? own2;
-      if (!initialized.has(target)) {
-        initialized.add(target);
+      if (!initialized2.has(target)) {
+        initialized2.add(target);
         members(target, protoMembers);
       }
     }
@@ -1068,16 +1068,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path6 = []) => {
+  const processError = (error63, path7 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1116,17 +1116,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result2 = { errors: [] };
-  const processError = (error63, path6 = []) => {
+  const processError = (error63, path7 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           result2.errors.push(mapper(issue2));
           continue;
@@ -1165,8 +1165,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path6 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path6) {
+  const path7 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path7) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -19198,13 +19198,13 @@ function resolveRef(ref2, ctx) {
   if (!ref2.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path6 = ref2.slice(1).split("/").filter(Boolean);
-  if (path6.length === 0) {
+  const path7 = ref2.slice(1).split("/").filter(Boolean);
+  if (path7.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path6[0] === defsKey) {
-    const key = path6[1] === void 0 ? void 0 : decodeJSONPointerSegment(path6[1]);
+  if (path7[0] === defsKey) {
+    const key = path7[1] === void 0 ? void 0 : decodeJSONPointerSegment(path7[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref2}`);
     }
@@ -20839,11 +20839,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants2);
+          this.rhs = optimizeExpr(this.rhs, names, constants3);
         return this;
       }
       get names() {
@@ -20860,10 +20860,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants2);
+        this.rhs = optimizeExpr(this.rhs, names, constants3);
         return this;
       }
       get names() {
@@ -20924,8 +20924,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants2) {
-        this.code = optimizeExpr(this.code, names, constants2);
+      optimizeNames(names, constants3) {
+        this.code = optimizeExpr(this.code, names, constants3);
         return this;
       }
       get names() {
@@ -20954,12 +20954,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         const { nodes } = this;
         let i2 = nodes.length;
         while (i2--) {
           const n = nodes[i2];
-          if (n.optimizeNames(names, constants2))
+          if (n.optimizeNames(names, constants3))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i2, 1);
@@ -21012,12 +21012,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         var _a3;
-        this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants2);
-        if (!(super.optimizeNames(names, constants2) || this.else))
+        this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants3);
+        if (!(super.optimizeNames(names, constants3) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants2);
+        this.condition = optimizeExpr(this.condition, names, constants3);
         return this;
       }
       get names() {
@@ -21040,10 +21040,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants2) {
-        if (!super.optimizeNames(names, constants2))
+      optimizeNames(names, constants3) {
+        if (!super.optimizeNames(names, constants3))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants2);
+        this.iteration = optimizeExpr(this.iteration, names, constants3);
         return this;
       }
       get names() {
@@ -21079,10 +21079,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants2) {
-        if (!super.optimizeNames(names, constants2))
+      optimizeNames(names, constants3) {
+        if (!super.optimizeNames(names, constants3))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants2);
+        this.iterable = optimizeExpr(this.iterable, names, constants3);
         return this;
       }
       get names() {
@@ -21124,11 +21124,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         var _a3, _b;
-        super.optimizeNames(names, constants2);
-        (_a3 = this.catch) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants2);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants2);
+        super.optimizeNames(names, constants3);
+        (_a3 = this.catch) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants3);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants3);
         return this;
       }
       get names() {
@@ -21429,7 +21429,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants2) {
+    function optimizeExpr(expr, names, constants3) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -21444,14 +21444,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n) {
-        const c = constants2[n.str];
+        const c = constants3[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants2[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants3[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -23691,8 +23691,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path6) {
-      let input2 = path6;
+    function removeDotSegments(path7) {
+      let input2 = path7;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -24101,8 +24101,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path6 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path6 && path6 !== "/" ? path6 : void 0;
+        const path7 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path7 && path7 !== "/" ? path7 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -24303,49 +24303,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative, options, skipNormalization) {
+    function resolveComponent(base, relative2, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse6(serialize(base, options), options);
-        relative = parse6(serialize(relative, options), options);
+        relative2 = parse6(serialize(relative2, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative.scheme) {
-        target.scheme = relative.scheme;
-        target.userinfo = relative.userinfo;
-        target.host = relative.host;
-        target.port = relative.port;
-        target.path = removeDotSegments(relative.path || "");
-        target.query = relative.query;
+      if (!options.tolerant && relative2.scheme) {
+        target.scheme = relative2.scheme;
+        target.userinfo = relative2.userinfo;
+        target.host = relative2.host;
+        target.port = relative2.port;
+        target.path = removeDotSegments(relative2.path || "");
+        target.query = relative2.query;
       } else {
-        if (relative.userinfo !== void 0 || relative.host !== void 0 || relative.port !== void 0) {
-          target.userinfo = relative.userinfo;
-          target.host = relative.host;
-          target.port = relative.port;
-          target.path = removeDotSegments(relative.path || "");
-          target.query = relative.query;
+        if (relative2.userinfo !== void 0 || relative2.host !== void 0 || relative2.port !== void 0) {
+          target.userinfo = relative2.userinfo;
+          target.host = relative2.host;
+          target.port = relative2.port;
+          target.path = removeDotSegments(relative2.path || "");
+          target.query = relative2.query;
         } else {
-          if (!relative.path) {
+          if (!relative2.path) {
             target.path = base.path;
-            if (relative.query !== void 0) {
-              target.query = relative.query;
+            if (relative2.query !== void 0) {
+              target.query = relative2.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative.path[0] === "/") {
-              target.path = removeDotSegments(relative.path);
+            if (relative2.path[0] === "/") {
+              target.path = removeDotSegments(relative2.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative.path;
+                target.path = "/" + relative2.path;
               } else if (!base.path) {
-                target.path = relative.path;
+                target.path = relative2.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative2.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative.query;
+            target.query = relative2.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -24353,7 +24353,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative.fragment;
+      target.fragment = relative2.fragment;
       return target;
     }
     function equal2(uriA, uriB, options) {
@@ -27631,7 +27631,7 @@ var require_dist = __commonJS({
 // ../../node_modules/graceful-fs/polyfills.js
 var require_polyfills = __commonJS({
   "../../node_modules/graceful-fs/polyfills.js"(exports, module) {
-    var constants2 = __require("constants");
+    var constants3 = __require("constants");
     var origCwd = process.cwd;
     var cwd = null;
     var platform = process.env.GRACEFUL_FS_PLATFORM || process.platform;
@@ -27655,7 +27655,7 @@ var require_polyfills = __commonJS({
     var chdir;
     module.exports = patch;
     function patch(fs) {
-      if (constants2.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
+      if (constants3.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
         patchLchmod(fs);
       }
       if (!fs.lutimes) {
@@ -27680,14 +27680,14 @@ var require_polyfills = __commonJS({
       fs.fstatSync = statFixSync(fs.fstatSync);
       fs.lstatSync = statFixSync(fs.lstatSync);
       if (fs.chmod && !fs.lchmod) {
-        fs.lchmod = function(path6, mode, cb) {
+        fs.lchmod = function(path7, mode, cb) {
           if (cb) process.nextTick(cb);
         };
         fs.lchmodSync = function() {
         };
       }
       if (fs.chown && !fs.lchown) {
-        fs.lchown = function(path6, uid, gid, cb) {
+        fs.lchown = function(path7, uid, gid, cb) {
           if (cb) process.nextTick(cb);
         };
         fs.lchownSync = function() {
@@ -27754,10 +27754,10 @@ var require_polyfills = __commonJS({
         };
       })(fs.readSync);
       function patchLchmod(fs2) {
-        fs2.lchmod = function(path6, mode, callback) {
+        fs2.lchmod = function(path7, mode, callback) {
           fs2.open(
-            path6,
-            constants2.O_WRONLY | constants2.O_SYMLINK,
+            path7,
+            constants3.O_WRONLY | constants3.O_SYMLINK,
             mode,
             function(err, fd) {
               if (err) {
@@ -27772,8 +27772,8 @@ var require_polyfills = __commonJS({
             }
           );
         };
-        fs2.lchmodSync = function(path6, mode) {
-          var fd = fs2.openSync(path6, constants2.O_WRONLY | constants2.O_SYMLINK, mode);
+        fs2.lchmodSync = function(path7, mode) {
+          var fd = fs2.openSync(path7, constants3.O_WRONLY | constants3.O_SYMLINK, mode);
           var threw = true;
           var ret;
           try {
@@ -27793,9 +27793,9 @@ var require_polyfills = __commonJS({
         };
       }
       function patchLutimes(fs2) {
-        if (constants2.hasOwnProperty("O_SYMLINK") && fs2.futimes) {
-          fs2.lutimes = function(path6, at2, mt, cb) {
-            fs2.open(path6, constants2.O_SYMLINK, function(er, fd) {
+        if (constants3.hasOwnProperty("O_SYMLINK") && fs2.futimes) {
+          fs2.lutimes = function(path7, at2, mt, cb) {
+            fs2.open(path7, constants3.O_SYMLINK, function(er, fd) {
               if (er) {
                 if (cb) cb(er);
                 return;
@@ -27807,8 +27807,8 @@ var require_polyfills = __commonJS({
               });
             });
           };
-          fs2.lutimesSync = function(path6, at2, mt) {
-            var fd = fs2.openSync(path6, constants2.O_SYMLINK);
+          fs2.lutimesSync = function(path7, at2, mt) {
+            var fd = fs2.openSync(path7, constants3.O_SYMLINK);
             var ret;
             var threw = true;
             try {
@@ -27926,11 +27926,11 @@ var require_legacy_streams = __commonJS({
         ReadStream,
         WriteStream
       };
-      function ReadStream(path6, options) {
-        if (!(this instanceof ReadStream)) return new ReadStream(path6, options);
+      function ReadStream(path7, options) {
+        if (!(this instanceof ReadStream)) return new ReadStream(path7, options);
         Stream.call(this);
         var self = this;
-        this.path = path6;
+        this.path = path7;
         this.fd = null;
         this.readable = true;
         this.paused = false;
@@ -27975,10 +27975,10 @@ var require_legacy_streams = __commonJS({
           self._read();
         });
       }
-      function WriteStream(path6, options) {
-        if (!(this instanceof WriteStream)) return new WriteStream(path6, options);
+      function WriteStream(path7, options) {
+        if (!(this instanceof WriteStream)) return new WriteStream(path7, options);
         Stream.call(this);
-        this.path = path6;
+        this.path = path7;
         this.fd = null;
         this.writable = true;
         this.flags = "w";
@@ -28120,15 +28120,15 @@ var require_graceful_fs = __commonJS({
       fs2.createReadStream = createReadStream;
       fs2.createWriteStream = createWriteStream;
       var fs$readFile = fs2.readFile;
-      fs2.readFile = readFile5;
-      function readFile5(path6, options, cb) {
+      fs2.readFile = readFile6;
+      function readFile6(path7, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$readFile(path6, options, cb);
-        function go$readFile(path7, options2, cb2, startTime) {
-          return fs$readFile(path7, options2, function(err) {
+        return go$readFile(path7, options, cb);
+        function go$readFile(path8, options2, cb2, startTime) {
+          return fs$readFile(path8, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$readFile, [path7, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$readFile, [path8, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28138,14 +28138,14 @@ var require_graceful_fs = __commonJS({
       }
       var fs$writeFile = fs2.writeFile;
       fs2.writeFile = writeFile5;
-      function writeFile5(path6, data2, options, cb) {
+      function writeFile5(path7, data2, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$writeFile(path6, data2, options, cb);
-        function go$writeFile(path7, data3, options2, cb2, startTime) {
-          return fs$writeFile(path7, data3, options2, function(err) {
+        return go$writeFile(path7, data2, options, cb);
+        function go$writeFile(path8, data3, options2, cb2, startTime) {
+          return fs$writeFile(path8, data3, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$writeFile, [path7, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$writeFile, [path8, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28156,14 +28156,14 @@ var require_graceful_fs = __commonJS({
       var fs$appendFile = fs2.appendFile;
       if (fs$appendFile)
         fs2.appendFile = appendFile;
-      function appendFile(path6, data2, options, cb) {
+      function appendFile(path7, data2, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$appendFile(path6, data2, options, cb);
-        function go$appendFile(path7, data3, options2, cb2, startTime) {
-          return fs$appendFile(path7, data3, options2, function(err) {
+        return go$appendFile(path7, data2, options, cb);
+        function go$appendFile(path8, data3, options2, cb2, startTime) {
+          return fs$appendFile(path8, data3, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$appendFile, [path7, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$appendFile, [path8, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28192,42 +28192,42 @@ var require_graceful_fs = __commonJS({
         }
       }
       var fs$readdir = fs2.readdir;
-      fs2.readdir = readdir4;
+      fs2.readdir = readdir5;
       var noReaddirOptionVersions = /^v[0-5]\./;
-      function readdir4(path6, options, cb) {
+      function readdir5(path7, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path7, options2, cb2, startTime) {
-          return fs$readdir(path7, fs$readdirCallback(
-            path7,
+        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path8, options2, cb2, startTime) {
+          return fs$readdir(path8, fs$readdirCallback(
+            path8,
             options2,
             cb2,
             startTime
           ));
-        } : function go$readdir2(path7, options2, cb2, startTime) {
-          return fs$readdir(path7, options2, fs$readdirCallback(
-            path7,
+        } : function go$readdir2(path8, options2, cb2, startTime) {
+          return fs$readdir(path8, options2, fs$readdirCallback(
+            path8,
             options2,
             cb2,
             startTime
           ));
         };
-        return go$readdir(path6, options, cb);
-        function fs$readdirCallback(path7, options2, cb2, startTime) {
-          return function(err, files) {
+        return go$readdir(path7, options, cb);
+        function fs$readdirCallback(path8, options2, cb2, startTime) {
+          return function(err, files2) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
               enqueue([
                 go$readdir,
-                [path7, options2, cb2],
+                [path8, options2, cb2],
                 err,
                 startTime || Date.now(),
                 Date.now()
               ]);
             else {
-              if (files && files.sort)
-                files.sort();
+              if (files2 && files2.sort)
+                files2.sort();
               if (typeof cb2 === "function")
-                cb2.call(this, err, files);
+                cb2.call(this, err, files2);
             }
           };
         }
@@ -28289,7 +28289,7 @@ var require_graceful_fs = __commonJS({
         enumerable: true,
         configurable: true
       });
-      function ReadStream(path6, options) {
+      function ReadStream(path7, options) {
         if (this instanceof ReadStream)
           return fs$ReadStream.apply(this, arguments), this;
         else
@@ -28297,7 +28297,7 @@ var require_graceful_fs = __commonJS({
       }
       function ReadStream$open() {
         var that = this;
-        open3(that.path, that.flags, that.mode, function(err, fd) {
+        open4(that.path, that.flags, that.mode, function(err, fd) {
           if (err) {
             if (that.autoClose)
               that.destroy();
@@ -28309,7 +28309,7 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function WriteStream(path6, options) {
+      function WriteStream(path7, options) {
         if (this instanceof WriteStream)
           return fs$WriteStream.apply(this, arguments), this;
         else
@@ -28317,7 +28317,7 @@ var require_graceful_fs = __commonJS({
       }
       function WriteStream$open() {
         var that = this;
-        open3(that.path, that.flags, that.mode, function(err, fd) {
+        open4(that.path, that.flags, that.mode, function(err, fd) {
           if (err) {
             that.destroy();
             that.emit("error", err);
@@ -28327,22 +28327,22 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function createReadStream(path6, options) {
-        return new fs2.ReadStream(path6, options);
+      function createReadStream(path7, options) {
+        return new fs2.ReadStream(path7, options);
       }
-      function createWriteStream(path6, options) {
-        return new fs2.WriteStream(path6, options);
+      function createWriteStream(path7, options) {
+        return new fs2.WriteStream(path7, options);
       }
       var fs$open = fs2.open;
-      fs2.open = open3;
-      function open3(path6, flags, mode, cb) {
+      fs2.open = open4;
+      function open4(path7, flags, mode, cb) {
         if (typeof mode === "function")
           cb = mode, mode = null;
-        return go$open(path6, flags, mode, cb);
-        function go$open(path7, flags2, mode2, cb2, startTime) {
-          return fs$open(path7, flags2, mode2, function(err, fd) {
+        return go$open(path7, flags, mode, cb);
+        function go$open(path8, flags2, mode2, cb2, startTime) {
+          return fs$open(path8, flags2, mode2, function(err, fd) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$open, [path7, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$open, [path8, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28871,7 +28871,7 @@ var require_mtime_precision = __commonJS({
 var require_lockfile = __commonJS({
   "../../node_modules/proper-lockfile/lib/lockfile.js"(exports, module) {
     "use strict";
-    var path6 = __require("path");
+    var path7 = __require("path");
     var fs = require_graceful_fs();
     var retry = require_retry2();
     var onExit = require_signal_exit();
@@ -28882,7 +28882,7 @@ var require_lockfile = __commonJS({
     }
     function resolveCanonicalPath(file2, options, callback) {
       if (!options.realpath) {
-        return callback(null, path6.resolve(file2));
+        return callback(null, path7.resolve(file2));
       }
       options.fs.realpath(file2, callback);
     }
@@ -31218,8 +31218,8 @@ function getErrorMap2() {
 
 // ../../node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data: data2, path: path6, errorMaps, issueData } = params;
-  const fullPath = [...path6, ...issueData.path || []];
+  const { data: data2, path: path7, errorMaps, issueData } = params;
+  const fullPath = [...path7, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -31334,11 +31334,11 @@ var errorUtil;
 
 // ../../node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path6, key) {
+  constructor(parent, value, path7, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path6;
+    this._path = path7;
     this._key = key;
   }
   get path() {
@@ -34901,11 +34901,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path6) {
-  if (path6.length === 0) {
+function getDotPath(path7) {
+  if (path7.length === 0) {
     return "object root";
   }
-  return path6.reduce((acc, seg, index) => {
+  return path7.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -39014,10 +39014,10 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.3.0",
+    version: "0.3.1",
     stage: "runtime-v2",
-    available: ["list-templates", "read-template", "save-template", "cross-project-reuse", "preview", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review"],
-    execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: true, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree"] },
+    available: ["list-templates", "read-template", "save-template", "cross-project-reuse", "preview", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
+    execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: true, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree"], submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
     ui: { available: true, stage: "live", hostIntegration: "requires-version-specific-verification", exampleDataOnly: false },
     recovery: { automatic: false, mode: "launch-order-replay", stoppedAgentsRestart: true },
     pendingDesign: ["multiple-concurrent-writing-workers"]
@@ -39025,8 +39025,8 @@ function getCapabilities() {
 }
 
 // src/templates.ts
-import { mkdir as mkdir3, readFile as readFile3, readdir as readdir3, rename as rename3, writeFile as writeFile3 } from "node:fs/promises";
-import path4 from "node:path";
+import { mkdir as mkdir5, readFile as readFile4, readdir as readdir4, rename as rename3, writeFile as writeFile3 } from "node:fs/promises";
+import path5 from "node:path";
 
 // ../../node_modules/acorn/dist/acorn.mjs
 var astralIdentifierCodes = [509, 0, 227, 0, 150, 4, 294, 9, 1368, 2, 2, 1, 6, 3, 41, 2, 5, 0, 166, 1, 574, 3, 9, 9, 7, 9, 32, 4, 318, 1, 31, 4, 33, 15, 71, 10, 50, 3, 123, 2, 54, 14, 32, 10, 3, 1, 11, 3, 46, 10, 8, 0, 46, 9, 7, 2, 37, 13, 2, 9, 6, 1, 45, 0, 13, 2, 49, 13, 9, 3, 2, 11, 83, 11, 7, 0, 3, 0, 158, 11, 6, 9, 7, 3, 56, 1, 2, 6, 3, 1, 3, 2, 10, 0, 11, 1, 3, 6, 4, 4, 68, 8, 2, 0, 3, 0, 2, 3, 2, 4, 2, 0, 15, 1, 83, 17, 10, 9, 5, 0, 82, 19, 13, 9, 214, 6, 3, 8, 28, 1, 83, 16, 16, 9, 82, 12, 9, 9, 7, 19, 58, 14, 5, 9, 243, 14, 166, 9, 71, 5, 2, 1, 3, 3, 2, 0, 2, 1, 13, 9, 120, 6, 3, 6, 4, 0, 29, 9, 41, 6, 2, 3, 9, 0, 10, 10, 47, 15, 199, 7, 137, 9, 54, 7, 2, 7, 17, 9, 57, 21, 2, 13, 123, 5, 4, 0, 2, 1, 2, 6, 2, 0, 9, 9, 49, 4, 2, 1, 2, 4, 9, 9, 55, 9, 7, 0, 259, 3, 10, 1, 2, 0, 49, 6, 4, 4, 14, 10, 5350, 0, 7, 14, 11465, 27, 2343, 9, 87, 9, 39, 4, 60, 6, 26, 9, 535, 9, 470, 0, 2, 54, 8, 3, 82, 0, 12, 1, 19628, 1, 4178, 9, 519, 45, 3, 22, 481, 1, 61, 4, 4, 5, 9, 7, 3, 6, 31, 3, 149, 2, 12, 2, 9, 1, 3, 0, 33, 1, 1357, 49, 513, 54, 5, 49, 9, 0, 15, 0, 23, 4, 2, 14, 1361, 6, 2, 16, 3, 6, 2, 1, 2, 4, 101, 0, 161, 6, 10, 9, 357, 0, 62, 13, 499, 13, 245, 1, 2, 9, 233, 0, 3, 0, 8, 1, 6, 0, 475, 6, 110, 6, 6, 9, 4759, 9, 787719, 239];
@@ -45088,14 +45088,14 @@ var RunStore = class {
   }
   async consumeControls(id, controlId, execute) {
     const directory = path.join(this.directory(id), "controls");
-    let files;
+    let files2;
     try {
-      files = await readdir(directory);
+      files2 = await readdir(directory);
     } catch (error62) {
       if (error62.code === "ENOENT") return;
       throw error62;
     }
-    for (const file2 of files.filter((file3) => /^[a-f0-9]{32}\.json$/.test(file3))) {
+    for (const file2 of files2.filter((file3) => /^[a-f0-9]{32}\.json$/.test(file3))) {
       const filename = path.join(directory, file2);
       let errorText;
       try {
@@ -45116,18 +45116,16 @@ var RunStore = class {
 };
 
 // src/maintenance.ts
-import { execFile } from "node:child_process";
-import { createHash, randomBytes as randomBytes2 } from "node:crypto";
-import { constants } from "node:fs";
-import { chmod, lstat as lstat2, mkdir as mkdir2, open as open2, readFile as readFile2, readdir as readdir2, readlink, realpath as realpath2, rename as rename2, rm as rm2, writeFile as writeFile2 } from "node:fs/promises";
-import path3 from "node:path";
-import { promisify } from "node:util";
+import { createHash as createHash2, randomBytes as randomBytes2 } from "node:crypto";
+import { constants as constants2 } from "node:fs";
+import { chmod, lstat as lstat3, mkdir as mkdir4, open as open3, readFile as readFile3, readdir as readdir3, readlink as readlink2, realpath as realpath3, rename as rename2, rm as rm3, writeFile as writeFile2 } from "node:fs/promises";
+import path4 from "node:path";
 
 // src/adapter.ts
 import { spawn } from "node:child_process";
 import path2 from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, mkdir as mkdir2, mkdtemp, realpath, rm as rm2 } from "node:fs/promises";
 var disabledFeatures = ["apps", "plugins", "remote_plugin", "browser_use", "computer_use", "multi_agent", "hooks", "skill_mcp_dependency_install", "memories"];
 var maxMessageBytes = 16 * 1024 * 1024;
 var maxOutputBytes = 4 * 1024 * 1024;
@@ -45397,13 +45395,6 @@ var CodexAdapter = class {
     if (request.networkAccess !== void 0 && typeof request.networkAccess !== "boolean") return Promise.reject(new Error("Command network authorization must be boolean."));
     if (request.timeoutMs !== void 0 && (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 1 || request.timeoutMs > 864e5)) return Promise.reject(new Error("Command timeout must be a positive integer of at most 24 hours."));
     if (request.retries !== void 0 && (!Number.isSafeInteger(request.retries) || request.retries < 0 || request.retries > 2)) return Promise.reject(new Error("Command retries must be an integer between zero and two."));
-    for (const argument of request.command.slice(1)) {
-      const value = argument.includes("=") && argument.startsWith("-") ? argument.slice(argument.indexOf("=") + 1) : argument;
-      if (!path2.isAbsolute(value) && !/^[.]{1,2}[\\/]/.test(value)) continue;
-      const target = path2.resolve(request.cwd, value);
-      const relative = path2.relative(request.cwd, target);
-      if (relative === ".." || relative.startsWith(`..${path2.sep}`) || path2.isAbsolute(relative)) return Promise.reject(new Error("Command argv references a path outside the declared working directory."));
-    }
     const controller = new AbortController();
     const relay = () => controller.abort();
     signal.addEventListener("abort", relay, { once: true });
@@ -45425,29 +45416,41 @@ var CodexAdapter = class {
     } catch (error62) {
       if (object3(error62).code !== "ENOENT") throw error62;
     }
-    const attempts = (request.retries ?? 0) + 1;
-    for (let attempt = 1; attempt <= attempts; attempt++) {
-      if (signal.aborted) throw abortError2();
-      const result2 = await this.commandAttempt({ ...request, cwd }, signal, onEvent, attempt, hasOwnedGit);
-      if (attempt === attempts || !request.networkAccess || !transientNetworkFailure(result2)) return result2;
-      onEvent({ type: "log", message: "Retrying command after a temporary network failure." });
-      await new Promise((resolve, reject) => {
-        const abort = () => {
-          clearTimeout(timer);
-          signal.removeEventListener("abort", abort);
-          reject(abortError2());
-        };
-        const timer = setTimeout(() => {
-          signal.removeEventListener("abort", abort);
-          resolve();
-        }, 100 * attempt);
-        signal.addEventListener("abort", abort, { once: true });
-        if (signal.aborted) abort();
-      });
+    if (signal.aborted) throw abortError2();
+    const scratch = await mkdtemp(path2.join(hasOwnedGit ? gitPath : cwd, ".workflows-command-"));
+    try {
+      const temporary = path2.join(scratch, "tmp");
+      const cache = path2.join(scratch, "cache");
+      await mkdir2(temporary);
+      await mkdir2(cache);
+      const env = { TMPDIR: temporary, TMP: temporary, TEMP: temporary, XDG_CACHE_HOME: cache, npm_config_cache: cache, NPM_CONFIG_CACHE: cache };
+      onEvent({ type: "log", message: "Command cache and temporary directories are isolated inside its workspace; argv is unchanged." });
+      const attempts = (request.retries ?? 0) + 1;
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        if (signal.aborted) throw abortError2();
+        const result2 = await this.commandAttempt({ ...request, cwd }, signal, onEvent, attempt, hasOwnedGit, env);
+        if (attempt === attempts || !request.networkAccess || !transientNetworkFailure(result2)) return result2;
+        onEvent({ type: "log", message: "Retrying command after a temporary network failure." });
+        await new Promise((resolve, reject) => {
+          const abort = () => {
+            clearTimeout(timer);
+            signal.removeEventListener("abort", abort);
+            reject(abortError2());
+          };
+          const timer = setTimeout(() => {
+            signal.removeEventListener("abort", abort);
+            resolve();
+          }, 100 * attempt);
+          signal.addEventListener("abort", abort, { once: true });
+          if (signal.aborted) abort();
+        });
+      }
+      throw new Error("Command did not produce a result.");
+    } finally {
+      await rm2(scratch, { recursive: true, force: true });
     }
-    throw new Error("Command did not produce a result.");
   }
-  async commandAttempt(request, signal, onEvent, attempt, hasOwnedGit) {
+  async commandAttempt(request, signal, onEvent, attempt, hasOwnedGit, env) {
     const processId = `${request.id}_attempt_${attempt}`;
     const timeoutMs = request.timeoutMs ?? 10 * 6e4;
     const output2 = { stdout: "", stderr: "" };
@@ -45509,7 +45512,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.3.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.3.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -45518,7 +45521,7 @@ var CodexAdapter = class {
       executionTimer = setTimeout(() => cancel(timeoutError("Codex command execution timed out.")), timeoutMs);
       const sandboxPolicy = { type: "workspaceWrite", writableRoots: [request.cwd, ...hasOwnedGit ? [path2.join(request.cwd, ".git")] : []], networkAccess: request.networkAccess === true, excludeTmpdirEnvVar: true, excludeSlashTmp: true };
       emit("Command execution started.");
-      const response = object3(await Promise.race([session.request("command/exec", { command: request.command, cwd: request.cwd, processId, sandboxPolicy, timeoutMs, streamStdoutStderr: true, outputBytesCap: maxOutputBytes }, timeoutMs + this.options.interruptTimeoutMs), session.failure.promise]));
+      const response = object3(await Promise.race([session.request("command/exec", { command: request.command, cwd: request.cwd, env, processId, sandboxPolicy, timeoutMs, streamStdoutStderr: true, outputBytesCap: maxOutputBytes }, timeoutMs + this.options.interruptTimeoutMs), session.failure.promise]));
       if (canceled) throw canceled;
       if (!Number.isSafeInteger(response.exitCode) || typeof response.stdout !== "string" || typeof response.stderr !== "string") throw new Error("Codex returned an invalid command result.");
       for (const stream of ["stdout", "stderr"]) append(stream, decoders[stream].end() + response[stream], true);
@@ -45669,7 +45672,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.3.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.3.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object3(object3(await session.request("config/read", { cwd: request.cwd })).config);
       const authorizedMcps = new Set(request.mcpServers ?? []);
@@ -45800,9 +45803,234 @@ var CodexAdapter = class {
   }
 };
 
-// src/maintenance.ts
+// src/submodules.ts
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { constants } from "node:fs";
+import { lstat as lstat2, mkdir as mkdir3, open as open2, readFile as readFile2, readdir as readdir2, readlink, realpath as realpath2 } from "node:fs/promises";
+import path3 from "node:path";
+import { promisify } from "node:util";
 var exec = promisify(execFile);
-var hash2 = (value) => createHash("sha256").update(value).digest("hex");
+var digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+async function gitCommand(cwd, args) {
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" };
+  for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"]) delete env[key];
+  try {
+    const disabledFilters = [];
+    {
+      let names = "";
+      try {
+        names = (await exec("git", ["--no-pager", "config", "--name-only", "--get-regexp", "^filter\\..*\\.(clean|smudge|process|required)$"], { cwd, env, encoding: "utf8", timeout: 12e4, maxBuffer: 1024 * 1024 })).stdout;
+      } catch (error62) {
+        if (Number(error62.code) !== 1) throw error62;
+      }
+      const drivers = [...new Set(names.split("\n").filter(Boolean).map((key) => key.slice(0, key.lastIndexOf("."))))];
+      for (const driver of drivers) {
+        if (!/^filter\.[^\r\n\0]+$/.test(driver)) throw new Error("Unsupported Git filter configuration");
+        for (const field of ["clean", "smudge", "process"]) disabledFilters.push("-c", `${driver}.${field}=`);
+        disabledFilters.push("-c", `${driver}.required=false`);
+      }
+    }
+    const { stdout } = await exec("git", ["--no-pager", "-c", "core.fsmonitor=false", "-c", "submodule.recurse=false", "-c", "fetch.recurseSubmodules=false", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always", ...disabledFilters, ...args], { cwd, env, encoding: "utf8", timeout: 12e4, maxBuffer: 32 * 1024 * 1024 });
+    return stdout;
+  } catch (error62) {
+    const failure2 = new Error(`Git ${args[0] ?? "operation"} failed (exit ${String(error62.code ?? "unknown")})`);
+    Object.assign(failure2, { code: error62.code });
+    throw failure2;
+  }
+}
+function relative(root, name) {
+  if (!name || path3.isAbsolute(name) || name.split(/[\\/]/).some((part) => !part || part === ".." || part === ".git")) throw new Error("Unsafe Git manifest path");
+  const file2 = path3.resolve(root, name);
+  if (!file2.startsWith(root + path3.sep)) throw new Error("Git manifest path escapes repository");
+  return file2;
+}
+async function parents(root, name) {
+  let current2 = root;
+  for (const segment of name.split(/[\\/]/).slice(0, -1)) {
+    current2 = path3.join(current2, segment);
+    const stat2 = await lstat2(current2);
+    if (!stat2.isDirectory() || stat2.isSymbolicLink() || !(await realpath2(current2)).startsWith(root + path3.sep)) throw new Error("Git manifest has an unsafe parent directory");
+  }
+}
+async function readGitIndex(project) {
+  return (await gitCommand(project, ["ls-files", "--stage", "-z"])).split("\0").filter(Boolean).map((record4) => {
+    const match = /^(\d{6}) ([a-f0-9]{40,64}) ([0-3])\t([\s\S]+)$/.exec(record4);
+    if (!match) throw new Error("Unsupported Git index record");
+    relative(path3.resolve(project), match[4]);
+    return { mode: match[1], commit: match[2], stage: Number(match[3]), path: match[4] };
+  });
+}
+async function listGitlinks(project) {
+  return (await readGitIndex(project)).filter((entry) => entry.mode === "160000");
+}
+async function initialized(root, name) {
+  const child = relative(root, name);
+  try {
+    await parents(root, name);
+  } catch (error62) {
+    if (error62.code === "ENOENT") return false;
+    throw error62;
+  }
+  let stat2;
+  try {
+    stat2 = await lstat2(child);
+  } catch (error62) {
+    if (error62.code === "ENOENT") return false;
+    throw error62;
+  }
+  if (!stat2.isDirectory() || stat2.isSymbolicLink()) throw new Error(`Git submodule path is not a safe directory: ${name}`);
+  try {
+    await lstat2(path3.join(child, ".git"));
+  } catch (error62) {
+    if (error62.code !== "ENOENT") throw error62;
+    if ((await readdir2(child)).length) throw new Error(`Uninitialized Git submodule has unmanaged files: ${name}`);
+    return false;
+  }
+  if (await realpath2((await gitCommand(child, ["rev-parse", "--show-toplevel"])).trim()) !== await realpath2(child)) throw new Error(`Git submodule metadata does not belong to its directory: ${name}`);
+  return true;
+}
+async function files(root, names, bounds) {
+  const result2 = [];
+  for (const name of [...new Set(names)].sort()) {
+    if (++bounds.count > 1e5) throw new Error("Git manifest exceeds 100000 files");
+    const file2 = relative(root, name);
+    let stat2;
+    try {
+      await parents(root, name);
+      stat2 = await lstat2(file2);
+    } catch (error62) {
+      if (error62.code === "ENOENT") continue;
+      throw error62;
+    }
+    if (stat2.isSymbolicLink()) {
+      const target = await readlink(file2), resolved = path3.resolve(path3.dirname(file2), target);
+      if (path3.isAbsolute(target) || !resolved.startsWith(root + path3.sep)) throw new Error("External Git manifest symlink is unsupported");
+      const canonical2 = await realpath2(resolved).catch((error62) => {
+        if (error62.code === "ENOENT") return resolved;
+        throw error62;
+      });
+      if (!canonical2.startsWith(root + path3.sep)) throw new Error("External Git manifest symlink chain is unsupported");
+      await parents(root, name);
+      result2.push({ path: name, kind: "link", mode: stat2.mode & 511, size: stat2.size, hash: createHash("sha256").update(target).digest("hex") });
+    } else if (stat2.isFile()) {
+      bounds.bytes += stat2.size;
+      if (stat2.size > 512 * 1024 * 1024 || bounds.bytes > 2 * 1024 * 1024 * 1024) throw new Error("Git manifest exceeds the bounded 2 GiB limit");
+      const hash4 = createHash("sha256"), fd = await open2(file2, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      try {
+        await parents(root, name);
+        const opened = await fd.stat();
+        if (opened.ino !== stat2.ino || opened.dev !== stat2.dev || !opened.isFile() || !(await realpath2(file2)).startsWith(root + path3.sep)) throw new Error("Git manifest file changed while opening it");
+        for await (const chunk of fd.createReadStream({ autoClose: false })) hash4.update(chunk);
+        await parents(root, name);
+        const after = await fd.stat(), now2 = await lstat2(file2);
+        if (after.size !== stat2.size || after.mtimeMs !== stat2.mtimeMs || after.ctimeMs !== stat2.ctimeMs || now2.dev !== opened.dev || now2.ino !== opened.ino || now2.isSymbolicLink()) throw new Error("Git manifest file changed during hashing");
+      } finally {
+        await fd.close();
+      }
+      result2.push({ path: name, kind: "file", mode: stat2.mode & 511, size: stat2.size, hash: hash4.digest("hex") });
+    } else throw new Error(`Unsupported Git manifest entry: ${name}`);
+  }
+  return result2;
+}
+async function inspectGitManifest(project, options = {}) {
+  const boundary = await realpath2(project), bounds = { count: 0, bytes: 0 };
+  async function inspect(root, depth) {
+    if (depth > 16) throw new Error("Git submodule nesting exceeds 16 levels");
+    if (await realpath2((await gitCommand(root, ["rev-parse", "--show-toplevel"])).trim()) !== root) throw new Error("Git manifest requires the repository root");
+    if (options.enforceOwnedMetadata) {
+      const entry = await lstat2(path3.join(root, ".git"));
+      const absolute = await realpath2((await gitCommand(root, ["rev-parse", "--absolute-git-dir"])).trim());
+      const common = await realpath2(path3.resolve(root, (await gitCommand(root, ["rev-parse", "--git-common-dir"])).trim()));
+      if (entry.isSymbolicLink() || (depth === 0 ? !entry.isDirectory() : !entry.isDirectory() && !entry.isFile()) || !absolute.startsWith(boundary + path3.sep) || !common.startsWith(boundary + path3.sep)) throw new Error("Git submodule must have independent owned metadata");
+      const alternates = path3.join(common, "objects", "info", "alternates");
+      try {
+        await parents(common, "objects/info/alternates");
+        const stat2 = await lstat2(alternates);
+        if (!stat2.isFile() || stat2.isSymbolicLink() || stat2.size > 65536 || (await readFile2(alternates, "utf8")).trim()) throw new Error("Git submodule cannot share alternate object storage");
+      } catch (error62) {
+        if (error62.code !== "ENOENT") throw error62;
+      }
+    }
+    const index = await readGitIndex(root);
+    if (index.some((entry) => entry.stage !== 0)) throw new Error("Git manifest has unresolved index entries");
+    const links = index.filter((entry) => entry.mode === "160000"), linkPaths = new Set(links.map((entry) => entry.path));
+    const presence = /* @__PURE__ */ new Map();
+    for (const entry of links) presence.set(entry.path, await initialized(root, entry.path));
+    const status = await gitCommand(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"]);
+    if (options.requireClean && status) throw new Error("Git repository or initialized submodule is dirty");
+    const names = (await gitCommand(root, ["ls-files", "-co", "--exclude-standard", "-z"])).split("\0").filter((name) => name && !linkPaths.has(name));
+    const ignoredNames = options.includeIgnored ? (await gitCommand(root, ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"])).split("\0").filter((name) => name && !linkPaths.has(name)) : [];
+    const submodules = [];
+    for (const entry of links) {
+      const present = presence.get(entry.path);
+      const manifest = present ? await inspect(await realpath2(relative(root, entry.path)), depth + 1) : void 0;
+      if (options.requireClean && manifest && manifest.head !== entry.commit) throw new Error(`Git submodule HEAD differs from its gitlink: ${entry.path}`);
+      submodules.push({ path: entry.path, commit: entry.commit, initialized: present, ...manifest ? { manifest } : {} });
+    }
+    return {
+      head: (await gitCommand(root, ["rev-parse", "--verify", "HEAD"])).trim(),
+      index,
+      status,
+      configFingerprint: createHash("sha256").update(await gitCommand(root, ["config", "--local", "--null", "--list"])).digest("hex"),
+      files: await files(root, names, bounds),
+      ignored: await files(root, ignoredNames, bounds),
+      submodules
+    };
+  }
+  return inspect(boundary, 0);
+}
+async function gitAwareContextDigest(project) {
+  return digest(await inspectGitManifest(project));
+}
+function flattenGitArtifacts(manifest) {
+  const result2 = [];
+  const walk = (item, prefix) => {
+    result2.push(...item.ignored.map((file2) => ({ ...file2, path: prefix + file2.path })));
+    for (const child of item.submodules) if (child.manifest) walk(child.manifest, prefix + child.path + "/");
+  };
+  walk(manifest, "");
+  return result2.sort((a, b) => a.path.localeCompare(b.path));
+}
+async function cloneInitializedSubmodules(source, destination, hooks) {
+  const manifest = await inspectGitManifest(source, { requireClean: true });
+  async function clone2(parentSource, parentDestination, state) {
+    for (const child of state.submodules) {
+      if (!child.manifest) continue;
+      const from = relative(parentSource, child.path), to = relative(parentDestination, child.path);
+      await parents(parentDestination, child.path);
+      await mkdir3(to, { recursive: true });
+      if ((await readdir2(to)).length) throw new Error(`Git submodule destination is not empty: ${child.path}`);
+      await gitCommand(parentDestination, ["-c", `core.hooksPath=${hooks}`, "clone", `--template=${hooks}`, "--no-local", "--no-hardlinks", "--no-checkout", "--", from, to]);
+      await gitCommand(to, ["config", "core.hooksPath", hooks]);
+      for (const remote of (await gitCommand(to, ["remote"])).split("\n").filter(Boolean)) await gitCommand(to, ["remote", "remove", remote]);
+      for (const remote of (await gitCommand(from, ["remote"])).split("\n").filter(Boolean)) {
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(remote)) throw new Error("Unsupported submodule remote name");
+        for (const key of ["url", "pushurl", "fetch"]) {
+          let values = "";
+          try {
+            values = await gitCommand(from, ["config", "--get-all", `remote.${remote}.${key}`]);
+          } catch (error62) {
+            if (Number(error62.code) !== 1) throw error62;
+          }
+          for (const value of values.split("\n").filter(Boolean)) await gitCommand(to, ["config", "--add", `remote.${remote}.${key}`, value]);
+        }
+      }
+      const refs = (await gitCommand(from, ["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/remotes"])).split("\n").filter(Boolean);
+      for (const ref2 of refs) {
+        const [name, value] = ref2.split(" ");
+        if (name && value) await gitCommand(to, ["update-ref", name, value]);
+      }
+      await gitCommand(to, ["checkout", "--detach", child.commit]);
+      await clone2(from, to, child.manifest);
+    }
+  }
+  await clone2(await realpath2(source), await realpath2(destination), manifest);
+  await inspectGitManifest(destination, { requireClean: true, enforceOwnedMetadata: true });
+}
+
+// src/maintenance.ts
+var hash2 = (value) => createHash2("sha256").update(value).digest("hex");
 var fingerprint = (value) => hash2(JSON.stringify(value));
 var maxFiles = 1e5;
 var maxArtifactBytes = 2 * 1024 * 1024 * 1024;
@@ -45848,14 +46076,7 @@ function validateMaintenance(plan, networkGrant) {
   return result2;
 }
 async function git(cwd, args) {
-  try {
-    const { stdout } = await exec("git", ["--no-pager", ...args], { cwd, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 12e4, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
-    return stdout;
-  } catch (error62) {
-    const failure2 = new Error(`Git ${args[0] ?? "operation"} failed (exit ${String(error62.code ?? "unknown")})`);
-    Object.assign(failure2, { code: error62.code });
-    throw failure2;
-  }
+  return gitCommand(cwd, args);
 }
 async function optionalGit(cwd, args) {
   try {
@@ -45866,15 +46087,15 @@ async function optionalGit(cwd, args) {
   }
 }
 async function clean(cwd) {
-  return !await git(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+  return !await git(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"]);
 }
 async function head(cwd) {
   return (await git(cwd, ["rev-parse", "--verify", "HEAD"])).trim();
 }
 async function emptyHooks(directory) {
-  await mkdir2(directory, { recursive: true, mode: 448 });
-  const entry = await lstat2(directory);
-  if (!entry.isDirectory() || entry.isSymbolicLink() || (await readdir2(directory)).length) throw new Error("Maintenance hooks directory must be an empty owned directory");
+  await mkdir4(directory, { recursive: true, mode: 448 });
+  const entry = await lstat3(directory);
+  if (!entry.isDirectory() || entry.isSymbolicLink() || (await readdir3(directory)).length) throw new Error("Maintenance hooks directory must be an empty owned directory");
   return directory;
 }
 async function branch(cwd) {
@@ -45884,29 +46105,34 @@ async function branch(cwd) {
 }
 async function ownGit(workspace) {
   if (workspace.kind !== "git-worktree" || !workspace.git) throw new Error("Maintenance requires an independent Git checkout");
-  const root = await realpath2(workspace.root);
-  const metadata = await lstat2(path3.join(root, ".git"));
+  const root = await realpath3(workspace.root);
+  const directory = await lstat3(workspace.root);
+  if (!directory.isDirectory() || directory.isSymbolicLink() || root !== path4.resolve(workspace.root)) throw new Error("Maintenance checkout path must remain its owned directory");
+  const metadata = await lstat3(path4.join(root, ".git"));
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("Maintenance Git metadata must be inside its independent checkout");
-  const common = await realpath2(path3.resolve(root, (await git(root, ["rev-parse", "--git-common-dir"])).trim()));
-  if (!common.startsWith(root + path3.sep)) throw new Error("Maintenance checkout cannot share source Git metadata");
-  if (await realpath2((await git(root, ["rev-parse", "--show-toplevel"])).trim()) !== root) throw new Error("Maintenance checkout has a redirected working tree");
+  const common = await realpath3(path4.resolve(root, (await git(root, ["rev-parse", "--git-common-dir"])).trim()));
+  if (!common.startsWith(root + path4.sep)) throw new Error("Maintenance checkout cannot share source Git metadata");
+  if (await realpath3((await git(root, ["rev-parse", "--show-toplevel"])).trim()) !== root) throw new Error("Maintenance checkout has a redirected working tree");
 }
 async function validateGitWorkspace(workspace) {
   await ownGit(workspace);
+  if (await realpath3(workspace.original) !== path4.resolve(workspace.original)) throw new Error("Original repository path changed; create a new preview");
   if (!await clean(workspace.original)) throw new Error("Original repository is dirty; create a new preview after resolving it");
   if (await head(workspace.original) !== workspace.git.base || await branch(workspace.original) !== workspace.git.branch) throw new Error("Original repository HEAD or branch changed; create a new preview");
+  await validateSourceSubmodules(workspace);
 }
 async function createGitWorkspace(projectPath, runDirectory) {
-  const original = await realpath2(projectPath);
-  if (await realpath2((await git(original, ["rev-parse", "--show-toplevel"])).trim()) !== original) throw new Error("Maintenance project must be the Git repository root");
+  const original = await realpath3(projectPath);
+  if (await realpath3((await git(original, ["rev-parse", "--show-toplevel"])).trim()) !== original) throw new Error("Maintenance project must be the Git repository root");
   if (!await clean(original)) throw new Error("Original repository must be clean before maintenance");
+  const sourceManifest = await inspectGitManifest(original, { requireClean: true });
   const base = await head(original), sourceBranch = await branch(original);
   const upstream = await optionalGit(original, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
-  await mkdir2(runDirectory, { recursive: true, mode: 448 });
-  const directory = await realpath2(runDirectory);
-  const root = path3.join(directory, "workspace");
-  const hooks = await emptyHooks(path3.join(directory, "disabled-hooks"));
-  await rm2(root, { recursive: true, force: true });
+  await mkdir4(runDirectory, { recursive: true, mode: 448 });
+  const directory = await realpath3(runDirectory);
+  const root = path4.join(directory, "workspace");
+  const hooks = await emptyHooks(path4.join(directory, "disabled-hooks"));
+  await rm3(root, { recursive: true, force: true });
   try {
     await git(directory, ["-c", `core.hooksPath=${hooks}`, "clone", `--template=${hooks}`, "--no-local", "--no-hardlinks", "--no-checkout", "--", original, root]);
     await git(root, ["config", "core.hooksPath", hooks]);
@@ -45920,7 +46146,7 @@ async function createGitWorkspace(projectPath, runDirectory) {
         for (const value of values?.split("\n") ?? []) await git(root, ["config", "--add", `remote.${remote}.${key}`, value]);
       }
     }
-    const remoteRefs = (await git(original, ["for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes"])).split("\n").filter(Boolean);
+    const remoteRefs = (await git(original, ["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/remotes"])).split("\n").filter(Boolean);
     for (const ref2 of remoteRefs) {
       const [name, value] = ref2.split(" ");
       if (name && value) await git(root, ["update-ref", name, value]);
@@ -45930,28 +46156,30 @@ async function createGitWorkspace(projectPath, runDirectory) {
       const value = await optionalGit(original, ["config", "--get", `branch.${sourceBranch}.${key}`]);
       if (value) await git(root, ["config", `branch.${sourceBranch}.${key}`, value]);
     }
+    await cloneInitializedSubmodules(original, root, hooks);
     const workspace = { root, original, baseline: {}, kind: "git-worktree", git: { base, branch: sourceBranch, ...upstream ? { upstream } : {} } };
+    await savePrivateJson(path4.join(directory, "submodule-baseline.json"), submoduleStates(sourceManifest));
     await validateGitWorkspace(workspace);
     return workspace;
   } catch (error62) {
-    await rm2(root, { recursive: true, force: true });
+    await rm3(root, { recursive: true, force: true });
     throw error62;
   }
 }
 function relativeFile(root, name) {
-  if (!name || path3.isAbsolute(name) || name.split(/[\\/]/).some((part) => part === ".." || part === ".git")) throw new Error("Unsafe maintenance artifact path");
-  const result2 = path3.resolve(root, name);
-  if (!result2.startsWith(root + path3.sep)) throw new Error("Maintenance artifact escapes checkout");
+  if (!name || path4.isAbsolute(name) || name.split(/[\\/]/).some((part) => part === ".." || part === ".git")) throw new Error("Unsafe maintenance artifact path");
+  const result2 = path4.resolve(root, name);
+  if (!result2.startsWith(root + path4.sep)) throw new Error("Maintenance artifact escapes checkout");
   return result2;
 }
 async function safeArtifactParents(root, name) {
   let parent = root;
   for (const segment of name.split(/[\\/]/).slice(0, -1)) {
-    parent = path3.join(parent, segment);
-    const entry = await lstat2(parent);
+    parent = path4.join(parent, segment);
+    const entry = await lstat3(parent);
     if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error("Maintenance artifact has an unsafe parent directory");
-    const canonical2 = await realpath2(parent);
-    if (!canonical2.startsWith(root + path3.sep)) throw new Error("Maintenance artifact parent escapes checkout");
+    const canonical2 = await realpath3(parent);
+    if (!canonical2.startsWith(root + path4.sep)) throw new Error("Maintenance artifact parent escapes checkout");
   }
 }
 async function records(workspace, args) {
@@ -45964,50 +46192,52 @@ async function records(workspace, args) {
     let stat2;
     try {
       await safeArtifactParents(workspace.root, name);
-      stat2 = await lstat2(file2);
+      stat2 = await lstat3(file2);
     } catch (error62) {
       if (error62.code === "ENOENT") continue;
       throw error62;
     }
     if (stat2.isSymbolicLink()) {
-      const target = await readlink(file2);
-      const resolved = path3.resolve(path3.dirname(file2), target);
-      if (path3.isAbsolute(target) || !resolved.startsWith(workspace.root + path3.sep)) throw new Error("External maintenance artifact symlink is unsupported");
-      const canonical2 = await realpath2(resolved).catch((error62) => {
+      const target = await readlink2(file2);
+      const resolved = path4.resolve(path4.dirname(file2), target);
+      if (path4.isAbsolute(target) || !resolved.startsWith(workspace.root + path4.sep)) throw new Error("External maintenance artifact symlink is unsupported");
+      const canonical2 = await realpath3(resolved).catch((error62) => {
         if (error62.code === "ENOENT") return resolved;
         throw error62;
       });
-      if (!canonical2.startsWith(workspace.root + path3.sep)) throw new Error("Maintenance artifact symlink chain escapes checkout");
+      if (!canonical2.startsWith(workspace.root + path4.sep)) throw new Error("Maintenance artifact symlink chain escapes checkout");
       await safeArtifactParents(workspace.root, name);
       result2.push({ path: name, kind: "link", mode: stat2.mode & 511, size: stat2.size, hash: hash2(target) });
     } else if (stat2.isFile()) {
       bytes += stat2.size;
       if (stat2.size > 512 * 1024 * 1024 || bytes > maxArtifactBytes) throw new Error("Maintenance artifacts exceed the bounded 2 GiB limit");
-      const digest2 = createHash("sha256");
-      const descriptor = await open2(file2, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      const digest3 = createHash2("sha256");
+      const descriptor = await open3(file2, constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0));
       try {
         await safeArtifactParents(workspace.root, name);
         const opened = await descriptor.stat();
-        const canonical2 = await realpath2(file2);
-        const current2 = await lstat2(canonical2);
-        if (!canonical2.startsWith(workspace.root + path3.sep) || opened.dev !== stat2.dev || opened.ino !== stat2.ino || current2.dev !== opened.dev || current2.ino !== opened.ino || !opened.isFile()) throw new Error("Maintenance artifact changed while opening it");
-        for await (const chunk of descriptor.createReadStream({ autoClose: false })) digest2.update(chunk);
+        const canonical2 = await realpath3(file2);
+        const current2 = await lstat3(canonical2);
+        if (!canonical2.startsWith(workspace.root + path4.sep) || opened.dev !== stat2.dev || opened.ino !== stat2.ino || current2.dev !== opened.dev || current2.ino !== opened.ino || !opened.isFile()) throw new Error("Maintenance artifact changed while opening it");
+        for await (const chunk of descriptor.createReadStream({ autoClose: false })) digest3.update(chunk);
         await safeArtifactParents(workspace.root, name);
-        const after = await descriptor.stat(), pathAfter = await lstat2(file2);
+        const after = await descriptor.stat(), pathAfter = await lstat3(file2);
         if (after.size !== stat2.size || after.mtimeMs !== stat2.mtimeMs || after.ctimeMs !== stat2.ctimeMs || pathAfter.dev !== opened.dev || pathAfter.ino !== opened.ino || pathAfter.isSymbolicLink()) throw new Error("Maintenance artifact changed during hashing");
       } finally {
         await descriptor.close();
       }
-      result2.push({ path: name, kind: "file", mode: stat2.mode & 511, size: stat2.size, hash: digest2.digest("hex") });
+      result2.push({ path: name, kind: "file", mode: stat2.mode & 511, size: stat2.size, hash: digest3.digest("hex") });
     } else throw new Error("Unsupported maintenance artifact entry");
   }
   return result2;
 }
 async function ignoredArtifacts(workspace) {
+  if ((await listGitlinks(workspace.root)).length) return flattenGitArtifacts(await inspectGitManifest(workspace.root, { includeIgnored: true, enforceOwnedMetadata: true }));
   return records(workspace, ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"]);
 }
 async function maintenanceFingerprint(workspace) {
   await ownGit(workspace);
+  if ((await listGitlinks(workspace.root)).length) return fingerprint(await inspectGitManifest(workspace.root, { includeIgnored: true, enforceOwnedMetadata: true }));
   const source = await records(workspace, ["ls-files", "-co", "--exclude-standard", "-z"]);
   const artifacts = await ignoredArtifacts(workspace);
   const config2 = await git(workspace.root, ["config", "--local", "--null", "--list"]);
@@ -46020,16 +46250,129 @@ async function reviewMaintenance(workspace, plan) {
   const text = await git(workspace.root, ["diff", "--binary", "--no-ext-diff", "--no-textconv", "--no-renames", workspace.git.base, target, "--"]);
   if (Buffer.byteLength(text) > 4 * 1024 * 1024) throw new Error("Maintenance review diff exceeds 4 MiB");
   const names = (await git(workspace.root, ["diff", "--name-status", "--no-renames", "-z", workspace.git.base, target, "--"])).split("\0").filter(Boolean);
-  const files = [];
+  const files2 = [];
   for (let index = 0; index < names.length; index += 2) {
     const status = names[index], name = names[index + 1];
-    if (name) files.push({ path: name, status: status === "A" ? "added" : status === "D" ? "deleted" : "modified" });
+    if (name) files2.push({ path: name, status: status === "A" ? "added" : status === "D" ? "deleted" : "modified" });
   }
   const artifacts = await ignoredArtifacts(workspace);
   const artifactFingerprint = fingerprint(artifacts);
   const state = await maintenanceFingerprint(workspace);
-  const diff = { text, files, fingerprint: fingerprint({ base: workspace.git.base, target, state }) };
-  return { base: workspace.git.base, target, branch: workspace.git.branch, ...workspace.git.upstream ? { upstream: workspace.git.upstream } : {}, diff, artifacts, artifactFingerprint, preparedClean, fingerprint: fingerprint({ state, plan }) };
+  const diff = { text, files: files2, fingerprint: fingerprint({ base: workspace.git.base, target, state }) };
+  const submodules = submoduleStates(await inspectGitManifest(workspace.root, { enforceOwnedMetadata: true }));
+  return { base: workspace.git.base, target, branch: workspace.git.branch, ...workspace.git.upstream ? { upstream: workspace.git.upstream } : {}, diff, artifacts, artifactFingerprint, preparedClean, fingerprint: fingerprint({ state, plan }), ...submodules.length ? { submodules } : {} };
+}
+function submoduleStates(manifest, prefix = "") {
+  return manifest.submodules.flatMap((child) => [{ path: prefix + child.path, commit: child.commit, initialized: child.initialized, ...child.manifest ? { head: child.manifest.head } : {} }, ...child.manifest ? submoduleStates(child.manifest, prefix + child.path + "/") : []]);
+}
+async function savePrivateJson(filename, value) {
+  const temporary = `${filename}.${randomBytes2(6).toString("hex")}.tmp`;
+  await writeFile2(temporary, JSON.stringify(value), { mode: 384, flag: "wx" });
+  await rename2(temporary, filename);
+  await chmod(filename, 384);
+}
+async function sourceSubmoduleBaseline(workspace) {
+  try {
+    return JSON.parse(await readFile3(path4.join(path4.dirname(workspace.root), "submodule-baseline.json"), "utf8"));
+  } catch (error62) {
+    if (error62.code !== "ENOENT") throw error62;
+    if ((await listGitlinks(workspace.original)).length) throw new Error("This run lacks its Git submodule baseline; create a new preview");
+    return [];
+  }
+}
+async function validateSourceSubmodules(workspace) {
+  const expected = await sourceSubmoduleBaseline(workspace);
+  const actual = submoduleStates(await inspectGitManifest(workspace.original, { requireClean: true }));
+  if (fingerprint(expected) !== fingerprint(actual)) throw new Error("Original Git submodule state changed; create a new preview");
+}
+function manifestRepositories(manifest, prefix = "") {
+  const result2 = /* @__PURE__ */ new Map();
+  for (const child of manifest.submodules) if (child.manifest) {
+    const name = prefix + child.path;
+    result2.set(name, child.manifest);
+    for (const [key, value] of manifestRepositories(child.manifest, name + "/")) result2.set(key, value);
+  }
+  return result2;
+}
+async function childRepository(root, name) {
+  const child = relativeFile(root, name);
+  await safeArtifactParents(root, name);
+  const stat2 = await lstat3(child);
+  if (!stat2.isDirectory() || stat2.isSymbolicLink() || !(await realpath3(child)).startsWith(root + path4.sep)) throw new Error("Submodule application path is unsafe");
+  if (await realpath3((await git(child, ["rev-parse", "--show-toplevel"])).trim()) !== child) throw new Error("Submodule application metadata changed");
+  return child;
+}
+async function ownSourceSignature(directory, state) {
+  const manifest = state ?? await inspectGitManifest(directory);
+  const status = await git(directory, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=all"]);
+  if (status) throw new Error("Initialized submodule has local changes");
+  return fingerprint({ head: manifest.head, index: manifest.index, files: manifest.files, config: manifest.configFingerprint, branch: await optionalGit(directory, ["symbolic-ref", "--quiet", "HEAD"]) ?? null });
+}
+async function prepareSubmoduleApply(workspace, review, originalHead) {
+  const filename = path4.join(path4.dirname(workspace.root), "submodule-apply-journal.json");
+  const prepared = await inspectGitManifest(workspace.root, { requireClean: true, enforceOwnedMetadata: true });
+  const targets = manifestRepositories(prepared);
+  let journal;
+  try {
+    journal = JSON.parse(await readFile3(filename, "utf8"));
+  } catch (error62) {
+    if (error62.code !== "ENOENT") throw error62;
+  }
+  if (journal) {
+    if (journal.schemaVersion !== 1 || journal.reviewFingerprint !== review.fingerprint || journal.base !== review.base || journal.target !== review.target) throw new Error("Submodule application journal does not match this review");
+    for (const entry of journal.entries) if (targets.get(entry.path)?.head !== entry.targetHead) throw new Error("Prepared submodule target changed since application");
+    return { journal, filename };
+  }
+  if (originalHead === review.base) await validateSourceSubmodules(workspace);
+  const original = await inspectGitManifest(workspace.original, { requireClean: true });
+  const sources = manifestRepositories(original), entries = [];
+  for (const [name, state] of sources) {
+    const target = targets.get(name);
+    if (!target) throw new Error(`Initialized submodule is missing from the prepared target: ${name}`);
+    const source = await childRepository(workspace.original, name);
+    entries.push({ path: name, beforeHead: state.head, beforeSignature: await ownSourceSignature(source, state), configFingerprint: state.configFingerprint, targetHead: target.head });
+  }
+  journal = { schemaVersion: 1, reviewFingerprint: review.fingerprint, base: review.base, target: review.target, entries, initializedPaths: [...sources.keys()].sort() };
+  await savePrivateJson(filename, journal);
+  return { journal, filename };
+}
+async function validateSubmoduleApply(workspace, journal) {
+  const original = await inspectGitManifest(workspace.original);
+  const sources = manifestRepositories(original);
+  if (fingerprint([...sources.keys()].sort()) !== fingerprint(journal.initializedPaths)) throw new Error("Original submodule initialization changed during application");
+  for (const entry of journal.entries) {
+    const state = sources.get(entry.path);
+    if (state.configFingerprint !== entry.configFingerprint) throw new Error(`Original submodule configuration changed: ${entry.path}`);
+    const source = await childRepository(workspace.original, entry.path);
+    const signature = await ownSourceSignature(source, state);
+    if (entry.afterSignature) {
+      if (signature !== entry.afterSignature) throw new Error(`Applied submodule changed after application: ${entry.path}`);
+    } else if (state.head === entry.beforeHead) {
+      if (signature !== entry.beforeSignature) throw new Error(`Original submodule changed before application: ${entry.path}`);
+    } else if (state.head !== entry.targetHead) throw new Error(`Original submodule HEAD changed: ${entry.path}`);
+  }
+}
+async function fetchSubmoduleTargets(workspace, journal, hooks) {
+  await validateSubmoduleApply(workspace, journal);
+  for (const entry of journal.entries) {
+    const source = await childRepository(workspace.original, entry.path), prepared = await childRepository(workspace.root, entry.path);
+    await git(source, ["-c", `core.hooksPath=${hooks}`, "fetch", "--no-tags", prepared, entry.targetHead]);
+    await git(source, ["cat-file", "-e", `${entry.targetHead}^{commit}`]);
+  }
+  await validateSubmoduleApply(workspace, journal);
+}
+async function syncSubmoduleTargets(workspace, journal, filename, hooks) {
+  await validateSubmoduleApply(workspace, journal);
+  for (const entry of journal.entries) {
+    const source = await childRepository(workspace.original, entry.path);
+    if (await head(source) !== entry.targetHead) {
+      await validateSubmoduleApply(workspace, journal);
+      await git(source, ["-c", `core.hooksPath=${hooks}`, "checkout", "--no-overwrite-ignore", "--detach", entry.targetHead]);
+    }
+    entry.afterSignature = await ownSourceSignature(source);
+    await savePrivateJson(filename, journal);
+  }
+  await inspectGitManifest(workspace.original, { requireClean: true });
 }
 async function userConfig(session) {
   const response = object4(await session.request("config/read", { includeLayers: true }));
@@ -46041,9 +46384,9 @@ async function userConfig(session) {
 var defaultSession = (cwd) => new ProtocolSession(process.env.WORKFLOWS_CODEX_COMMAND ?? "codex", ["app-server"], cwd, 15e3, 5e3, () => {
 });
 async function saveActivationJournal(filename, journal) {
-  const directory = path3.dirname(filename);
-  await mkdir2(directory, { recursive: true, mode: 448 });
-  if ((await lstat2(directory)).isSymbolicLink()) throw new Error("Activation journal directory cannot be a symbolic link");
+  const directory = path4.dirname(filename);
+  await mkdir4(directory, { recursive: true, mode: 448 });
+  if ((await lstat3(directory)).isSymbolicLink()) throw new Error("Activation journal directory cannot be a symbolic link");
   await chmod(directory, 448);
   const temporary = `${filename}.${randomBytes2(8).toString("hex")}.tmp`;
   try {
@@ -46051,13 +46394,13 @@ async function saveActivationJournal(filename, journal) {
     await rename2(temporary, filename);
     await chmod(filename, 384);
   } finally {
-    await rm2(temporary, { force: true });
+    await rm3(temporary, { force: true });
   }
 }
 async function retainConfigBackup(filename, bytes) {
   try {
-    const existing = await lstat2(filename);
-    if (!existing.isFile() || existing.isSymbolicLink() || !bytes.equals(await readFile2(filename))) throw new Error("An orphaned activation backup does not match the current config; inspect it before retrying");
+    const existing = await lstat3(filename);
+    if (!existing.isFile() || existing.isSymbolicLink() || !bytes.equals(await readFile3(filename))) throw new Error("An orphaned activation backup does not match the current config; inspect it before retrying");
     await chmod(filename, 384);
     return;
   } catch (error62) {
@@ -46069,7 +46412,7 @@ async function retainConfigBackup(filename, bytes) {
     await rename2(temporary, filename);
     await chmod(filename, 384);
   } finally {
-    await rm2(temporary, { force: true });
+    await rm3(temporary, { force: true });
   }
 }
 function preservedServer(server2) {
@@ -46086,7 +46429,7 @@ async function activateMcpServer(workspace, activation, sessionFactory = default
   const args = activation.args.map((value) => value.replaceAll("${WORKSPACE}", workspace.root));
   const result2 = { status: "pending_restart", serverName: activation.serverName, command, args };
   const session = sessionFactory(workspace.root);
-  const journalPath = path3.join(path3.dirname(workspace.root), "activation-journal.json");
+  const journalPath = path4.join(path4.dirname(workspace.root), "activation-journal.json");
   let journal;
   let didWrite = false;
   try {
@@ -46097,14 +46440,14 @@ async function activateMcpServer(workspace, activation, sessionFactory = default
     const server2 = object4(object4(object4(layer.config).mcp_servers)[activation.serverName]);
     if (typeof server2.command !== "string" || server2.url !== void 0) throw new Error("Activation requires an existing user-configured stdio MCP server");
     try {
-      const stat2 = await lstat2(journalPath);
+      const stat2 = await lstat3(journalPath);
       if (!stat2.isFile() || stat2.isSymbolicLink()) throw new Error("Invalid activation journal file");
-      journal = JSON.parse(await readFile2(journalPath, "utf8"));
+      journal = JSON.parse(await readFile3(journalPath, "utf8"));
       if (journal.schemaVersion !== 1 || journal.serverName !== activation.serverName || journal.configPath !== layer.name.file || fingerprint(journal.desired) !== fingerprint({ command, args }) || typeof journal.before.command !== "string") throw new Error("Activation journal does not match this reviewed plan");
     } catch (error62) {
       if (error62.code !== "ENOENT") throw error62;
-      const backup = path3.join(path3.dirname(workspace.root), "activation-config.backup.toml");
-      await retainConfigBackup(backup, await readFile2(layer.name.file));
+      const backup = path4.join(path4.dirname(workspace.root), "activation-config.backup.toml");
+      await retainConfigBackup(backup, await readFile3(layer.name.file));
       journal = { schemaVersion: 1, serverName: activation.serverName, configPath: layer.name.file, backupPath: backup, before: server2, desired: { command, args }, beforeVersion: layer.version, state: "prepared" };
       await saveActivationJournal(journalPath, journal);
     }
@@ -46157,23 +46500,44 @@ async function activateMcpServer(workspace, activation, sessionFactory = default
 }
 async function applyMaintenance(workspace, review, plan, activationSessionFactory = defaultSession) {
   await ownGit(workspace);
+  if (await realpath3(workspace.original) !== path4.resolve(workspace.original)) return { applied: false, conflicts: ["repository-path"] };
   const current2 = await reviewMaintenance(workspace, plan);
   if (current2.fingerprint !== review.fingerprint || current2.target !== review.target) throw new Error("Maintenance checkout or artifacts changed since review");
   if (!current2.preparedClean) throw new Error("Maintenance checkout has uncommitted source changes; no automatic commit is allowed");
   const originalHead = await head(workspace.original);
-  if (!await clean(workspace.original) || await branch(workspace.original) !== review.branch || ![review.base, review.target].includes(originalHead)) return { applied: false, conflicts: ["repository-baseline"] };
+  const hasSubmodules = (await sourceSubmoduleBaseline(workspace)).length > 0 || (await listGitlinks(workspace.root)).length > 0;
+  if (await branch(workspace.original) !== review.branch || ![review.base, review.target].includes(originalHead)) return { applied: false, conflicts: ["repository-baseline"] };
+  if (!hasSubmodules && !await clean(workspace.original)) return { applied: false, conflicts: ["repository-baseline"] };
   try {
     await git(workspace.root, ["merge-base", "--is-ancestor", review.base, review.target]);
   } catch {
     return { applied: false, conflicts: ["non-fast-forward-target"] };
   }
+  const hooks = await emptyHooks(path4.join(path4.dirname(workspace.root), "disabled-hooks"));
+  let submoduleApplication;
+  if (hasSubmodules) {
+    try {
+      if (await git(workspace.original, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=all"])) throw new Error("Original repository has local changes");
+      submoduleApplication = await prepareSubmoduleApply(workspace, review, originalHead);
+      await fetchSubmoduleTargets(workspace, submoduleApplication.journal, hooks);
+    } catch (error62) {
+      return { applied: originalHead === review.target && originalHead !== review.base, conflicts: ["submodule-baseline"], ...originalHead === review.target && originalHead !== review.base ? { partial: true } : {}, error: error62.message };
+    }
+  }
   if (originalHead !== review.target) {
     await git(workspace.original, ["fetch", "--no-tags", workspace.root, review.target]);
     if (!await clean(workspace.original) || await head(workspace.original) !== review.base || await branch(workspace.original) !== review.branch) return { applied: false, conflicts: ["repository-changed-during-apply"] };
-    const hooks = await emptyHooks(path3.join(path3.dirname(workspace.root), "disabled-hooks"));
-    await git(workspace.original, ["-c", `core.hooksPath=${hooks}`, "merge", "--ff-only", "--no-edit", review.target]);
+    if (submoduleApplication) await validateSubmoduleApply(workspace, submoduleApplication.journal);
+    await git(workspace.original, ["-c", `core.hooksPath=${hooks}`, "merge", "--ff-only", "--no-edit", "--no-overwrite-ignore", review.target]);
   }
   if (await head(workspace.original) !== review.target) throw new Error("Original repository did not reach the reviewed target");
+  if (submoduleApplication) {
+    try {
+      await syncSubmoduleTargets(workspace, submoduleApplication.journal, submoduleApplication.filename, hooks);
+    } catch (error62) {
+      return { applied: true, conflicts: ["submodule-application"], partial: true, error: error62.message };
+    }
+  }
   const activation = plan.activation ? await activateMcpServer(workspace, plan.activation, activationSessionFactory) : void 0;
   return { applied: true, conflicts: [], ...activation ? { activation } : {} };
 }
@@ -46186,21 +46550,21 @@ var TemplateStore = class {
   }
   filename(id) {
     if (!/^saved:[a-z][a-z0-9-]{0,63}$/.test(id)) throw new Error("Invalid saved workflow ID");
-    return path4.join(this.store.root, "templates", `${id.slice(6)}.json`);
+    return path5.join(this.store.root, "templates", `${id.slice(6)}.json`);
   }
   async get(id) {
     try {
-      return JSON.parse(await readFile3(this.filename(id), "utf8"));
+      return JSON.parse(await readFile4(this.filename(id), "utf8"));
     } catch (error62) {
       if (error62.code === "ENOENT") return void 0;
       throw error62;
     }
   }
   async list() {
-    const directory = path4.join(this.store.root, "templates");
-    await mkdir3(directory, { recursive: true, mode: 448 });
-    const files = (await readdir3(directory)).filter((file2) => /^[a-z][a-z0-9-]{0,63}\.json$/.test(file2));
-    const templates = await Promise.all(files.map((file2) => this.get(`saved:${file2.slice(0, -5)}`)));
+    const directory = path5.join(this.store.root, "templates");
+    await mkdir5(directory, { recursive: true, mode: 448 });
+    const files2 = (await readdir4(directory)).filter((file2) => /^[a-z][a-z0-9-]{0,63}\.json$/.test(file2));
+    const templates = await Promise.all(files2.map((file2) => this.get(`saved:${file2.slice(0, -5)}`)));
     return templates.filter((template2) => Boolean(template2));
   }
   async save(input2) {
@@ -46223,7 +46587,7 @@ var TemplateStore = class {
       const json2 = JSON.stringify(template2);
       if (Buffer.byteLength(json2) > 2 * 1024 * 1024) throw new Error("Saved workflow exceeds 2 MiB");
       const filename = this.filename(id);
-      await mkdir3(path4.dirname(filename), { recursive: true, mode: 448 });
+      await mkdir5(path5.dirname(filename), { recursive: true, mode: 448 });
       const temporary = `${filename}.${process.pid}.tmp`;
       await writeFile3(temporary, json2, { mode: 384 });
       await rename3(temporary, filename);
@@ -46247,7 +46611,7 @@ var panelResourceUris = [
   "ui://workflows/panel/0.2.1.html"
 ];
 function createServer(engine2) {
-  const serverInfo = { name: "workflows", version: "0.3.0" };
+  const serverInfo = { name: "workflows", version: "0.3.1" };
   const panelHtml = readFileSync3(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);
@@ -46350,21 +46714,21 @@ function createServer(engine2) {
 }
 
 // src/engine.ts
-import { randomBytes as randomBytes4, createHash as createHash3 } from "node:crypto";
-import { realpath as realpath4, stat } from "node:fs/promises";
+import { randomBytes as randomBytes4, createHash as createHash4 } from "node:crypto";
+import { realpath as realpath5, stat } from "node:fs/promises";
 
 // src/workspace.ts
 import { execFile as execFile2 } from "node:child_process";
 import { promisify as promisify2 } from "node:util";
-import { createHash as createHash2, randomBytes as randomBytes3 } from "node:crypto";
-import { copyFile, lstat as lstat3, mkdir as mkdir4, readFile as readFile4, readlink as readlink2, realpath as realpath3, rename as rename4, rm as rm3, symlink, writeFile as writeFile4, chmod as chmod2 } from "node:fs/promises";
-import path5 from "node:path";
+import { createHash as createHash3, randomBytes as randomBytes3 } from "node:crypto";
+import { copyFile, lstat as lstat4, mkdir as mkdir6, readFile as readFile5, readlink as readlink3, realpath as realpath4, rename as rename4, rm as rm4, symlink, writeFile as writeFile4, chmod as chmod2 } from "node:fs/promises";
+import path6 from "node:path";
 var exec2 = promisify2(execFile2);
-var hash3 = (value) => createHash2("sha256").update(value).digest("hex");
+var hash3 = (value) => createHash3("sha256").update(value).digest("hex");
 function resolveFile(root, name) {
   if (!name || name.includes("\0") || name.split(/[\\/]/).some((part) => part === ".." || part === ".git")) throw new Error(`Unsafe workspace path: ${name}`);
-  const target = path5.resolve(root, name);
-  if (!target.startsWith(root + path5.sep)) throw new Error(`Workspace path escapes root: ${name}`);
+  const target = path6.resolve(root, name);
+  if (!target.startsWith(root + path6.sep)) throw new Error(`Workspace path escapes root: ${name}`);
   return target;
 }
 async function record3(root, name) {
@@ -46372,32 +46736,32 @@ async function record3(root, name) {
   const target = resolveFile(root, name);
   let stat2;
   try {
-    stat2 = await lstat3(target);
+    stat2 = await lstat4(target);
   } catch (error62) {
     if (error62.code === "ENOENT") return;
     throw error62;
   }
   if (stat2.isSymbolicLink()) {
-    const value = await readlink2(target);
-    const destination = path5.resolve(path5.dirname(target), value);
-    if (path5.isAbsolute(value) || !destination.startsWith(root + path5.sep)) throw new Error(`External symbolic link is unsupported: ${name}`);
+    const value = await readlink3(target);
+    const destination = path6.resolve(path6.dirname(target), value);
+    if (path6.isAbsolute(value) || !destination.startsWith(root + path6.sep)) throw new Error(`External symbolic link is unsupported: ${name}`);
     return { hash: hash3(value), kind: "link", mode: stat2.mode & 511 };
   }
   if (!stat2.isFile()) throw new Error(`Unsupported workspace entry: ${name}`);
   if (stat2.size > 16 * 1024 * 1024) throw new Error(`Workspace file exceeds 16 MiB: ${name}`);
-  return { hash: hash3(await readFile4(target)), kind: "file", mode: stat2.mode & 511 };
+  return { hash: hash3(await readFile5(target)), kind: "file", mode: stat2.mode & 511 };
 }
 async function safeParents(root, name, create = true) {
-  const pieces = name.split(path5.sep).slice(0, -1);
+  const pieces = name.split(path6.sep).slice(0, -1);
   let directory = root;
   for (const piece of pieces) {
-    directory = path5.join(directory, piece);
+    directory = path6.join(directory, piece);
     try {
-      const stat2 = await lstat3(directory);
+      const stat2 = await lstat4(directory);
       if (!stat2.isDirectory() || stat2.isSymbolicLink()) throw new Error(`Unsafe parent directory: ${name}`);
     } catch (error62) {
       if (error62.code !== "ENOENT") throw error62;
-      if (create) await mkdir4(directory);
+      if (create) await mkdir6(directory);
       else return;
     }
   }
@@ -46406,8 +46770,8 @@ async function copyEntry(source, destination, name, entry) {
   await safeParents(source, name, false);
   await safeParents(destination, name);
   const target = resolveFile(destination, name);
-  await rm3(target, { force: true });
-  if (entry.kind === "link") await symlink(await readlink2(resolveFile(source, name)), target);
+  await rm4(target, { force: true });
+  if (entry.kind === "link") await symlink(await readlink3(resolveFile(source, name)), target);
   else {
     await copyFile(resolveFile(source, name), target);
     await chmod2(target, entry.mode);
@@ -46419,14 +46783,14 @@ async function replaceEntry(source, destination, name, entry) {
   const target = resolveFile(destination, name);
   const temporary = `${target}.wf-${randomBytes3(8).toString("hex")}.tmp`;
   try {
-    if (entry.kind === "link") await symlink(await readlink2(resolveFile(source, name)), temporary);
+    if (entry.kind === "link") await symlink(await readlink3(resolveFile(source, name)), temporary);
     else {
       await copyFile(resolveFile(source, name), temporary);
       await chmod2(temporary, entry.mode);
     }
     await rename4(temporary, target);
   } finally {
-    await rm3(temporary, { force: true });
+    await rm4(temporary, { force: true });
   }
 }
 async function projectFiles(project) {
@@ -46434,26 +46798,28 @@ async function projectFiles(project) {
   return [...new Set(stdout.split("\0").filter(Boolean))].filter((name) => !name.startsWith(".workflow-data/")).sort();
 }
 async function contextDigest(project) {
-  const files = await projectFiles(project);
-  const records2 = await Promise.all(files.map(async (name) => [name, await record3(project, name)]));
+  const files2 = await projectFiles(project);
+  const records2 = await Promise.all(files2.map(async (name) => [name, await record3(project, name)]));
   return hash3(JSON.stringify(records2));
 }
 async function createWorkspace(project, directory) {
-  const canonical2 = await realpath3(project);
+  const canonical2 = await realpath4(project);
   const { stdout } = await exec2("git", ["rev-parse", "--show-toplevel"], { cwd: canonical2 });
-  if (await realpath3(stdout.trim()) !== canonical2) throw new Error("Writing workflows require the Git repository root as projectPath");
-  const root = path5.join(directory, "workspace");
-  const base = path5.join(directory, "baseline");
-  await rm3(root, { recursive: true, force: true });
-  await rm3(base, { recursive: true, force: true });
-  await mkdir4(root, { recursive: true, mode: 448 });
-  await mkdir4(base, { recursive: true, mode: 448 });
+  if (await realpath4(stdout.trim()) !== canonical2) throw new Error("Writing workflows require the Git repository root as projectPath");
+  const gitlinks = await listGitlinks(canonical2);
+  if (gitlinks.length) throw new Error("Snapshot writing does not copy Git submodules. Create a new preview with workspaceMode: git-worktree to retain their commit and initialization state.");
+  const root = path6.join(directory, "workspace");
+  const base = path6.join(directory, "baseline");
+  await rm4(root, { recursive: true, force: true });
+  await rm4(base, { recursive: true, force: true });
+  await mkdir6(root, { recursive: true, mode: 448 });
+  await mkdir6(base, { recursive: true, mode: 448 });
   const baseline = {};
   let size = 0;
   for (const name of await projectFiles(canonical2)) {
     const entry = await record3(canonical2, name);
     if (!entry) continue;
-    size += (await lstat3(resolveFile(canonical2, name))).size;
+    size += (await lstat4(resolveFile(canonical2, name))).size;
     if (size > 256 * 1024 * 1024) throw new Error("Workspace snapshot exceeds 256 MiB");
     baseline[name] = entry;
     await copyEntry(canonical2, base, name, entry);
@@ -46469,17 +46835,17 @@ function equal(a, b) {
 async function workspaceDiff(workspace) {
   const names = [.../* @__PURE__ */ new Set([...Object.keys(workspace.baseline), ...await projectFiles(workspace.root)])].sort();
   if (names.length > 2e4) throw new Error("Workspace exceeds 20000 source files");
-  const files = [];
+  const files2 = [];
   const details = [];
   const parts = [];
   for (const name of names) {
     const before = workspace.baseline[name];
     const after = await record3(workspace.root, name);
     if (equal(before, after)) continue;
-    files.push({ path: name, status: !before ? "added" : !after ? "deleted" : "modified" });
+    files2.push({ path: name, status: !before ? "added" : !after ? "deleted" : "modified" });
     details.push([name, before ?? null, after ?? null]);
     const nullFile = process.platform === "win32" ? "NUL" : "/dev/null";
-    const left = before ? resolveFile(path5.join(path5.dirname(workspace.root), "baseline"), name) : nullFile;
+    const left = before ? resolveFile(path6.join(path6.dirname(workspace.root), "baseline"), name) : nullFile;
     const right = after ? resolveFile(workspace.root, name) : nullFile;
     if (before?.kind === "link" || after?.kind === "link") {
       parts.push(`diff -- ${name}
@@ -46498,8 +46864,8 @@ Symbolic link or file type changed
   }
   const raw = parts.join("\n");
   if (raw.length > 4 * 1024 * 1024) throw new Error("Review diff exceeds 4 MiB");
-  const text = raw.replaceAll(path5.join(path5.dirname(workspace.root), "baseline") + path5.sep, "").replaceAll(workspace.root + path5.sep, "");
-  return { text, files, fingerprint: hash3(JSON.stringify(details)) };
+  const text = raw.replaceAll(path6.join(path6.dirname(workspace.root), "baseline") + path6.sep, "").replaceAll(workspace.root + path6.sep, "");
+  return { text, files: files2, fingerprint: hash3(JSON.stringify(details)) };
 }
 async function applyWorkspace(workspace, reviewed) {
   const current2 = await workspaceDiff(workspace);
@@ -46513,15 +46879,15 @@ async function applyWorkspace(workspace, reviewed) {
     targets.set(file2.path, after);
   }
   if (conflicts.length) return { applied: false, conflicts };
-  const transaction = path5.join(path5.dirname(workspace.root), "apply-transaction");
-  const staged = path5.join(transaction, "staged");
-  await mkdir4(transaction, { recursive: true, mode: 448 });
-  await mkdir4(staged, { recursive: true, mode: 448 });
+  const transaction = path6.join(path6.dirname(workspace.root), "apply-transaction");
+  const staged = path6.join(transaction, "staged");
+  await mkdir6(transaction, { recursive: true, mode: 448 });
+  await mkdir6(staged, { recursive: true, mode: 448 });
   for (const file2 of current2.files) {
     const after = targets.get(file2.path);
     if (after) await copyEntry(workspace.root, staged, file2.path, after);
   }
-  await writeFile4(path5.join(transaction, "journal.json"), JSON.stringify({ files: current2.files, fingerprint: current2.fingerprint, state: "prepared" }), { mode: 384 });
+  await writeFile4(path6.join(transaction, "journal.json"), JSON.stringify({ files: current2.files, fingerprint: current2.fingerprint, state: "prepared" }), { mode: 384 });
   const changed = [];
   try {
     for (const file2 of current2.files) {
@@ -46531,17 +46897,17 @@ async function applyWorkspace(workspace, reviewed) {
       if (!equal(workspace.baseline[file2.path], before)) throw new Error(`Project changed during application: ${file2.path}`);
       changed.push(file2.path);
       if (after) await replaceEntry(staged, workspace.original, file2.path, after);
-      else await rm3(resolveFile(workspace.original, file2.path));
+      else await rm4(resolveFile(workspace.original, file2.path));
     }
-    await writeFile4(path5.join(transaction, "journal.json"), JSON.stringify({ files: current2.files, state: "completed" }), { mode: 384 });
+    await writeFile4(path6.join(transaction, "journal.json"), JSON.stringify({ files: current2.files, state: "completed" }), { mode: 384 });
     return { applied: true, conflicts: [] };
   } catch (error62) {
-    const base = path5.join(path5.dirname(workspace.root), "baseline");
+    const base = path6.join(path6.dirname(workspace.root), "baseline");
     for (const name of changed.reverse()) {
       const before = workspace.baseline[name];
       if (!equal(await record3(workspace.original, name), targets.get(name))) continue;
       if (before) await replaceEntry(base, workspace.original, name, before);
-      else await rm3(resolveFile(workspace.original, name), { force: true });
+      else await rm4(resolveFile(workspace.original, name), { force: true });
     }
     throw error62;
   }
@@ -46554,7 +46920,7 @@ function canonical(value) {
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, entry]) => [key, canonical(entry)]));
   return value;
 }
-var digest = (value) => createHash3("sha256").update(JSON.stringify(canonical(value))).digest("hex");
+var digest2 = (value) => createHash4("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 var message = (error62) => error62 instanceof Error ? error62.message : String(error62);
 var defaults = { maxReadWorkers: 4, maxCalls: 1e3, timeoutMs: 60 * 60 * 1e3, maxTokens: 0 };
 var Pool = class {
@@ -46697,14 +47063,14 @@ var WorkflowEngine = class {
   }
   async list(projectPath) {
     await this.initialization;
-    const project = projectPath ? await realpath4(projectPath) : void 0;
+    const project = projectPath ? await realpath5(projectPath) : void 0;
     const runs = await this.store.list();
     return runs.filter((run) => !project || run.projectPath === project);
   }
   async preview(input2) {
     await this.initialization;
     const { meta: meta3 } = validateScript(input2.script);
-    const projectPath = await realpath4(input2.projectPath);
+    const projectPath = await realpath5(input2.projectPath);
     if (!(await stat(projectPath)).isDirectory()) throw new Error("projectPath must be a directory");
     if (input2.workspaceMode === "git-worktree" && !input2.allowWrite) throw new Error("Git maintenance requires an isolated writable workspace");
     if (input2.maintenance && (!input2.allowWrite || input2.workspaceMode !== "git-worktree")) throw new Error("Maintenance operations require git-worktree isolation and allowWrite");
@@ -46720,7 +47086,7 @@ var WorkflowEngine = class {
       updatedAt: now(),
       meta: meta3,
       script: input2.script,
-      scriptDigest: digest(input2.script),
+      scriptDigest: digest2(input2.script),
       args: input2.args === void 0 ? {} : input2.args,
       projectPath,
       allowWrite: input2.allowWrite ?? false,
@@ -46755,7 +47121,7 @@ var WorkflowEngine = class {
         this.log(run, "Overall delegated task changed; saved task results will not be reused.");
       }
       run.script = input2.script;
-      run.scriptDigest = digest(input2.script);
+      run.scriptDigest = digest2(input2.script);
       run.meta = meta3;
       run.args = input2.args;
       const scopes = {
@@ -46766,13 +47132,13 @@ var WorkflowEngine = class {
         workspaceMode: input2.workspaceMode ?? run.workspaceMode ?? "snapshot",
         maintenance: input2.maintenance ?? run.maintenance
       };
-      if (run.workspace && digest(scopes) !== digest({ allowWrite: run.allowWrite, networkAccess: run.networkAccess ?? false, allowedMcpServers: run.allowedMcpServers ?? [], allowedMcpTools: run.allowedMcpTools ?? {}, workspaceMode: run.workspaceMode ?? "snapshot", maintenance: run.maintenance })) throw new Error("Changing execution scope requires a new preview and workspace");
+      if (run.workspace && digest2(scopes) !== digest2({ allowWrite: run.allowWrite, networkAccess: run.networkAccess ?? false, allowedMcpServers: run.allowedMcpServers ?? [], allowedMcpTools: run.allowedMcpTools ?? {}, workspaceMode: run.workspaceMode ?? "snapshot", maintenance: run.maintenance })) throw new Error("Changing execution scope requires a new preview and workspace");
       if (scopes.allowedMcpServers.some((name) => !/^[a-zA-Z0-9_.-]{1,128}$/.test(name) || /workflows/i.test(name))) throw new Error("Invalid or recursive MCP server grant");
       if (scopes.maintenance) scopes.maintenance = validateMaintenance(scopes.maintenance, scopes.networkAccess);
       this.validateMcpTools(scopes.allowedMcpServers, scopes.allowedMcpTools);
       if (scopes.maintenance && (!scopes.allowWrite || scopes.workspaceMode !== "git-worktree")) throw new Error("Maintenance operations require git-worktree isolation and allowWrite");
       const previousScope = { allowWrite: run.allowWrite, networkAccess: run.networkAccess ?? false, allowedMcpServers: run.allowedMcpServers ?? [], allowedMcpTools: run.allowedMcpTools ?? {}, workspaceMode: run.workspaceMode ?? "snapshot", maintenance: run.maintenance };
-      if (digest(scopes) !== digest(previousScope)) {
+      if (digest2(scopes) !== digest2(previousScope)) {
         for (const task of run.tasks) task.status = "interrupted";
         this.log(run, "Execution permissions changed; saved task results will not be reused.");
       }
@@ -46821,7 +47187,9 @@ var WorkflowEngine = class {
       if (resume ? !["stopped", "failed"].includes(run.execution) : run.execution !== "draft") throw new Error("Workflow state changed before start");
       let context;
       try {
-        context = await contextDigest(run.projectPath);
+        const gitlinks = await listGitlinks(run.projectPath);
+        if (gitlinks.length && run.allowWrite && run.workspaceMode !== "git-worktree") throw new Error("Snapshot writing does not copy Git submodules. Create a new preview with workspaceMode: git-worktree to retain their commit and initialization state.");
+        context = gitlinks.length ? await gitAwareContextDigest(run.projectPath) : await contextDigest(run.projectPath);
       } catch (error62) {
         if (run.allowWrite) throw error62;
         context = randomBytes4(16).toString("hex");
@@ -46909,10 +47277,10 @@ var WorkflowEngine = class {
           throw error62;
         }
         const mode = options.mode === "write" ? "write" : "read";
-        const fingerprint2 = digest({ prompt, options });
+        const fingerprint2 = digest2({ prompt, options });
         const task = { id: `task_${position + 1}`, index: position, prompt, options, mode, status: "queued", cached: false, attempts: previous?.attempts ?? [], ...typeof options.label === "string" ? { label: options.label } : {}, ...typeof options.phase === "string" ? { phase: options.phase } : phase ? { phase } : {} };
         run.tasks[position] = task;
-        if (cacheValid && previous?.status === "completed" && digest({ prompt: previous.prompt, options: previous.options }) === fingerprint2 && Object.hasOwn(previous, "output")) {
+        if (cacheValid && previous?.status === "completed" && digest2({ prompt: previous.prompt, options: previous.options }) === fingerprint2 && Object.hasOwn(previous, "output")) {
           task.status = "completed";
           task.cached = true;
           task.output = previous.output;
@@ -46929,7 +47297,7 @@ var WorkflowEngine = class {
           await this.persist(run);
           throw new Error(task.error);
         }
-        if (!(previous?.status === "interrupted" && digest({ prompt: previous.prompt, options: previous.options }) === fingerprint2)) cacheValid = false;
+        if (!(previous?.status === "interrupted" && digest2({ prompt: previous.prompt, options: previous.options }) === fingerprint2)) cacheValid = false;
         const controller = new AbortController();
         const abort = () => controller.abort();
         active.controller.signal.addEventListener("abort", abort, { once: true });
@@ -46992,7 +47360,7 @@ ${prompt}`,
               });
               task.output = options.schema ? report.data : report.output;
               if (options.schema && report.data === void 0) throw new Error("Worker did not return structured output");
-              if (digest(task.output).length && Buffer.byteLength(JSON.stringify(task.output) ?? "null") > 1024 * 1024) throw new Error("Task output exceeds 1 MiB");
+              if (digest2(task.output).length && Buffer.byteLength(JSON.stringify(task.output) ?? "null") > 1024 * 1024) throw new Error("Task output exceeds 1 MiB");
               task.status = "completed";
               attempt.status = "completed";
               attempt.output = task.output;
@@ -47139,7 +47507,7 @@ ${prompt}`,
       run = await this.store.load(id);
       this.assertRevision(run, revision);
       if (run.execution !== "completed" || !run.workspace || !run.diff || run.application === "applied") throw new Error("Workflow changed before application");
-      releaseProject = await this.store.acquireNamed(`apply_${digest(run.projectPath)}`);
+      releaseProject = await this.store.acquireNamed(`apply_${digest2(run.projectPath)}`);
       applicationStarted = true;
       run.application = "applying";
       await this.persist(run);
@@ -47150,9 +47518,12 @@ ${prompt}`,
         if (maintenance.activation) run.activation = maintenance.activation;
         result2 = maintenance;
       } else result2 = await applyWorkspace(run.workspace, run.diff);
-      run.application = result2.applied ? run.activation?.status === "failed" ? "partial" : "applied" : "conflict";
+      run.application = result2.partial ? "partial" : result2.applied ? run.activation?.status === "failed" ? "partial" : "applied" : "conflict";
+      if (result2.error) run.error = result2.error;
+      else if (run.application === "applied") delete run.error;
       if (!result2.applied) run.diff.conflicts = result2.conflicts;
-      this.log(run, result2.applied ? run.application === "partial" ? "Repository updated, but activation failed. Review activation before retrying application." : run.activation?.status === "pending_restart" ? "Repository and configuration updated. The current desktop connection still requires restart verification." : "Reviewed changes applied to the project." : "Project conflicts detected; changes were not applied.");
+      else if (run.application === "applied") delete run.diff.conflicts;
+      this.log(run, run.application === "partial" ? "Repository partially updated. Review the unfinished submodule or activation stage before retrying application." : result2.applied ? run.activation?.status === "pending_restart" ? "Repository and configuration updated. The current desktop connection still requires restart verification." : "Reviewed changes applied to the project." : "Project conflicts detected; changes were not applied.");
     } catch (error62) {
       if (!applicationStarted) throw error62;
       run.application = "failed";

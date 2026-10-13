@@ -111,7 +111,9 @@ createInterface({ input: process.stdin }).on("line", line => {
     if (scenario !== "stubborn") setTimeout(() => notify("turn/completed", { threadId, turn: { id: turnId, status: "interrupted", items: [] } }), 10);
   } else if (method === "command/exec") {
     commandId = id;
-    if (params.sandboxPolicy?.type !== "workspaceWrite" || !Array.isArray(params.command) || typeof params.sandboxPolicy.networkAccess !== "boolean" || params.env !== undefined || params.sandboxPolicy.excludeTmpdirEnvVar !== true || params.sandboxPolicy.excludeSlashTmp !== true || params.sandboxPolicy.writableRoots.some(root => root !== params.cwd && root !== params.cwd + "/.git")) process.exit(6);
+    const environment = params.env ?? {};
+    const envKeys = ["TMPDIR", "TMP", "TEMP", "XDG_CACHE_HOME", "npm_config_cache", "NPM_CONFIG_CACHE"];
+    if (params.sandboxPolicy?.type !== "workspaceWrite" || !Array.isArray(params.command) || typeof params.sandboxPolicy.networkAccess !== "boolean" || Object.keys(environment).length !== envKeys.length || envKeys.some(key => typeof environment[key] !== "string" || !environment[key].startsWith(params.cwd + "/") || !environment[key].includes(".workflows-command-")) || params.sandboxPolicy.excludeTmpdirEnvVar !== true || params.sandboxPolicy.excludeSlashTmp !== true || params.sandboxPolicy.writableRoots.some(root => root !== params.cwd && root !== params.cwd + "/.git")) process.exit(6);
     if (scenario === "command-host-request") { send({ id: "command-approval", method: "item/permissions/requestApproval", params: {} }); return; }
     if (scenario === "command-interrupt" || scenario === "command-stubborn") { notify("command/exec/outputDelta", { processId: params.processId, stream: "stdout", deltaBase64: Buffer.from("ready\n").toString("base64") }); return; }
     const attempts = readFileSync(traceFile, "utf8").split("\n").filter(line => line.includes('"method":"command/exec"')).length;

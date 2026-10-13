@@ -21,7 +21,7 @@ const panelResourceUris = [
 ];
 
 export function createServer(engine: WorkflowEngine) {
-  const serverInfo = { name: "workflows", version: "0.3.0" };
+  const serverInfo = { name: "workflows", version: "0.3.1" };
   const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server = new McpServer(serverInfo);
   const templates = new TemplateStore(engine.store);

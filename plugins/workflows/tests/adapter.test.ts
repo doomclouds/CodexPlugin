@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,7 +39,7 @@ test("protocol fixture streams final output and usage with an initialized, isola
     assert.equal(thread.params.approvalPolicy, "never");
     assert.equal(thread.params.ephemeral, true);
     assert.deepEqual(thread.params.config.mcp_servers.fixture, { enabled: false, required: false });
-    assert.equal(transcript.find(message => message.method === "initialize")!.params.clientInfo.version, "0.3.0");
+    assert.equal(transcript.find(message => message.method === "initialize")!.params.clientInfo.version, JSON.parse(await readFile(new URL("../plugin.json", import.meta.url), "utf8")).version);
     const turn = transcript.find(message => message.method === "turn/start")!;
     assert.deepEqual(turn.params.sandboxPolicy, { type: "readOnly", networkAccess: false });
   } finally { await context.cleanup(); }
@@ -331,7 +332,11 @@ test("command protocol uses exact argv, bounded sandbox and redacts streamed out
     assert.equal(call.params.cwd, await realpath(context.request.cwd));
     assert.equal(call.params.sandboxPolicy.networkAccess, true);
     assert.equal(call.params.sandboxPolicy.type, "workspaceWrite");
-    assert.equal(call.params.env, undefined);
+    assert.deepEqual(Object.keys(call.params.env).sort(), ["NPM_CONFIG_CACHE", "TEMP", "TMP", "TMPDIR", "XDG_CACHE_HOME", "npm_config_cache"].sort());
+    for (const directory of Object.values(call.params.env) as string[]) assert.ok(directory.startsWith(call.params.cwd + path.sep));
+    assert.equal(call.params.env.npm_config_cache, call.params.env.NPM_CONFIG_CACHE);
+    assert.equal(call.params.env.TMPDIR, call.params.env.TEMP);
+    assert.deepEqual(await readdir(context.request.cwd), ["protocol.jsonl"]);
     assert.equal(call.params.streamStdoutStderr, true);
   } finally { await context.cleanup(); }
 });
@@ -370,14 +375,73 @@ test("command timeout forcibly cleans up a nonresponsive host", async () => {
   } finally { await context.cleanup(); }
 });
 
-test("command requests refuse environment injection, undeclared paths, linked Git and approvals", async () => {
+test("command requests refuse environment injection, linked Git and approvals", async () => {
   const context = await setup("command-host-request");
   try {
     const request: CommandRequest = { id: "scope-test", cwd: context.request.cwd, command: ["git", "status"] };
     await assert.rejects(context.adapter.command({ ...request, env: { SECRET: "fixture-only" } } as CommandRequest, context.controller.signal), /unsupported fields/);
-    await assert.rejects(context.adapter.command({ ...request, command: ["npm", "--prefix", "../other"] }, context.controller.signal), /outside the declared/);
     await assert.rejects(context.adapter.command(request, context.controller.signal), /unsupported host interaction/);
     await writeFile(path.join(context.request.cwd, ".git"), "gitdir: ../linked-metadata\n");
     await assert.rejects(context.adapter.command(request, context.controller.signal), /linked or external Git metadata/);
   } finally { await context.cleanup(); }
+});
+
+test("command protocol accepts absolute read-only toolchain argv without expanding write roots", async () => {
+  const context = await setup("command-complete");
+  try {
+    const command = ["/usr/bin/env", "HUSKY=0", "PATH=/toolchain/bin", process.execPath, path.join(os.tmpdir(), "installed-toolchain", "npm-cli.js"), "ci"];
+    await context.adapter.command({ id: "absolute-toolchain", cwd: context.request.cwd, command }, context.controller.signal);
+    const call = (await context.transcript()).find(item => item.method === "command/exec")!;
+    assert.deepEqual(call.params.command, command);
+    assert.deepEqual(call.params.sandboxPolicy.writableRoots, [await realpath(context.request.cwd)]);
+    assert.equal(call.params.sandboxPolicy.excludeTmpdirEnvVar, true);
+    assert.equal(call.params.sandboxPolicy.excludeSlashTmp, true);
+  } finally { await context.cleanup(); }
+});
+
+test("real command sandbox reads external tools, isolates npm defaults and refuses external writes", {
+  skip: process.env.WORKFLOWS_REAL_COMMAND_TESTS !== "1" || !["darwin", "linux"].includes(process.platform),
+}, async () => {
+  // Opt-in integration test: real installed CLI and OS sandbox, no model invocation.
+  const root = await mkdtemp(path.join(os.tmpdir(), "workflows-real-command-"));
+  const cwd = path.join(root, "owned");
+  const tool = path.join(root, "external-tool.mjs");
+  const external = path.join(root, "external-marker.txt");
+  const adapter = new CodexAdapter();
+  const signal = new AbortController().signal;
+  try {
+    await mkdir(cwd);
+    await writeFile(external, "external-read-only\n");
+    await writeFile(tool, "import fs from 'node:fs';const marker=fs.readFileSync(process.argv[2],'utf8').trim();console.log(JSON.stringify({marker,cache:process.env.npm_config_cache,tmp:process.env.TMPDIR}));\n");
+    const read = await adapter.command({ id: "external-tool-read", cwd, command: [process.execPath, tool, external] }, signal);
+    assert.equal(read.exitCode, 0, read.stderr);
+    const observed = JSON.parse(read.stdout);
+    assert.equal(observed.marker, "external-read-only");
+    const resolved = await realpath(cwd);
+    assert.ok(observed.cache.startsWith(resolved + path.sep));
+    assert.ok(observed.tmp.startsWith(resolved + path.sep));
+    assert.deepEqual(await readdir(cwd), []);
+    const denied = await adapter.command({ id: "outside-write-denied", cwd, command: [process.execPath, "-e", "require('node:fs').writeFileSync(process.argv[1],'changed')", external] }, signal);
+    assert.notEqual(denied.exitCode, 0);
+    assert.match(denied.stderr, /EPERM|EACCES|Operation not permitted|Permission denied/);
+    assert.equal(await readFile(external, "utf8"), "external-read-only\n");
+    let npmCli: string | undefined;
+    for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
+      const executable = path.join(directory, "npm");
+      try { await access(executable, constants.X_OK); npmCli = await realpath(executable); break; } catch { /* Try the next PATH entry. */ }
+    }
+    assert.ok(npmCli, "An installed npm CLI is required for this opt-in test.");
+    await writeFile(path.join(cwd, "package.json"), JSON.stringify({ name: "isolated-command-fixture", version: "1.0.0", private: true, scripts: { build: "node -e \"require('node:fs').writeFileSync('build.txt','built')\"" } }));
+    await writeFile(path.join(cwd, "package-lock.json"), JSON.stringify({ name: "isolated-command-fixture", version: "1.0.0", lockfileVersion: 3, packages: { "": { name: "isolated-command-fixture", version: "1.0.0" } } }));
+    const prefix = ["/usr/bin/env", "HUSKY=0", `PATH=${process.env.PATH ?? ""}`, process.execPath, npmCli];
+    const effectiveCache = await adapter.command({ id: "absolute-npm-cache", cwd, command: [...prefix, "config", "get", "cache"] }, signal);
+    assert.equal(effectiveCache.exitCode, 0, effectiveCache.stderr);
+    assert.ok(effectiveCache.stdout.trim().startsWith(resolved + path.sep));
+    const install = await adapter.command({ id: "absolute-npm-ci", cwd, command: [...prefix, "ci", "--ignore-scripts", "--offline", "--no-audit"] }, signal);
+    assert.equal(install.exitCode, 0, install.stderr);
+    const build = await adapter.command({ id: "absolute-npm-build", cwd, command: [...prefix, "run", "build"] }, signal);
+    assert.equal(build.exitCode, 0, build.stderr);
+    assert.equal(await readFile(path.join(cwd, "build.txt"), "utf8"), "built");
+    assert.equal((await readdir(cwd)).some(name => name.startsWith(".workflows-command-")), false);
+  } finally { await adapter.close(); await rm(root, { recursive: true, force: true }); }
 });

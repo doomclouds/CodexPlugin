@@ -4,6 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { copyFile, lstat, mkdir, readFile, readlink, realpath, rename, rm, symlink, writeFile, chmod } from "node:fs/promises";
 import path from "node:path";
 import type { Diff, FileRecord, Workspace } from "./types.ts";
+import { listGitlinks } from "./submodules.ts";
 
 const exec = promisify(execFile);
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
@@ -69,6 +70,8 @@ export async function createWorkspace(project: string, directory: string): Promi
   const canonical = await realpath(project);
   const { stdout } = await exec("git", ["rev-parse", "--show-toplevel"], { cwd: canonical });
   if (await realpath(stdout.trim()) !== canonical) throw new Error("Writing workflows require the Git repository root as projectPath");
+  const gitlinks = await listGitlinks(canonical);
+  if (gitlinks.length) throw new Error("Snapshot writing does not copy Git submodules. Create a new preview with workspaceMode: git-worktree to retain their commit and initialization state.");
   const root = path.join(directory, "workspace");
   const base = path.join(directory, "baseline");
   // This function only creates an unconfirmed snapshot. Retained workspaces are resumed without calling it.

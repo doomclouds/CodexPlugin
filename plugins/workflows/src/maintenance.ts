@@ -1,13 +1,11 @@
-import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readFile, readdir, readlink, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
 import { ProtocolSession } from "./adapter.ts";
+import { cloneInitializedSubmodules, flattenGitArtifacts, gitCommand, inspectGitManifest, listGitlinks, type GitManifest } from "./submodules.ts";
 import type { ActivationResult, Diff, MaintenanceArtifact, MaintenancePlan, MaintenanceReview, Workspace } from "./types.ts";
 
-const exec = promisify(execFile);
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const fingerprint = (value: unknown) => hash(JSON.stringify(value));
 const maxFiles = 100000;
@@ -56,20 +54,13 @@ export function validateMaintenance(plan: MaintenancePlan, networkGrant: boolean
 }
 
 async function git(cwd: string, args: string[]): Promise<string> {
-  try {
-    const { stdout } = await exec("git", ["--no-pager", ...args], { cwd, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 120000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
-    return stdout;
-  } catch (error) {
-    const failure = new Error(`Git ${args[0] ?? "operation"} failed (exit ${String((error as { code?: unknown }).code ?? "unknown")})`);
-    Object.assign(failure, { code: (error as { code?: unknown }).code });
-    throw failure;
-  }
+  return gitCommand(cwd, args);
 }
 async function optionalGit(cwd: string, args: string[]): Promise<string | undefined> {
   try { return (await git(cwd, args)).trim() || undefined; }
   catch (error) { if ([1, 128].includes(Number((error as { code?: unknown }).code))) return undefined; throw error; }
 }
-async function clean(cwd: string): Promise<boolean> { return !(await git(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])); }
+async function clean(cwd: string): Promise<boolean> { return !(await git(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"])); }
 async function head(cwd: string): Promise<string> { return (await git(cwd, ["rev-parse", "--verify", "HEAD"])).trim(); }
 async function emptyHooks(directory: string): Promise<string> {
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -85,6 +76,8 @@ async function branch(cwd: string): Promise<string> {
 async function ownGit(workspace: Workspace): Promise<void> {
   if (workspace.kind !== "git-worktree" || !workspace.git) throw new Error("Maintenance requires an independent Git checkout");
   const root = await realpath(workspace.root);
+  const directory = await lstat(workspace.root);
+  if (!directory.isDirectory() || directory.isSymbolicLink() || root !== path.resolve(workspace.root)) throw new Error("Maintenance checkout path must remain its owned directory");
   const metadata = await lstat(path.join(root, ".git"));
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("Maintenance Git metadata must be inside its independent checkout");
   const common = await realpath(path.resolve(root, (await git(root, ["rev-parse", "--git-common-dir"])).trim()));
@@ -93,13 +86,16 @@ async function ownGit(workspace: Workspace): Promise<void> {
 }
 export async function validateGitWorkspace(workspace: Workspace): Promise<void> {
   await ownGit(workspace);
+  if (await realpath(workspace.original) !== path.resolve(workspace.original)) throw new Error("Original repository path changed; create a new preview");
   if (!await clean(workspace.original)) throw new Error("Original repository is dirty; create a new preview after resolving it");
   if (await head(workspace.original) !== workspace.git!.base || await branch(workspace.original) !== workspace.git!.branch) throw new Error("Original repository HEAD or branch changed; create a new preview");
+  await validateSourceSubmodules(workspace);
 }
 export async function createGitWorkspace(projectPath: string, runDirectory: string): Promise<Workspace> {
   const original = await realpath(projectPath);
   if (await realpath((await git(original, ["rev-parse", "--show-toplevel"])).trim()) !== original) throw new Error("Maintenance project must be the Git repository root");
   if (!await clean(original)) throw new Error("Original repository must be clean before maintenance");
+  const sourceManifest = await inspectGitManifest(original, { requireClean: true });
   const base = await head(original), sourceBranch = await branch(original);
   const upstream = await optionalGit(original, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
   await mkdir(runDirectory, { recursive: true, mode: 0o700 });
@@ -122,14 +118,16 @@ export async function createGitWorkspace(projectPath: string, runDirectory: stri
       }
     }
     // Recreate original remote-tracking refs after removing clone's temporary origin.
-    const remoteRefs = (await git(original, ["for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes"])).split("\n").filter(Boolean);
+    const remoteRefs = (await git(original, ["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/remotes"])).split("\n").filter(Boolean);
     for (const ref of remoteRefs) { const [name, value] = ref.split(" "); if (name && value) await git(root, ["update-ref", name, value]); }
     await git(root, ["checkout", "-B", sourceBranch, base]);
     for (const key of ["remote", "merge"]) {
       const value = await optionalGit(original, ["config", "--get", `branch.${sourceBranch}.${key}`]);
       if (value) await git(root, ["config", `branch.${sourceBranch}.${key}`, value]);
     }
+    await cloneInitializedSubmodules(original, root, hooks);
     const workspace: Workspace = { root, original, baseline: {}, kind: "git-worktree", git: { base, branch: sourceBranch, ...(upstream ? { upstream } : {}) } };
+    await savePrivateJson(path.join(directory, "submodule-baseline.json"), submoduleStates(sourceManifest));
     await validateGitWorkspace(workspace);
     return workspace;
   } catch (error) { await rm(root, { recursive: true, force: true }); throw error; }
@@ -189,9 +187,13 @@ async function records(workspace: Workspace, args: string[]): Promise<Maintenanc
   }
   return result;
 }
-async function ignoredArtifacts(workspace: Workspace) { return records(workspace, ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"]); }
+async function ignoredArtifacts(workspace: Workspace) {
+  if ((await listGitlinks(workspace.root)).length) return flattenGitArtifacts(await inspectGitManifest(workspace.root, { includeIgnored: true, enforceOwnedMetadata: true }));
+  return records(workspace, ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"]);
+}
 export async function maintenanceFingerprint(workspace: Workspace): Promise<string> {
   await ownGit(workspace);
+  if ((await listGitlinks(workspace.root)).length) return fingerprint(await inspectGitManifest(workspace.root, { includeIgnored: true, enforceOwnedMetadata: true }));
   const source = await records(workspace, ["ls-files", "-co", "--exclude-standard", "-z"]);
   const artifacts = await ignoredArtifacts(workspace);
   // Hash local settings without publishing remote URLs or other configuration values.
@@ -214,7 +216,119 @@ export async function reviewMaintenance(workspace: Workspace, plan: MaintenanceP
   const artifactFingerprint = fingerprint(artifacts);
   const state = await maintenanceFingerprint(workspace);
   const diff: Diff = { text, files, fingerprint: fingerprint({ base: workspace.git!.base, target, state }) };
-  return { base: workspace.git!.base, target, branch: workspace.git!.branch, ...(workspace.git!.upstream ? { upstream: workspace.git!.upstream } : {}), diff, artifacts, artifactFingerprint, preparedClean, fingerprint: fingerprint({ state, plan }) };
+  const submodules = submoduleStates(await inspectGitManifest(workspace.root, { enforceOwnedMetadata: true }));
+  return { base: workspace.git!.base, target, branch: workspace.git!.branch, ...(workspace.git!.upstream ? { upstream: workspace.git!.upstream } : {}), diff, artifacts, artifactFingerprint, preparedClean, fingerprint: fingerprint({ state, plan }), ...(submodules.length ? { submodules } : {}) };
+}
+
+interface SubmoduleState { path: string; commit: string; initialized: boolean; head?: string }
+function submoduleStates(manifest: GitManifest, prefix = ""): SubmoduleState[] {
+  return manifest.submodules.flatMap(child => [{ path: prefix + child.path, commit: child.commit, initialized: child.initialized, ...(child.manifest ? { head: child.manifest.head } : {}) }, ...(child.manifest ? submoduleStates(child.manifest, prefix + child.path + "/") : [])]);
+}
+async function savePrivateJson(filename: string, value: unknown): Promise<void> {
+  const temporary = `${filename}.${randomBytes(6).toString("hex")}.tmp`;
+  await writeFile(temporary, JSON.stringify(value), { mode: 0o600, flag: "wx" });
+  await rename(temporary, filename); await chmod(filename, 0o600);
+}
+async function sourceSubmoduleBaseline(workspace: Workspace): Promise<SubmoduleState[]> {
+  try { return JSON.parse(await readFile(path.join(path.dirname(workspace.root), "submodule-baseline.json"), "utf8")) as SubmoduleState[]; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if ((await listGitlinks(workspace.original)).length) throw new Error("This run lacks its Git submodule baseline; create a new preview");
+    return [];
+  }
+}
+async function validateSourceSubmodules(workspace: Workspace): Promise<void> {
+  const expected = await sourceSubmoduleBaseline(workspace);
+  const actual = submoduleStates(await inspectGitManifest(workspace.original, { requireClean: true }));
+  if (fingerprint(expected) !== fingerprint(actual)) throw new Error("Original Git submodule state changed; create a new preview");
+}
+
+interface SubmoduleApplyEntry { path: string; beforeHead: string; beforeSignature: string; configFingerprint: string; targetHead: string; afterSignature?: string }
+interface SubmoduleApplyJournal { schemaVersion: 1; reviewFingerprint: string; base: string; target: string; entries: SubmoduleApplyEntry[]; initializedPaths: string[] }
+function manifestRepositories(manifest: GitManifest, prefix = ""): Map<string, GitManifest> {
+  const result = new Map<string, GitManifest>();
+  for (const child of manifest.submodules) if (child.manifest) {
+    const name = prefix + child.path; result.set(name, child.manifest);
+    for (const [key, value] of manifestRepositories(child.manifest, name + "/")) result.set(key, value);
+  }
+  return result;
+}
+async function childRepository(root: string, name: string): Promise<string> {
+  const child = relativeFile(root, name); await safeArtifactParents(root, name);
+  const stat = await lstat(child);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || !(await realpath(child)).startsWith(root + path.sep)) throw new Error("Submodule application path is unsafe");
+  if (await realpath((await git(child, ["rev-parse", "--show-toplevel"])).trim()) !== child) throw new Error("Submodule application metadata changed");
+  return child;
+}
+async function ownSourceSignature(directory: string, state?: GitManifest): Promise<string> {
+  const manifest = state ?? await inspectGitManifest(directory);
+  const status = await git(directory, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=all"]);
+  if (status) throw new Error("Initialized submodule has local changes");
+  return fingerprint({ head: manifest.head, index: manifest.index, files: manifest.files, config: manifest.configFingerprint, branch: await optionalGit(directory, ["symbolic-ref", "--quiet", "HEAD"]) ?? null });
+}
+async function prepareSubmoduleApply(workspace: Workspace, review: MaintenanceReview, originalHead: string): Promise<{ journal: SubmoduleApplyJournal; filename: string }> {
+  const filename = path.join(path.dirname(workspace.root), "submodule-apply-journal.json");
+  const prepared = await inspectGitManifest(workspace.root, { requireClean: true, enforceOwnedMetadata: true });
+  const targets = manifestRepositories(prepared);
+  let journal: SubmoduleApplyJournal | undefined;
+  try { journal = JSON.parse(await readFile(filename, "utf8")) as SubmoduleApplyJournal; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  if (journal) {
+    if (journal.schemaVersion !== 1 || journal.reviewFingerprint !== review.fingerprint || journal.base !== review.base || journal.target !== review.target) throw new Error("Submodule application journal does not match this review");
+    for (const entry of journal.entries) if (targets.get(entry.path)?.head !== entry.targetHead) throw new Error("Prepared submodule target changed since application");
+    return { journal, filename };
+  }
+  if (originalHead === review.base) await validateSourceSubmodules(workspace);
+  const original = await inspectGitManifest(workspace.original, { requireClean: true });
+  const sources = manifestRepositories(original), entries: SubmoduleApplyEntry[] = [];
+  for (const [name, state] of sources) {
+    const target = targets.get(name);
+    if (!target) throw new Error(`Initialized submodule is missing from the prepared target: ${name}`);
+    const source = await childRepository(workspace.original, name);
+    entries.push({ path: name, beforeHead: state.head, beforeSignature: await ownSourceSignature(source, state), configFingerprint: state.configFingerprint, targetHead: target.head });
+  }
+  journal = { schemaVersion: 1, reviewFingerprint: review.fingerprint, base: review.base, target: review.target, entries, initializedPaths: [...sources.keys()].sort() };
+  await savePrivateJson(filename, journal);
+  return { journal, filename };
+}
+async function validateSubmoduleApply(workspace: Workspace, journal: SubmoduleApplyJournal): Promise<void> {
+  const original = await inspectGitManifest(workspace.original);
+  const sources = manifestRepositories(original);
+  if (fingerprint([...sources.keys()].sort()) !== fingerprint(journal.initializedPaths)) throw new Error("Original submodule initialization changed during application");
+  for (const entry of journal.entries) {
+    const state = sources.get(entry.path)!;
+    if (state.configFingerprint !== entry.configFingerprint) throw new Error(`Original submodule configuration changed: ${entry.path}`);
+    const source = await childRepository(workspace.original, entry.path);
+    const signature = await ownSourceSignature(source, state);
+    if (entry.afterSignature) {
+      if (signature !== entry.afterSignature) throw new Error(`Applied submodule changed after application: ${entry.path}`);
+    } else if (state.head === entry.beforeHead) {
+      if (signature !== entry.beforeSignature) throw new Error(`Original submodule changed before application: ${entry.path}`);
+    } else if (state.head !== entry.targetHead) throw new Error(`Original submodule HEAD changed: ${entry.path}`);
+  }
+}
+async function fetchSubmoduleTargets(workspace: Workspace, journal: SubmoduleApplyJournal, hooks: string): Promise<void> {
+  await validateSubmoduleApply(workspace, journal);
+  for (const entry of journal.entries) {
+    const source = await childRepository(workspace.original, entry.path), prepared = await childRepository(workspace.root, entry.path);
+    // Transfer only the reviewed object from the independent checkout, never a configured remote.
+    await git(source, ["-c", `core.hooksPath=${hooks}`, "fetch", "--no-tags", prepared, entry.targetHead]);
+    await git(source, ["cat-file", "-e", `${entry.targetHead}^{commit}`]);
+  }
+  await validateSubmoduleApply(workspace, journal);
+}
+async function syncSubmoduleTargets(workspace: Workspace, journal: SubmoduleApplyJournal, filename: string, hooks: string): Promise<void> {
+  await validateSubmoduleApply(workspace, journal);
+  for (const entry of journal.entries) {
+    const source = await childRepository(workspace.original, entry.path);
+    if (await head(source) !== entry.targetHead) {
+      await validateSubmoduleApply(workspace, journal);
+      await git(source, ["-c", `core.hooksPath=${hooks}`, "checkout", "--no-overwrite-ignore", "--detach", entry.targetHead]);
+    }
+    entry.afterSignature = await ownSourceSignature(source);
+    await savePrivateJson(filename, journal);
+  }
+  await inspectGitManifest(workspace.original, { requireClean: true });
 }
 
 export interface ActivationSession {
@@ -325,23 +439,41 @@ export async function activateMcpServer(workspace: Workspace, activation: NonNul
     return result;
   } finally { await session.close(); }
 }
-export async function applyMaintenance(workspace: Workspace, review: MaintenanceReview, plan: MaintenancePlan, activationSessionFactory: ActivationSessionFactory = defaultSession): Promise<{ applied: boolean; conflicts: string[]; activation?: ActivationResult }> {
+export async function applyMaintenance(workspace: Workspace, review: MaintenanceReview, plan: MaintenancePlan, activationSessionFactory: ActivationSessionFactory = defaultSession): Promise<{ applied: boolean; conflicts: string[]; activation?: ActivationResult; partial?: boolean; error?: string }> {
   await ownGit(workspace);
+  if (await realpath(workspace.original) !== path.resolve(workspace.original)) return { applied: false, conflicts: ["repository-path"] };
   const current = await reviewMaintenance(workspace, plan);
   if (current.fingerprint !== review.fingerprint || current.target !== review.target) throw new Error("Maintenance checkout or artifacts changed since review");
   if (!current.preparedClean) throw new Error("Maintenance checkout has uncommitted source changes; no automatic commit is allowed");
   const originalHead = await head(workspace.original);
-  if (!await clean(workspace.original) || await branch(workspace.original) !== review.branch || ![review.base, review.target].includes(originalHead)) return { applied: false, conflicts: ["repository-baseline"] };
+  const hasSubmodules = (await sourceSubmoduleBaseline(workspace)).length > 0 || (await listGitlinks(workspace.root)).length > 0;
+  if (await branch(workspace.original) !== review.branch || ![review.base, review.target].includes(originalHead)) return { applied: false, conflicts: ["repository-baseline"] };
+  if (!hasSubmodules && !await clean(workspace.original)) return { applied: false, conflicts: ["repository-baseline"] };
   try { await git(workspace.root, ["merge-base", "--is-ancestor", review.base, review.target]); }
   catch { return { applied: false, conflicts: ["non-fast-forward-target"] }; }
+  const hooks = await emptyHooks(path.join(path.dirname(workspace.root), "disabled-hooks"));
+  let submoduleApplication: Awaited<ReturnType<typeof prepareSubmoduleApply>> | undefined;
+  if (hasSubmodules) {
+    try {
+      if (await git(workspace.original, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=all"])) throw new Error("Original repository has local changes");
+      submoduleApplication = await prepareSubmoduleApply(workspace, review, originalHead);
+      await fetchSubmoduleTargets(workspace, submoduleApplication.journal, hooks);
+    } catch (error) {
+      return { applied: originalHead === review.target && originalHead !== review.base, conflicts: ["submodule-baseline"], ...(originalHead === review.target && originalHead !== review.base ? { partial: true } : {}), error: (error as Error).message };
+    }
+  }
   if (originalHead !== review.target) {
     // Copy the verified commit without consulting the mutable remote again.
     await git(workspace.original, ["fetch", "--no-tags", workspace.root, review.target]);
     if (!await clean(workspace.original) || await head(workspace.original) !== review.base || await branch(workspace.original) !== review.branch) return { applied: false, conflicts: ["repository-changed-during-apply"] };
-    const hooks = await emptyHooks(path.join(path.dirname(workspace.root), "disabled-hooks"));
-    await git(workspace.original, ["-c", `core.hooksPath=${hooks}`, "merge", "--ff-only", "--no-edit", review.target]);
+    if (submoduleApplication) await validateSubmoduleApply(workspace, submoduleApplication.journal);
+    await git(workspace.original, ["-c", `core.hooksPath=${hooks}`, "merge", "--ff-only", "--no-edit", "--no-overwrite-ignore", review.target]);
   }
   if (await head(workspace.original) !== review.target) throw new Error("Original repository did not reach the reviewed target");
+  if (submoduleApplication) {
+    try { await syncSubmoduleTargets(workspace, submoduleApplication.journal, submoduleApplication.filename, hooks); }
+    catch (error) { return { applied: true, conflicts: ["submodule-application"], partial: true, error: (error as Error).message }; }
+  }
   const activation = plan.activation ? await activateMcpServer(workspace, plan.activation, activationSessionFactory) : undefined;
   return { applied: true, conflicts: [], ...(activation ? { activation } : {}) };
 }
