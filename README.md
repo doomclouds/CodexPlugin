@@ -39,7 +39,7 @@ npm run build --workspace=@codex-plugin/workflows
 3. 在 `.agents/plugins/marketplace.json` 增加条目。`source.path` 从仓库根目录解析，例如 `./plugins/<name>`。
 4. 给有运行时的插件提供 `build`、`typecheck` 和必要的 `smoke` 脚本，运行相关检查。
 
-市场文件只描述可安装的插件，创建它不会安装插件或修改用户配置。各插件的 `runtime/` 是随 Git 提交的自包含运行包，GitHub 安装不需要在宿主运行 npm install 或构建。修改源代码后先构建、验证，再与运行包一起提交。
+市场文件只描述可安装的插件，创建它不会安装插件或修改用户配置。各插件的 `runtime/` 是随 Git 提交的自包含运行包，GitHub 安装不需要在宿主运行 npm install 或构建。发布插件文件的变化时，保持插件清单、package.json 和 MCP serverInfo 版本一致并递增版本；先构建、验证，再与运行包一起提交，避免复用旧安装缓存。
 
 ## 从 GitHub 安装和同步
 
@@ -61,4 +61,6 @@ codex plugin add workflows@codex-plugin-workspace
 
 ## Workflows
 
-已实现模板列表、脚本读取和当前能力查询。真实代理执行、恢复日志和 UI 尚未接入。使用方式与后续设计见 [插件说明](plugins/workflows/README.md)；宿主扩展边界见 [能力核对](docs/codex-extension-boundaries.md)。
+目标是动态工作流：根据任务生成脚本，并按执行结果动态分支、循环和调度 worker。当前只实现模板列表、脚本读取和能力查询；真实代理执行、恢复日志和 UI 尚未接入。
+
+使用方式见 [插件说明](plugins/workflows/README.md)，已确认的产品方向见 [设计记录](plugins/workflows/docs/design.md)，宿主扩展边界见 [能力核对](docs/codex-extension-boundaries.md)。

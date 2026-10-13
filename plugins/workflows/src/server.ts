@@ -10,7 +10,7 @@ function result(data: Record<string, unknown>): CallToolResult {
 const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 
 export function createServer() {
-  const server = new McpServer({ name: "workflows", version: "0.1.0" });
+  const server = new McpServer({ name: "workflows", version: "0.1.1" });
 
   server.registerTool("workflow_get_capabilities", {
     title: "查看工作流插件能力",

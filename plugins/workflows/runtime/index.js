@@ -36623,7 +36623,7 @@ function result(data) {
 }
 var annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 function createServer() {
-  const server2 = new McpServer({ name: "workflows", version: "0.1.0" });
+  const server2 = new McpServer({ name: "workflows", version: "0.1.1" });
   server2.registerTool("workflow_get_capabilities", {
     title: "\u67E5\u770B\u5DE5\u4F5C\u6D41\u63D2\u4EF6\u80FD\u529B",
     description: "Report the implemented features and pending design decisions. This scaffold cannot execute workflows.",

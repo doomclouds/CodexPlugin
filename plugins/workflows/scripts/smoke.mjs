@@ -13,6 +13,7 @@ await cp(path.join(pluginRoot, "runtime"), path.join(isolatedRoot, "runtime"), {
 await cp(path.join(pluginRoot, "workflows"), path.join(isolatedRoot, "workflows"), { recursive: true });
 await cp(path.join(pluginRoot, "package.json"), path.join(isolatedRoot, "package.json"));
 const config = JSON.parse(await readFile(new URL("../mcp.json", import.meta.url), "utf8"));
+const manifest = JSON.parse(await readFile(new URL("../plugin.json", import.meta.url), "utf8"));
 const entry = config.mcpServers.workflows;
 const transport = new StdioClientTransport({
   command: process.execPath,
@@ -26,6 +27,7 @@ transport.stderr?.on("data", chunk => { stderr += chunk.toString(); });
 
 try {
   await client.connect(transport);
+  assert.equal(client.getServerVersion()?.version, manifest.version);
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map(tool => tool.name).sort(), [
     "workflow_get_capabilities", "workflow_get_template", "workflow_list_templates",
