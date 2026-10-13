@@ -10,10 +10,10 @@ function result(data: Record<string, unknown>): CallToolResult {
 }
 
 const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
-const panelResourceUri = "ui://workflows/prototype/0.1.3.html";
+const panelResourceUri = "ui://workflows/prototype/0.1.4.html";
 
 export function createServer() {
-  const server = new McpServer({ name: "workflows", version: "0.1.3" });
+  const server = new McpServer({ name: "workflows", version: "0.1.4" });
 
   registerAppTool(server, "workflow_open_panel", {
     title: "Workflows",

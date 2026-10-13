@@ -37449,9 +37449,9 @@ function result(data) {
   return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
 }
 var annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
-var panelResourceUri = "ui://workflows/prototype/0.1.3.html";
+var panelResourceUri = "ui://workflows/prototype/0.1.4.html";
 function createServer() {
-  const server2 = new McpServer({ name: "workflows", version: "0.1.3" });
+  const server2 = new McpServer({ name: "workflows", version: "0.1.4" });
   K3(server2, "workflow_open_panel", {
     title: "Workflows",
     description: "Open the Workflows panel prototype using example data. Its buttons simulate local state only; no agents run and no project files change.",

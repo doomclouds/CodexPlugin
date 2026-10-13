@@ -113,7 +113,7 @@
   const completedWorkers = () => [worker('w1','定位变更文件','审查','只读','completed','找到 2 个相关文件'),worker('w2','审查会话刷新逻辑','审查','只读','completed','发现一个边界问题'),worker('w3','检查测试覆盖','审查','只读','completed','定位缺失的回归用例'),worker('w4','复核发现的问题','核实','只读','completed','确认问题可以复现'),worker('w5','修复并补充测试','修复','写入','completed','隔离工作区中的 2 个文件已修改'),worker('w6','运行测试并复核差异','验证','写入','completed','示例测试 12 项通过')];
   const runs = [
     {id:'review',title:'审查会话刷新逻辑并修复问题',execution:'ready',change:'none',tick:-1,workers:[],logs:['动态脚本已生成，等待用户开始'],dirty:false},
-    {id:'stopped',title:'上次运行：修复会话刷新逻辑',execution:'stopped',change:'none',tick:3,workers:completedWorkers().slice(0,6).map((item,index)=>({...item,status:index<4?'completed':index===4?'stopped':'queued',detail:index===4?'停止时保留了工作区中的修改':item.detail})),logs:['用户开始执行','发现问题，创建修复任务','用户停止：中断写入 worker，保留已有进度'],dirty:true},
+    {id:'stopped',title:'上次运行：修复会话刷新逻辑',execution:'stopped',change:'none',tick:3,workers:completedWorkers().slice(0,6).map((item,index)=>({...item,status:index<4?'completed':index===4?'stopped':'queued',detail:index===4?'停止时保留了工作区中的修改':index===5?'等待修复完成':item.detail})),logs:['用户开始执行','发现问题，创建修复任务','用户停止：中断写入 worker，保留已有进度'],dirty:true},
     {id:'reviewable',title:'已完成：会话刷新边界检查',execution:'completed',change:'pending',tick:5,workers:completedWorkers(),logs:['工作流执行已完成','差异与测试结果已汇总，等待用户审查'],dirty:true},
     {id:'conflict',title:'待审查：当前项目已有新改动',execution:'completed',change:'pending',tick:5,workers:completedWorkers(),logs:['隔离工作区中的执行已完成','等待审查，本次应用将演示工作区冲突'],dirty:true},
     {id:'failed',title:'执行失败：检查接口返回类型',execution:'failed',change:'none',tick:0,workers:[worker('w1','检查测试入口','审查','只读','failed','测试入口未找到（示例错误）')],logs:['用户开始执行','测试入口未找到，脚本未处理此错误，执行结束'],dirty:false}
@@ -123,6 +123,9 @@
   let selectedWorker = null;
   let scriptOpen = false;
   const timers = new Map();
+  const delays = new Set();
+  function schedule(callback, milliseconds) { const handle=setTimeout(()=>{delays.delete(handle);callback();},milliseconds);delays.add(handle); }
+  function teardown() {for(const timer of timers.values())clearInterval(timer);timers.clear();for(const delay of delays)clearTimeout(delay);delays.clear();}
   const run = () => runs.find(item => item.id === selectedRun);
   const code = ["export const meta = { name: 'review-session',", "  description: '审查会话刷新边界，必要时修复',", "  phases: [{title:'审查'}, {title:'核实'},", "           {title:'修复'}, {title:'验证'}] };", "", "const schema = {type:'array', items:{type:'string'}};", "const files = await agent('找出相关变更文件', {schema});", "const findings = await pipeline(files ?? [],", "  file => agent(`审查 ${file}，返回问题列表`,", "    {schema, phase:'审查'}),", "  issues => agent(`复核 ${JSON.stringify(issues)}`,", "    {schema, phase:'核实'}));", "const issues = findings.flatMap(result => result ?? []);", "", "if (issues.length > 0) {", "  await agent(`修复 ${JSON.stringify(issues)}`,", "    {phase:'修复'});", "  await agent('运行测试并复核最终差异', {phase:'验证'});", "}", "return issues;"].join('\n');
   function persistSelection() {
@@ -191,8 +194,8 @@
     if(item.tick===1){item.workers[0].status='completed';item.workers.push(worker('w2','审查会话刷新逻辑','审查','只读','running','检查刷新逻辑的并发边界'),worker('w3','检查测试覆盖','审查','只读','running','查找相关回归用例'));log(item,'发现 2 个相关文件，动态创建 2 个并行审查任务');}
     if(item.tick===2){item.workers.find(w=>w.id==='w2').status='completed';item.workers.push(worker('w4','复核发现的问题','核实','只读','running','根据审查结果核实问题'));log(item,'一个审查任务发现问题，新增核实任务；其他审查继续执行');}
     if(item.tick===3){item.workers.forEach(w=>w.status='completed');item.workers.push(worker('w5','修复并补充测试','修复','写入','running','在隔离工作区修改 2 个文件'),worker('w6','运行测试并复核差异','验证','写入','queued','等待修复完成'));item.dirty=true;log(item,'确认问题，创建写入任务；验证任务等待修复完成');}
-    if(item.tick===4){item.workers.find(w=>w.id==='w5').status='completed';item.workers.find(w=>w.id==='w6').status='running';log(item,'修复完成，释放写入槽位，开始验证');}
-    if(item.tick===5){item.workers.forEach(w=>w.status='completed');item.execution='completed';item.change='pending';clearInterval(timers.get(item.id));timers.delete(item.id);log(item,'执行已完成，统一汇总差异和验证结果；等待用户审查并应用');}
+    if(item.tick===4){const writer=item.workers.find(w=>w.id==='w5');writer.status='completed';writer.detail='隔离工作区中的 2 个文件已修改';const verifier=item.workers.find(w=>w.id==='w6');verifier.status='running';verifier.detail='正在运行测试并复核最终差异';log(item,'修复完成，释放写入槽位，开始验证');}
+    if(item.tick===5){item.workers.forEach(w=>w.status='completed');item.workers.find(w=>w.id==='w6').detail='示例测试 12 项通过';item.execution='completed';item.change='pending';clearInterval(timers.get(item.id));timers.delete(item.id);log(item,'执行已完成，统一汇总差异和验证结果；等待用户审查并应用');}
     render();
   }
   function start(item,resume=false) {
@@ -204,11 +207,11 @@
   function stop(item) {
     clearInterval(timers.get(item.id));timers.delete(item.id);
     item.execution='stopping';item.workers.filter(w=>w.status==='running').forEach(w=>w.status='stopping');log(item,'用户停止：停止派发新任务，请求中断全部活跃 worker');render();
-    setTimeout(()=>{item.workers.filter(w=>w.status==='stopping').forEach(w=>w.status='stopped');item.execution='stopped';log(item,'worker 已结束；示例进度、结果和工作区改动保留');render();persistSelection();},750);
+    schedule(()=>{item.workers.filter(w=>w.status==='stopping').forEach(w=>w.status='stopped');item.execution='stopped';log(item,'worker 已结束；示例进度、结果和工作区改动保留');render();persistSelection();},750);
   }
   function apply(item) {
     item.change='applying';log(item,'用户点击应用，检查当前项目与工作区差异');render();
-    setTimeout(()=>{item.change=item.id==='conflict'?'conflict':'applied';log(item,item.change==='conflict'?'发现应用冲突，保留当前项目，等待处理':'示例应用完成；没有修改真实文件');render();persistSelection();},900);
+    schedule(()=>{item.change=item.id==='conflict'?'conflict':'applied';log(item,item.change==='conflict'?'发现应用冲突，保留当前项目，等待处理':'示例应用完成；没有修改真实文件');render();persistSelection();},900);
   }
   $('#wf-run-select').addEventListener('change',event=>{selectedRun=event.target.value;selectedWorker=null;render();persistSelection();});
   root.addEventListener('click',event=>{
@@ -223,8 +226,8 @@
     if(action==='apply'&&item.execution==='completed'&&item.change==='pending'&&selectedTab==='diff')apply(item);
     if(action)persistSelection();
   });
-  window.addEventListener('pagehide',()=>{for(const timer of timers.values())clearInterval(timer);timers.clear();});
-  window.addEventListener('workflows-prototype-teardown',()=>{for(const timer of timers.values())clearInterval(timer);timers.clear();});
+  window.addEventListener('pagehide',teardown);
+  window.addEventListener('workflows-prototype-teardown',teardown);
   render();
 })();
 </script>

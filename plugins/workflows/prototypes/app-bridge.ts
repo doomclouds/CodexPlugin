@@ -1,7 +1,7 @@
 // MCP App hosting probe only. This bridge never calls a worker or mutating tool.
 import { App, applyDocumentTheme } from "@modelcontextprotocol/ext-apps";
 
-const app = new App({ name: "Workflows prototype", version: "0.1.3" }, {}, { autoResize: true });
+const app = new App({ name: "Workflows prototype", version: "0.1.4" }, {}, { autoResize: true });
 app.onhostcontextchanged = context => {
   if (context.theme) applyDocumentTheme(context.theme);
 };

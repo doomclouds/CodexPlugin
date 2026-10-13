@@ -32,7 +32,7 @@ esbuild 将运行依赖打包为 `runtime/index.js`，`mcp.json` 使用 `${PLUGI
 
 面板使用“概览、任务、差异、日志”四个区域；示例覆盖待开始、运行、停止与恢复、执行完成、应用和冲突。全部交互使用内存示例数据，不是实际任务运行记录。状态草案见 [面板与状态](docs/panel-state.md)。
 
-插件通过 `ui://workflows/prototype/0.1.3.html` 提供自包含 MCP App 资源，MIME 为 `text/html;profile=mcp-app`，声明会话面板与全局插件入口。宿主读取资源并在 iframe 中承载，标准 `App.connect()` 完成握手；这不是修改 Codex 原生子代理卡片的接口。App 入口是否实际可用，以宿主验证为准。
+插件通过 `ui://workflows/prototype/0.1.4.html` 提供自包含 MCP App 资源，MIME 为 `text/html;profile=mcp-app`，声明会话面板与全局插件入口。宿主读取资源并在 iframe 中承载，标准 `App.connect()` 完成握手；这不是修改 Codex 原生子代理卡片的接口。App 入口是否实际可用，以宿主验证为准。
 
 开发时可以运行以下命令，从输出的 loopback 地址预览。这个临时网页只用于开发与布局检查，不是正式面板的默认打开方式：
 
