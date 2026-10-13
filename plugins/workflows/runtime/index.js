@@ -39014,7 +39014,7 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.2.1",
+    version: "0.2.2",
     stage: "runtime-v1",
     available: ["list-templates", "read-template", "save-template", "cross-project-reuse", "preview", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: true },
@@ -39351,7 +39351,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.2.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.2.2" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object3(object3(await session.request("config/read", { cwd: request.cwd })).config);
       const config2 = { "web_search": "disabled" };
@@ -46228,7 +46228,7 @@ var panelResourceUris = [
   "ui://workflows/panel/0.2.1.html"
 ];
 function createServer(engine2) {
-  const serverInfo = { name: "workflows", version: "0.2.1" };
+  const serverInfo = { name: "workflows", version: "0.2.2" };
   const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);

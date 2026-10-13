@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "workflows",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Dynamic JavaScript workflows with Codex workers, replay recovery, isolated changes, and a task panel.",
   "license": "MIT",
   "extensions": {
@@ -14,7 +14,11 @@
         "shortDescription": "动态编排、停止恢复与改动审查",
         "longDescription": "预览动态脚本后启动真实 Codex worker，支持停止、持久化恢复、隔离写入及最终差异审查与应用。",
         "category": "Productivity",
-        "capabilities": ["Read", "Write", "Interactive"],
+        "capabilities": [
+          "Read",
+          "Write",
+          "Interactive"
+        ],
         "defaultPrompt": "根据当前任务起草动态工作流，保存预览并打开 Workflows 面板。"
       }
     }

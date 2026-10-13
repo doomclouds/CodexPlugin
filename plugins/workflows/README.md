@@ -2,9 +2,9 @@
 
 <img src="assets/workflows-icon.png" alt="Workflows 产品图标" width="64" height="64">
 
-`0.2.1` 提供动态工作流第一版：预览 JavaScript 脚本后启动真实 Codex worker，按结果分支、循环和调度任务；支持停止、磁盘保存和手动恢复。写入先在独立快照中完成，全部执行结束后统一审查，再由用户点击“应用改动”。
+`0.2.2` 提供动态工作流第一版：预览 JavaScript 脚本后启动真实 Codex worker，按结果分支、循环和调度任务；支持停止、磁盘保存和手动恢复。写入先在独立快照中完成，全部执行结束后统一审查，再由用户点击“应用改动”。
 
-需要 Node.js 22 或更新版本、支持 `app-server` 的 Codex CLI 和已有登录。插件不负责登录或修改全局配置。本机真实 adapter 与完整执行流程已验证；新版的原生宿主面板验收仍需安装对应版本后进行，见 [0.2.0 验证记录](../../docs/workflows-0.2-verification.md)。
+需要 Node.js 22 或更新版本、支持 `app-server` 的 Codex CLI 和已有登录。插件不负责登录或修改全局配置。打开面板前核对工具返回的运行版本；安装版本和当前连接的服务版本可能不同。
 
 ## 使用
 
@@ -39,13 +39,13 @@ phase("汇总");
 return await agent(`汇总并排除误报：${JSON.stringify(findings.filter(Boolean))}`);
 ```
 
-对应 MCP 参数如下；`script` 表示上述脚本文本，这不是直接用 Node 执行的程序：
+对应 MCP 参数如下；`script` 表示上述脚本文本，`projectAPath` 和 `projectBPath` 由用户提供，不预设机器目录：
 
 ```javascript
 workflow_save_template({ script, args: { files: ["src/Example.cs"] }, allowWrite: false });
 
-workflow_preview({ projectPath: "/path/to/project-a", script, args: { files: ["src/Example.cs"] } });
-workflow_preview({ projectPath: "/path/to/project-b", script, args: { files: ["src/Other.cs"] } });
+workflow_preview({ projectPath: projectAPath, script, args: { files: ["src/Example.cs"] } });
+workflow_preview({ projectPath: projectBPath, script, args: { files: ["src/Other.cs"] } });
 ```
 
 库同时列出内置定义与用户定义。内置 ID 为 `review-changes`；用户定义 ID 为 `saved:<meta.name>`。保存定义、读取定义和保存预览都不启动 worker。当前没有定义删除、导入导出或远端同步入口。
@@ -95,22 +95,26 @@ workflow_preview({ projectPath: "/path/to/project-b", script, args: { files: ["s
 
 正常关闭面板会停止其启动的运行，MCP 正常关闭也等待退出并保存。面板每 5 秒续租，租约有效期 90 秒；关闭事件未送达时由到期检测兜底。异常退出后的记录重新加载时整理为已停止或应用失败，用户手动继续。实际宿主事件送达仍需新版验证。
 
-## 构建与验证
+## 源码构建与验证
 
-```powershell
-npm ci --ignore-scripts
-npm run check
+发布完整插件目录，保留技能参考文件及全部清单引用资源。esbuild 将 MCP、内嵌 WASM 的脚本 Worker 和面板打包到 `runtime/`。`${PLUGIN_ROOT}` 定位真实入口，不依赖宿主工作目录；GitHub 市场安装直接使用运行包，不需要仓库外依赖或宿主构建。
+
+单独使用插件源码时，在插件目录安装声明的开发依赖即可构建和检查，不需要父工程配置：
+
+```sh
+npm install --ignore-scripts
+npm run typecheck
+npm run build
+npm run smoke
 ```
 
-esbuild 将 MCP、内嵌 WASM 的脚本 Worker 和面板打包到 `runtime/`。`${PLUGIN_ROOT}` 定位真实入口，不依赖宿主工作目录。分发保留 `plugin.json`、`mcp.json`、`package.json`、`runtime/`、`assets/`、`skills/` 和 `workflows/`；GitHub 市场安装不需要仓库外依赖或宿主构建。
-
-日常检查覆盖类型、构建、结构、独立 MCP 包、沙箱、调度、持久化、工作区、模板与面板。`TestAdapter` 和协议进程夹具是明确的测试替身，不作为模型实际执行证据。可选真实验证会调用模型：
+日常检查覆盖类型、构建、结构、独立 MCP 包、沙箱、调度、持久化、工作区、模板与面板。测试中的 adapter 与协议进程夹具不调用模型。可选真实验证会调用模型：
 
 ```powershell
-npm run smoke:real --workspace=@codex-plugin/workflows
+npm run smoke:real
 ```
 
-`ui://workflows/panel.html` 是稳定的自包含 MCP App 资源，支持全局和会话入口。初次连接和更新时应用宿主主题、颜色、字体 CSS、字号、行高和相关变量；缺失变量使用回退。见 [主题检查](../../design-qa.md)。[旧宿主记录](../../docs/mcp-app-host-verification.md) 仅适用于 `0.1.4`，不能代替新版原生宿主验收。
+`ui://workflows/panel.html` 是稳定的自包含 MCP App 资源，支持全局和会话入口。初次连接和更新时应用宿主主题、颜色、字体 CSS、字号、行高和相关变量；缺失变量使用回退。
 
 ## 升级后的宿主连接
 
@@ -118,4 +122,4 @@ npm run smoke:real --workspace=@codex-plugin/workflows
 
 GitHub 市场升级完成不代表已经运行的 MCP 进程重新加载。旧进程可能仍持有已被更新移除的缓存目录，或无法识别新版资源地址。升级后需要重新加载宿主中的 Workflows MCP 连接，再打开面板；兼容地址只能由新版服务提供，不能修复仍运行的旧进程。`workflow_get_capabilities` 和 `workflow_open_panel` 的结果包含 `version`，可与安装版本核对；面板工具的资源地址应为上述稳定地址。
 
-详细契约见 [设计记录](docs/design.md)、[面板与状态](docs/panel-state.md)、[运行时设计](docs/runtime-design.md) 和 [Claude 参考](docs/claude-reference.md)。
+详细调用说明见技能目录内的 [接口与脚本参考](skills/workflows/references/runtime.md)。该资料随插件发布，不依赖开发工程。

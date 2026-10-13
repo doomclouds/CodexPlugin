@@ -41,4 +41,4 @@ DeepSeek Harness 公开 Web Client slots，可使用 `ctx.slots.register()` 和 
 1. 主聊天委派原生子代理：上下文衔接直接，插件辅助编排与记录；完整脚本调度、取消和恢复需要验证控制能力。
 2. 插件通过 app-server 管理独立 worker：适合并发、结构化结果、日志和恢复；需要实现上下文、权限及 UI 适配。
 
-用户已选择第一版采用插件任务面板，支持多个只读 worker 并行和 1 个隔离的写入 worker。停止或关闭 App 时中断运行并保存进度，之后由用户手动恢复。当前建议由插件管理独立 worker；详细规则见 [动态工作流设计记录](../plugins/workflows/docs/design.md)。基础模板尚未接入代理执行或原生 UI 注入。
+用户已选择第一版采用插件任务面板，支持多个只读 worker 并行和 1 个隔离的写入 worker。停止或关闭 App 时中断运行并保存进度，之后由用户手动恢复。当前建议由插件管理独立 worker；详细规则见 [动态工作流设计记录](workflows/design.md)。基础模板尚未接入代理执行或原生 UI 注入。

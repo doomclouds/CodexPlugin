@@ -38,4 +38,4 @@
 | 隔离 | 文件快照，isolation worktree 当前不创建 Git worktree |
 | 未支持 | Claude 全部选项、stall 自动重启、交互问答、token budget API |
 
-任务结果缓存与模型 prompt cache 不同。本插件复用保存结果，不据 Claude prompt-cache 机制推断 Codex 计费或命中率。契约见 [运行时设计](runtime-design.md)，使用见 [插件说明](../README.md)。
+任务结果缓存与模型 prompt cache 不同。本插件复用保存结果，不据 Claude prompt-cache 机制推断 Codex 计费或命中率。契约见 [运行时设计](runtime-design.md)，使用见 [插件说明](../../plugins/workflows/README.md)。

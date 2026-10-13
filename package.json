@@ -16,14 +16,12 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "validate": "node scripts/validate-plugins.mjs",
     "smoke": "npm run smoke --workspaces --if-present",
-    "check": "npm run typecheck && npm run build && npm run validate && npm run smoke",
+    "check": "npm run typecheck && npm run build && npm run validate && npm run test:portability && npm run smoke",
     "dev:workflows": "npm run dev --workspace=@codex-plugin/workflows",
-    "prototype:workflows": "npm run prototype --workspace=@codex-plugin/workflows"
+    "prototype:workflows": "npm run prototype --workspace=@codex-plugin/workflows",
+    "test:portability": "node --test scripts/tests/portability.test.mjs"
   },
   "devDependencies": {
-    "@types/node": "24.19.2",
-    "@types/proper-lockfile": "4.1.4",
-    "esbuild": "0.28.2",
-    "typescript": "5.9.3"
+    "acorn": "8.19.0"
   }
 }

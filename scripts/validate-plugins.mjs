@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, readdir, access } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkPluginPortability, formatPortabilityIssue } from "./check-plugin-portability.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const readJson = async relative => JSON.parse(await readFile(path.join(root, relative), "utf8"));
@@ -86,5 +87,8 @@ for (const name of pluginDirs) {
     assert.match(content, new RegExp(`\\nname: ${skill.name}\\n`));
     assert.match(content, /\ndescription: .+/);
   }
-  console.log(`Validated ${name}: manifest, marketplace, component paths, skill metadata.`);
+  const portability = await checkPluginPortability(directory, { repositoryRoot: root });
+  for (const warning of portability.warnings) console.warn(formatPortabilityIssue(warning));
+  assert.equal(portability.issues.length, 0, `Plugin portability failed:\n${portability.issues.map(formatPortabilityIssue).join("\n")}`);
+  console.log(`Validated ${name}: manifest, marketplace, component paths, skill metadata, portability (${portability.filesChecked} files).`);
 }

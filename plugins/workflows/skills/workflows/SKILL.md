@@ -7,7 +7,7 @@ description: 查看、起草、保存和跨项目复用 Workflows 动态工作�
 
 ## 起草与预览
 
-读取 [设计记录](../../docs/design.md) 和 [运行时契约](../../docs/runtime-design.md)。用 `workflow_list_templates`、`workflow_get_template` 查看内置或用户定义，再按任务调整脚本和 JSON 输入。
+用 `workflow_list_templates`、`workflow_get_template` 查看内置或用户定义，再按任务调整脚本和 JSON 输入。需要具体字段或调用规则时读取 [接口与脚本参考](references/runtime.md)。
 
 脚本首条语句必须是纯字面量 `export const meta`，含小写短横线名称、描述和可选阶段。使用 `args`、`agent`、`parallel`、`pipeline`、`phase`、`log` 及普通分支循环，最终返回有用结果。不得直接调用 Node、文件、shell、网络、模块、定时器、时钟或随机数；不要把 DSL 当作 Node 程序执行。
 

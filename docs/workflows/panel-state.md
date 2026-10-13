@@ -53,4 +53,4 @@
 
 SDK 的 `applyDocumentTheme`、`applyHostStyleVariables`、`applyHostFonts` 分别应用主题、样式变量和字体 CSS；初次上下文及更新均同步。面板与控件继承宿主字体，代码用宿主等宽字体，字号、行高、字重、颜色、圆角等使用宿主变量，缺失时回退。
 
-[主题检查](../../../design-qa.md) 记录开发浏览器的视觉验证。[0.2.0 验证](../../../docs/workflows-0.2-verification.md) 与 [旧宿主记录](../../../docs/mcp-app-host-verification.md) 分开；旧 `0.1.4` 原型日志不证明新版原生面板验收。
+[主题检查](../../design-qa.md) 记录开发浏览器的视觉验证。[0.2.0 验证](../workflows-0.2-verification.md) 与 [旧宿主记录](../mcp-app-host-verification.md) 分开；旧 `0.1.4` 原型日志不证明新版原生面板验收。
