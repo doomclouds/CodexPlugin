@@ -1,14 +1,40 @@
 ---
 name: workflows
-description: Inspect Codex workflow templates and draft multi-agent orchestration scripts for the Workflows plugin. Use when the user asks to view, design, or adapt a workflow.
+description: 查看、起草、保存和跨项目复用 Workflows 动态工作流，通过插件面板预览、执行、停止恢复与审查改动。用户要求动态编排、工作流库或工作流执行时使用。
 ---
 
-Use `workflow_get_capabilities` to establish which features this plugin currently implements. This scaffold supports inspection and drafting; it does not execute workflow scripts.
+先调用 `workflow_get_capabilities`，按当前服务返回的版本与能力工作，不把本地构建、旧安装或测试替身当作当前聊天已加载的执行器。
 
-Use `workflow_list_templates` to find examples and `workflow_get_template` to read a selected script. The example follows Claude-style `meta`, `agent`, `parallel`, `pipeline`, and `phase` syntax as a discussion draft, not a committed runtime contract.
+## 起草与预览
 
-Use `workflow_open_panel` to show the MCP App panel prototype when the user wants to inspect the interface. Clearly identify its example data and simulated controls; its start, stop, resume, and apply buttons do not execute workers or change project files. Prefer a supported host panel entrypoint over the development-only localhost preview.
+读取 [设计记录](../../docs/design.md) 和 [运行时契约](../../docs/runtime-design.md)。用 `workflow_list_templates`、`workflow_get_template` 查看内置或用户定义，再按任务调整脚本和 JSON 输入。
 
-When designing or drafting a workflow, read the [design record](../../docs/design.md) for the accepted execution, stopping, and recovery rules. Distinguish these design targets from implemented features. Describe the workflow's input, stages, agent outputs, completion condition, and failure handling. Keep intermediate results within the intended workflow runtime and return a useful final result to the conversation.
+脚本首条语句必须是纯字面量 `export const meta`，含小写短横线名称、描述和可选阶段。使用 `args`、`agent`、`parallel`、`pipeline`、`phase`、`log` 及普通分支循环，最终返回有用结果。不得直接调用 Node、文件、shell、网络、模块、定时器、时钟或随机数；不要把 DSL 当作 Node 程序执行。
 
-For execution requests, report that the adapter is not yet connected and explain the missing capability. Do not execute the script as an unrestricted Node program or substitute an unrelated agent run while claiming this plugin executed it. Normal user-authorized work can still proceed separately with existing tools.
+明确输入、阶段、输出、结束条件与错误处理。`parallel` 接受函数数组，单项失败返回 `null` 并记日志；`pipeline` 各输入独立推进，失败或 `null` 停止该输入后续阶段。直接 `await agent` 的错误可以捕获。结构化输出传 JSON `schema`，不要假设纯文本自动变为 JSON。
+
+目标项目必须明确，不从插件启动目录猜测。写入要求 Git 仓库根目录、预览 `allowWrite: true` 与任务 `{ mode: "write" }`。默认任务只读；只读读取范围不限于 `cwd`，外部工具与网络关闭。测试由快照内真实 worker 执行，按实际报告说明结果。
+
+用 `workflow_preview` 保存计划，或以当前 `revision` 用 `workflow_update` 更新，再 `workflow_open_panel` 展示。预览不执行。用户在面板开始；不得绕过用户动作调用仅 App 可见的开始或恢复工具。
+
+## 保存与复用
+
+用户希望保留定义时，用 `workflow_save_template` 保存脚本、默认输入、写入范围和限制，不绑定项目和运行结果。ID 为 `saved:<meta.name>`，更新前读取当前定义版本。
+
+同一定义可为不同项目创建独立预览与运行。核对目标和输入，不借用另一项目的结果或快照当作缓存。库定义更新不自动更改历史运行。
+
+## 执行、停止与恢复
+
+用 `workflow_get_run`、`workflow_list_runs` 读取真实任务、尝试、用量、结果与日志。默认只读并发 4、最多 16；同一数据目录实际同时最多 1 个写入 worker。
+
+停止可调用 `workflow_stop`，等待真实退出与保存；正在停止不等于已停止。恢复由用户在面板触发：重放脚本，复用有效结果，重跑中断任务；首个失败或调用指纹变化使后续缓存失效。保留快照可能已有修改，重试先检查内容。
+
+面板或 MCP 正常关闭停止并保存，未收到面板关闭事件由租约到期兜底。重开只加载，不自动执行或应用。快照缺失、项目变更和外部运行锁按实际错误处理，不静默重建后声称已经恢复。
+
+## 审查与应用
+
+执行完成后汇总实际 worker 报告、测试输出与差异，保留未验证事项。快照修改尚未进入当前项目。
+
+用户在差异页点击应用后才修改项目。指纹或基线变化时展示冲突或失败并保留日志，不自动覆盖。应用不是提交、推送或部署；这些动作按用户具体授权执行。
+
+优先使用 MCP App 宿主面板，localhost 仅供开发。主题、变量、字体和字号继承宿主；旧原型加载记录不证明新版宿主验收。

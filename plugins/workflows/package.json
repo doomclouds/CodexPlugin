@@ -1,6 +1,6 @@
 {
   "name": "@codex-plugin/workflows",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -9,12 +9,17 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json --noEmit",
     "dev": "node --experimental-strip-types src/index.ts",
     "start": "node runtime/index.js",
-    "smoke": "node scripts/smoke.mjs",
+    "smoke": "node scripts/smoke.mjs && node --experimental-strip-types --test tests/*.test.ts",
+    "smoke:real": "node --experimental-strip-types scripts/real-smoke.ts --real-workers",
     "prototype": "node prototypes/serve.mjs"
   },
   "dependencies": {
+    "@jitl/quickjs-singlefile-cjs-release-sync": "0.32.0",
     "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "1.32.1",
+    "acorn": "8.19.0",
+    "proper-lockfile": "4.1.2",
+    "quickjs-emscripten-core": "0.32.0",
     "zod": "4.6.7"
   }
 }

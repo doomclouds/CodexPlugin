@@ -5,8 +5,12 @@
   "type": "module",
   "description": "Independent Codex plugins maintained in one repository.",
   "license": "MIT",
-  "engines": { "node": ">=22" },
-  "workspaces": ["plugins/*"],
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "plugins/*"
+  ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
@@ -18,6 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "24.19.2",
+    "@types/proper-lockfile": "4.1.4",
     "esbuild": "0.28.2",
     "typescript": "5.9.3"
   }

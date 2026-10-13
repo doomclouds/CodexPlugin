@@ -19,6 +19,7 @@ const transport = new StdioClientTransport({
   command: process.execPath,
   args: entry.args.map(argument => argument.replaceAll("${PLUGIN_ROOT}", isolatedRoot)),
   cwd: tmpdir(),
+  env: { ...process.env, WORKFLOWS_DATA_DIR: path.join(isolatedRoot, "data") },
   stderr: "pipe",
 });
 const client = new Client({ name: "workflows-smoke", version: "0.1.0" });
@@ -31,19 +32,38 @@ try {
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map(tool => tool.name).sort(), [
     "workflow_get_capabilities", "workflow_get_template", "workflow_list_templates", "workflow_open_panel",
-  ]);
+    "workflow_save_template", "workflow_preview", "workflow_update", "workflow_list_runs", "workflow_get_run", "workflow_stop", "workflow_panel_lease", "workflow_start", "workflow_resume", "workflow_cancel_task", "workflow_apply",
+  ].sort());
   const panelTool = tools.find(tool => tool.name === "workflow_open_panel");
   assert.deepEqual(panelTool._meta["openai/ui"].entrypoints, [{ type: "thread" }, { type: "global" }]);
   const panelResult = await client.callTool({ name: "workflow_open_panel", arguments: {} });
-  assert.equal(panelResult.structuredContent.prototype, true);
-  assert.equal(panelResult.structuredContent.executionAvailable, false);
+  assert.equal(panelResult.structuredContent.prototype, false);
+  assert.equal(panelResult.structuredContent.executionAvailable, true);
   const panelResource = await client.readResource({ uri: panelTool._meta.ui.resourceUri });
   assert.equal(panelResource.contents[0].mimeType, "text/html;profile=mcp-app");
-  assert.match(panelResource.contents[0].text, /workflow-panel-prototype/);
+  assert.match(panelResource.contents[0].text, /workflow-panel/);
+  for (const name of ["workflow_start", "workflow_resume", "workflow_apply", "workflow_cancel_task"]) assert.deepEqual(tools.find(tool => tool.name === name)._meta.ui.visibility, ["app"]);
 
   const capabilities = await client.callTool({ name: "workflow_get_capabilities", arguments: {} });
   assert.equal(capabilities.isError, undefined);
-  assert.equal(capabilities.structuredContent.execution.available, false);
+  assert.equal(capabilities.structuredContent.execution.available, true);
+  const preview = await client.callTool({ name: "workflow_preview", arguments: { projectPath: tmpdir(), script: 'export const meta = { name: "smoke", description: "Standalone runtime check" }; return args.value + 1;', args: { value: 6 } } });
+  assert.equal(preview.isError, undefined);
+  assert.equal(preview.structuredContent.run.execution, "draft");
+  const lease = await client.callTool({ name: "workflow_panel_lease", arguments: {} });
+  const runId = preview.structuredContent.run.id;
+  const started = await client.callTool({ name: "workflow_start", arguments: { id: runId, revision: preview.structuredContent.run.revision, leaseId: lease.structuredContent.leaseId } });
+  assert.equal(started.isError, undefined);
+  let finished;
+  for (let index = 0; index < 100; index++) {
+    const current = await client.callTool({ name: "workflow_get_run", arguments: { id: runId } });
+    finished = current.structuredContent.run;
+    if (finished.execution !== "running") break;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.equal(finished.execution, "completed", finished.error);
+  assert.equal(finished.result, 7);
+  await client.callTool({ name: "workflow_panel_lease", arguments: { leaseId: lease.structuredContent.leaseId, release: true } });
 
   const catalog = await client.callTool({ name: "workflow_list_templates", arguments: {} });
   const templateId = catalog.structuredContent.templates[0].id;

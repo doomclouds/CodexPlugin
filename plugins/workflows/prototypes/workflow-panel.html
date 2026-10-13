@@ -1,16 +1,39 @@
-<!-- PROTOTYPE: inspect panel layout and local state transitions with example data; no agents or file mutations. -->
+<!-- The host bridge renders persisted workflow data; standalone preview stays offline. -->
 <div id="workflow-panel-prototype" class="viz-dotted-background">
-  <section class="wf-window" aria-label="Workflows 任务面板交互原型">
+  <section class="wf-window" aria-label="Workflows 任务面板">
     <header class="wf-header">
-      <div class="wf-brand"><span class="wf-title">Workflows</span><span class="wf-prototype-label">交互原型 · 示例数据</span></div>
-      <div class="wf-project">当前项目 / 示例项目</div>
+      <div class="wf-brand"><span class="wf-title">Workflows</span><span id="wf-connection" class="wf-prototype-label" role="status">离线预览 · 连接宿主后可查看真实运行记录</span></div>
+      <div id="wf-project" class="wf-project">项目尚未选择</div>
     </header>
     <div class="wf-run-picker">
       <label for="wf-run-select">运行记录</label>
-      <select id="wf-run-select" aria-label="查看示例运行记录"></select>
+      <select id="wf-run-select" aria-label="查看运行记录" disabled><option>暂无运行记录</option></select><button id="wf-refresh" type="button" disabled>刷新</button><button id="wf-new" type="button" disabled>新建</button>
     </div>
+    <div class="wf-run-picker">
+      <label for="wf-template-select">工作流库</label>
+      <select id="wf-template-select" aria-label="选择工作流定义" disabled><option value="">暂无工作流定义</option></select>
+      <button id="wf-load-template" type="button" disabled>载入到新运行</button>
+    </div>
+    <div id="wf-notification" class="wf-alert" role="alert" hidden></div>
+    <details id="wf-editor" class="wf-editor">
+      <summary>新建或编辑工作流</summary>
+      <form id="wf-form">
+        <label for="wf-project-path">项目目录（绝对路径）</label>
+        <input id="wf-project-path" name="projectPath" type="text" required autocomplete="off" spellcheck="false" placeholder="从宿主读取不到项目时，请填写目录" disabled>
+        <label for="wf-script">动态脚本</label>
+        <textarea id="wf-script" name="script" rows="12" required spellcheck="false" placeholder="粘贴包含 export const meta 的工作流脚本" disabled></textarea>
+        <label for="wf-args">输入参数（JSON）</label>
+        <textarea id="wf-args" name="args" rows="3" required spellcheck="false" disabled>{}</textarea>
+        <label class="wf-checkbox"><input id="wf-allow-write" name="allowWrite" type="checkbox" disabled>允许在隔离工作区修改代码和运行测试</label>
+        <p class="wf-muted">预览只校验并保存脚本；点击“开始”后才调度 worker。</p>
+        <div id="wf-template-help" class="wf-muted"></div>
+        <div class="wf-actions"><button id="wf-save" class="wf-primary" type="submit" disabled>保存预览</button><button id="wf-save-definition" type="button" disabled>保存到工作流库</button><button id="wf-editor-cancel" type="button">收起</button></div>
+        <div id="wf-editor-error" class="wf-alert" role="alert" hidden></div>
+        <div id="wf-editor-status" class="wf-notice" role="status" hidden></div>
+      </form>
+    </details>
     <div class="wf-run-header">
-      <div><h2 id="wf-run-title"></h2><div id="wf-run-meta" class="wf-muted"></div></div>
+      <div><h2 id="wf-run-title">暂无运行记录</h2><div id="wf-run-meta" class="wf-muted"></div></div>
       <div id="wf-actions" class="wf-actions"></div>
     </div>
     <div class="wf-status-row" aria-live="polite">
@@ -25,209 +48,115 @@
       <button type="button" id="wf-tab-logs" class="cursor-interaction" role="tab" aria-controls="wf-panel-logs" aria-selected="false" data-tab="logs">日志</button>
     </nav>
     <div class="wf-content">
-      <section id="wf-panel-overview" role="tabpanel" aria-labelledby="wf-tab-overview"></section>
+      <section id="wf-panel-overview" role="tabpanel" aria-labelledby="wf-tab-overview"><div class="wf-empty">当前为离线预览。请从 Workflows 插件打开面板；这里不会模拟执行任务。</div></section>
       <section id="wf-panel-tasks" role="tabpanel" aria-labelledby="wf-tab-tasks" hidden></section>
       <section id="wf-panel-diff" role="tabpanel" aria-labelledby="wf-tab-diff" hidden></section>
       <section id="wf-panel-logs" role="tabpanel" aria-labelledby="wf-tab-logs" hidden></section>
     </div>
-    <footer class="wf-footer"><span>只读任务可并行 · 写入任务上限 1</span><span>示例交互不会执行代理或修改文件</span></footer>
+    <footer class="wf-footer"><span>只读任务可并行 · 写入任务上限 1</span><span>开始与应用均由你点击确认</span></footer>
   </section>
 </div>
 <style>
-#workflow-panel-prototype{padding:12px;color-scheme:light dark;--wf-bg:light-dark(#fff,#18191b);--wf-surface:light-dark(#f6f7f8,#222428);--wf-text:light-dark(#202326,#eceef0);--wf-muted:light-dark(#616870,#aeb4bd);--wf-border:light-dark(#e0e3e7,#36393e);--wf-selected:light-dark(#e9edf2,#303640);--wf-strong:light-dark(#252a32,#edf0f4);--wf-on-strong:light-dark(#fff,#20242b);--wf-blue:light-dark(#275cc2,#aac6ff);--wf-blue-bg:light-dark(#edf3ff,#26364f);--wf-green:light-dark(#216140,#a1d6b5);--wf-green-bg:light-dark(#ecf6ef,#243c2e);--wf-amber:light-dark(#80541b,#efc482);--wf-amber-bg:light-dark(#fff4df,#413421);--wf-red:light-dark(#a23737,#ffb0b0);--wf-red-bg:light-dark(#fdeeee,#47292b);font:13px/1.55 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:var(--wf-text)}
+body{background:var(--color-background-primary,light-dark(#ffffff,#181818))}
+#workflow-panel-prototype{padding:12px;color-scheme:inherit;
+--wf-bg:var(--color-background-primary,light-dark(#ffffff,#181818));
+--wf-surface:var(--color-background-secondary,light-dark(#f5f5f5,#212121));
+--wf-selected:var(--color-background-tertiary,light-dark(#ebebeb,#303030));
+--wf-text:var(--color-text-primary,light-dark(#202020,#ececec));
+--wf-muted:var(--color-text-secondary,light-dark(#686868,#a5a5a5));
+--wf-border:var(--color-border-primary,light-dark(#dedede,#383838));
+--wf-strong:var(--color-background-inverse,light-dark(#242424,#ececec));
+--wf-on-strong:var(--color-text-inverse,light-dark(#ffffff,#181818));
+--wf-blue:var(--color-text-info,light-dark(#275cc2,#a8c4ff));
+--wf-blue-bg:var(--color-background-info,light-dark(#edf3ff,#26364f));
+--wf-green:var(--color-text-success,light-dark(#216140,#a1d6b5));
+--wf-green-bg:var(--color-background-success,light-dark(#ecf6ef,#243c2e));
+--wf-amber:var(--color-text-warning,light-dark(#80541b,#efc482));
+--wf-amber-bg:var(--color-background-warning,light-dark(#fff4df,#413421));
+--wf-red:var(--color-text-danger,light-dark(#a23737,#ffb0b0));
+--wf-red-bg:var(--color-background-danger,light-dark(#fdeeee,#47292b));
+--wf-font:var(--font-sans,-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",system-ui,sans-serif);
+--wf-mono:var(--font-mono,ui-monospace,SFMono-Regular,Consolas,monospace);
+--wf-xs:var(--font-text-xs-size,12px);--wf-sm:var(--font-text-sm-size,14px);--wf-md:var(--font-text-md-size,14px);
+--wf-line-xs:var(--font-text-xs-line-height,1.6);--wf-line-sm:var(--font-text-sm-line-height,1.5);--wf-line-md:var(--font-text-md-line-height,1.5);
+--wf-title:var(--font-heading-md-size,18px);--wf-heading:var(--font-heading-sm-size,16px);
+--wf-title-line:var(--font-heading-md-line-height,1.4);--wf-heading-line:var(--font-heading-sm-line-height,1.5);
+--wf-radius-xs:var(--border-radius-xs,4px);--wf-radius-sm:var(--border-radius-sm,6px);--wf-radius-md:var(--border-radius-md,8px);--wf-radius-lg:var(--border-radius-lg,12px);
+--wf-weight:var(--font-weight-normal,400);--wf-medium:var(--font-weight-medium,500);--wf-border-width:var(--border-width-regular,1px);
+font:var(--wf-weight) var(--wf-sm)/var(--wf-line-sm) var(--wf-font);color:var(--wf-text)}
 #workflow-panel-prototype *{box-sizing:border-box}
 #workflow-panel-prototype [hidden]{display:none!important}
-#workflow-panel-prototype button,#workflow-panel-prototype select{font:inherit;color:inherit}
-#workflow-panel-prototype button{border:1px solid var(--wf-border);background:var(--wf-bg);border-radius:7px;padding:7px 12px;min-height:34px}
+#workflow-panel-prototype button,#workflow-panel-prototype select,#workflow-panel-prototype input,#workflow-panel-prototype textarea{font:inherit;color:inherit}
+#workflow-panel-prototype button{border:var(--wf-border-width) solid var(--wf-border);background:var(--wf-bg);border-radius:var(--wf-radius-md);padding:7px 12px;min-height:34px}
 #workflow-panel-prototype button:hover:not(:disabled){background:var(--wf-surface)}
 #workflow-panel-prototype button:disabled{opacity:.55}
 #workflow-panel-prototype .wf-primary{background:var(--wf-strong);color:var(--wf-on-strong);border-color:transparent}
 #workflow-panel-prototype .wf-primary:hover:not(:disabled){background:var(--wf-strong);opacity:.9}
-#workflow-panel-prototype .wf-window{background:var(--wf-bg);border:1px solid var(--wf-border);border-radius:12px;overflow:clip;min-width:0}
-#workflow-panel-prototype .wf-header{padding:18px 20px 12px;border-bottom:1px solid var(--wf-border);padding-right:100px}
+#workflow-panel-prototype .wf-window{background:var(--wf-bg);border:var(--wf-border-width) solid var(--wf-border);border-radius:var(--wf-radius-lg);overflow:clip;min-width:0}
+#workflow-panel-prototype .wf-header{padding:18px 20px 12px;border-bottom:var(--wf-border-width) solid var(--wf-border);padding-right:100px}
 #workflow-panel-prototype .wf-brand{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-#workflow-panel-prototype .wf-title{font-size:18px;font-weight:500;letter-spacing:-.3px}
-#workflow-panel-prototype .wf-prototype-label{color:var(--wf-muted);font-size:11px}
-#workflow-panel-prototype .wf-project{color:var(--wf-muted);margin-top:3px;font-size:12px}
+#workflow-panel-prototype .wf-title{font-size:var(--wf-title);line-height:var(--wf-title-line);font-weight:var(--wf-medium);letter-spacing:-.3px}
+#workflow-panel-prototype .wf-prototype-label{color:var(--wf-muted);font-size:var(--wf-xs);line-height:var(--wf-line-xs)}
+#workflow-panel-prototype .wf-project{color:var(--wf-muted);margin-top:3px;font-size:var(--wf-xs);line-height:var(--wf-line-xs)}
 #workflow-panel-prototype .wf-run-picker{padding:16px 20px 0;display:flex;align-items:center;gap:12px}
 #workflow-panel-prototype .wf-run-picker label{color:var(--wf-muted);white-space:nowrap}
-#workflow-panel-prototype select{border:1px solid var(--wf-border);background:var(--wf-bg);border-radius:7px;padding:6px 10px;min-width:0;max-width:100%;flex:1}
+#workflow-panel-prototype select{border:var(--wf-border-width) solid var(--wf-border);background:var(--wf-bg);border-radius:var(--wf-radius-md);padding:6px 10px;min-width:0;max-width:100%;flex:1}
 #workflow-panel-prototype .wf-run-header{padding:18px 20px 10px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
-#workflow-panel-prototype h2{font-size:17px;font-weight:500;margin:0 0 4px;overflow-wrap:anywhere}
-#workflow-panel-prototype .wf-muted{color:var(--wf-muted);font-size:12px;overflow-wrap:anywhere}
+#workflow-panel-prototype h2{font-size:var(--wf-heading);line-height:var(--wf-heading-line);font-weight:var(--wf-medium);margin:0 0 4px;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-muted{color:var(--wf-muted);font-size:var(--wf-xs);line-height:var(--wf-line-xs);overflow-wrap:anywhere}
 #workflow-panel-prototype .wf-actions{display:flex;gap:7px;flex-wrap:wrap}
 #workflow-panel-prototype .wf-status-row{padding:0 20px 15px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:38px}
-#workflow-panel-prototype .wf-badge{background:var(--wf-surface);color:var(--wf-muted);border-radius:5px;padding:3px 8px;font-size:12px;white-space:nowrap}
+#workflow-panel-prototype .wf-badge{background:var(--wf-surface);color:var(--wf-muted);border-radius:var(--wf-radius-xs);padding:3px 8px;font-size:var(--wf-xs);line-height:var(--wf-line-xs);white-space:nowrap}
 #workflow-panel-prototype .wf-badge[data-tone="blue"]{color:var(--wf-blue);background:var(--wf-blue-bg)}
 #workflow-panel-prototype .wf-badge[data-tone="green"]{color:var(--wf-green);background:var(--wf-green-bg)}
 #workflow-panel-prototype .wf-badge[data-tone="amber"]{color:var(--wf-amber);background:var(--wf-amber-bg)}
 #workflow-panel-prototype .wf-badge[data-tone="red"]{color:var(--wf-red);background:var(--wf-red-bg)}
-#workflow-panel-prototype .wf-progress-text{color:var(--wf-muted);font-size:12px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
-#workflow-panel-prototype .wf-tabs{display:flex;border-bottom:1px solid var(--wf-border);padding:0 20px;gap:8px;flex-wrap:wrap}
+#workflow-panel-prototype .wf-progress-text{color:var(--wf-muted);font-size:var(--wf-xs);line-height:var(--wf-line-xs);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-tabs{display:flex;border-bottom:var(--wf-border-width) solid var(--wf-border);padding:0 20px;gap:8px;flex-wrap:wrap}
 #workflow-panel-prototype .wf-tabs button{border:0;border-radius:0;padding:9px 13px;background:transparent;color:var(--wf-muted);border-bottom:2px solid transparent}
 #workflow-panel-prototype .wf-tabs button[aria-selected="true"]{color:var(--wf-text);border-bottom-color:var(--wf-strong)}
-#workflow-panel-prototype #wf-task-count{font-variant-numeric:tabular-nums;font-size:11px;margin-left:4px}
+#workflow-panel-prototype #wf-task-count{font-variant-numeric:tabular-nums;font-size:var(--wf-xs);line-height:var(--wf-line-xs);margin-left:4px}
 #workflow-panel-prototype .wf-content{padding:20px;min-height:285px}
-#workflow-panel-prototype .wf-section-title{margin:0 0 10px;font-weight:500;font-size:13px}
-#workflow-panel-prototype .wf-goal{margin:0 0 18px;font-size:14px;overflow-wrap:anywhere}
-#workflow-panel-prototype .wf-facts{display:flex;gap:16px;flex-wrap:wrap;color:var(--wf-muted);font-size:12px;padding:0 0 18px}
+#workflow-panel-prototype .wf-section-title{margin:0 0 10px;font-weight:var(--wf-medium);font-size:var(--wf-sm);line-height:var(--wf-line-sm)}
+#workflow-panel-prototype .wf-goal{margin:0 0 18px;font-size:var(--wf-md);line-height:var(--wf-line-md);overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-facts{display:flex;gap:16px;flex-wrap:wrap;color:var(--wf-muted);font-size:var(--wf-xs);line-height:var(--wf-line-xs);padding:0 0 18px}
 #workflow-panel-prototype .wf-phase-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:18px}
-#workflow-panel-prototype .wf-phase{padding:11px 12px;background:var(--wf-surface);border-radius:7px;min-width:0}
-#workflow-panel-prototype .wf-phase-label{font-weight:500;margin-bottom:4px}
-#workflow-panel-prototype .wf-phase-detail{font-size:11px;color:var(--wf-muted);overflow-wrap:anywhere}
-#workflow-panel-prototype .wf-notice{padding:10px 12px;background:var(--wf-surface);border-radius:7px;color:var(--wf-muted);font-size:12px;margin:12px 0}
+#workflow-panel-prototype .wf-phase{padding:11px 12px;background:var(--wf-surface);border-radius:var(--wf-radius-md);min-width:0}
+#workflow-panel-prototype .wf-phase-label{font-weight:var(--wf-medium);margin-bottom:4px}
+#workflow-panel-prototype .wf-phase-detail{font-size:var(--wf-xs);line-height:var(--wf-line-xs);color:var(--wf-muted);overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-notice{padding:10px 12px;background:var(--wf-surface);border-radius:var(--wf-radius-md);color:var(--wf-muted);font-size:var(--wf-xs);line-height:var(--wf-line-xs);margin:12px 0}
 #workflow-panel-prototype details{margin-top:15px}
-#workflow-panel-prototype summary{font-weight:500;user-select:none;padding:7px 0}
-#workflow-panel-prototype pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0;padding:13px;background:var(--wf-surface);border-radius:7px;font:12px/1.65 Consolas,monospace;color:var(--wf-text);max-width:100%}
-#workflow-panel-prototype .wf-worker{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;border-top:1px solid var(--wf-border);padding:12px 0}
+#workflow-panel-prototype summary{font-weight:var(--wf-medium);user-select:none;padding:7px 0}
+#workflow-panel-prototype pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0;padding:13px;background:var(--wf-surface);border-radius:var(--wf-radius-md);font:var(--wf-xs)/var(--wf-line-xs) var(--wf-mono);color:var(--wf-text);max-width:100%}
+#workflow-panel-prototype .wf-worker{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;border-top:var(--wf-border-width) solid var(--wf-border);padding:12px 0}
 #workflow-panel-prototype .wf-worker:first-of-type{border-top:0}
 #workflow-panel-prototype .wf-worker button{border:0;text-align:left;padding:0;background:transparent;min-height:35px;min-width:0;border-radius:0}
 #workflow-panel-prototype .wf-worker button:hover:not(:disabled){background:transparent;color:var(--wf-blue)}
-#workflow-panel-prototype .wf-worker-name{font-weight:500;display:block;overflow-wrap:anywhere}
-#workflow-panel-prototype .wf-worker-meta{font-size:11px;color:var(--wf-muted);display:block;margin-top:3px;overflow-wrap:anywhere}
-#workflow-panel-prototype .wf-worker-detail{background:var(--wf-surface);border-radius:7px;padding:13px;margin-top:15px;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-worker-name{font-weight:var(--wf-medium);display:block;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-worker-meta{font-size:var(--wf-xs);line-height:var(--wf-line-xs);color:var(--wf-muted);display:block;margin-top:3px;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-worker-detail{background:var(--wf-surface);border-radius:var(--wf-radius-md);padding:13px;margin-top:15px;overflow-wrap:anywhere}
 #workflow-panel-prototype .wf-empty{color:var(--wf-muted);padding:30px 8px;text-align:center}
-#workflow-panel-prototype .wf-file-header{display:flex;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--wf-surface);border-radius:7px 7px 0 0;overflow-wrap:anywhere}
-#workflow-panel-prototype .wf-diff{margin:0 0 15px;border:1px solid var(--wf-border);border-radius:7px;overflow:clip}
-#workflow-panel-prototype .wf-diff-line{padding:3px 12px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.65 Consolas,monospace}
+#workflow-panel-prototype .wf-file-header{display:flex;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--wf-surface);border-radius:var(--wf-radius-md) var(--wf-radius-md) 0 0;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-diff{margin:0 0 15px;border:var(--wf-border-width) solid var(--wf-border);border-radius:var(--wf-radius-md);overflow:clip}
+#workflow-panel-prototype .wf-diff-line{padding:3px 12px;white-space:pre-wrap;overflow-wrap:anywhere;font:var(--wf-xs)/var(--wf-line-xs) var(--wf-mono)}
 #workflow-panel-prototype .wf-diff-line.add{background:var(--wf-green-bg);color:var(--wf-green)}
 #workflow-panel-prototype .wf-diff-line.remove{background:var(--wf-red-bg);color:var(--wf-red)}
 #workflow-panel-prototype .wf-test-result{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 0;margin-bottom:13px}
-#workflow-panel-prototype .wf-alert{padding:12px;background:var(--wf-red-bg);color:var(--wf-red);border-radius:7px;margin:12px 0;overflow-wrap:anywhere}
-#workflow-panel-prototype .wf-log{display:grid;grid-template-columns:50px minmax(0,1fr);gap:10px;padding:8px 0;border-bottom:1px solid var(--wf-border);font-size:12px;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-alert{padding:12px;background:var(--wf-red-bg);color:var(--wf-red);border-radius:var(--wf-radius-md);margin:12px 0;overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-log{display:grid;grid-template-columns:50px minmax(0,1fr);gap:10px;padding:8px 0;border-bottom:var(--wf-border-width) solid var(--wf-border);font-size:var(--wf-xs);line-height:var(--wf-line-xs);overflow-wrap:anywhere}
 #workflow-panel-prototype .wf-log-time{color:var(--wf-muted);font-variant-numeric:tabular-nums}
-#workflow-panel-prototype .wf-footer{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px 20px;border-top:1px solid var(--wf-border);font-size:11px;color:var(--wf-muted)}
+#workflow-panel-prototype .wf-footer{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px 20px;border-top:var(--wf-border-width) solid var(--wf-border);font-size:var(--wf-xs);line-height:var(--wf-line-xs);color:var(--wf-muted)}
 @media(max-width:520px){#workflow-panel-prototype{padding:6px}#workflow-panel-prototype .wf-header{padding:14px 14px 12px}#workflow-panel-prototype .wf-run-picker{padding:12px 14px 0;align-items:stretch;flex-direction:column;gap:5px}#workflow-panel-prototype .wf-run-header{padding:15px 14px 10px;align-items:flex-start}#workflow-panel-prototype .wf-status-row{padding:0 14px 12px}#workflow-panel-prototype .wf-tabs{padding:0 8px;gap:0}#workflow-panel-prototype .wf-tabs button{padding:9px 11px}#workflow-panel-prototype .wf-content{padding:15px 14px}#workflow-panel-prototype .wf-phase-grid{grid-template-columns:repeat(2,minmax(0,1fr))}#workflow-panel-prototype .wf-footer{padding:12px 14px}#workflow-panel-prototype .wf-worker{gap:5px}#workflow-panel-prototype .wf-brand{gap:5px}#workflow-panel-prototype .wf-prototype-label{width:100%}}
 @media(pointer:coarse){#workflow-panel-prototype button,#workflow-panel-prototype select{min-height:44px}#workflow-panel-prototype .wf-worker button{min-height:44px}}
+#workflow-panel-prototype .wf-editor{margin:12px 20px;padding:8px 12px;border:var(--wf-border-width) solid var(--wf-border);border-radius:var(--wf-radius-md)}
+#workflow-panel-prototype .wf-editor form{display:grid;gap:8px;min-width:0}
+#workflow-panel-prototype .wf-editor input[type="text"],#workflow-panel-prototype textarea{width:100%;min-width:0;border:var(--wf-border-width) solid var(--wf-border);border-radius:var(--wf-radius-sm);background:var(--wf-bg);padding:9px;resize:vertical}
+#workflow-panel-prototype textarea{font:var(--wf-xs)/var(--wf-line-xs) var(--wf-mono)}
+#workflow-panel-prototype .wf-checkbox{display:flex;align-items:flex-start;gap:8px}
+#workflow-panel-prototype button:focus-visible,#workflow-panel-prototype select:focus-visible,#workflow-panel-prototype input:focus-visible,#workflow-panel-prototype textarea:focus-visible,#workflow-panel-prototype summary:focus-visible{outline:2px solid var(--wf-blue);outline-offset:2px}
+#workflow-panel-prototype #wf-notification{margin:12px 20px}
+#workflow-panel-prototype .wf-log{grid-template-columns:84px minmax(0,1fr)}
+#workflow-panel-prototype .wf-worker-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+#workflow-panel-prototype .wf-worker .wf-cancel-task{border:var(--wf-border-width) solid var(--wf-border);padding:5px 8px;text-align:center;font-size:var(--wf-xs);line-height:var(--wf-line-xs)}
+@media(max-width:520px){#workflow-panel-prototype .wf-editor,#workflow-panel-prototype #wf-notification{margin:12px 14px}#workflow-panel-prototype .wf-run-picker{flex-wrap:wrap}#workflow-panel-prototype .wf-worker{grid-template-columns:minmax(0,1fr)}#workflow-panel-prototype .wf-worker-actions{justify-content:flex-start}#workflow-panel-prototype .wf-log{grid-template-columns:minmax(0,1fr);gap:2px}}
 </style>
-<script>
-(() => {
-  const root = document.getElementById('workflow-panel-prototype');
-  const $ = selector => root.querySelector(selector);
-  const escape = value => String(value).replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
-  const phases = ['审查','核实','修复','验证'];
-  const executionLabels = {ready:'待开始',running:'运行中',stopping:'正在停止',stopped:'已停止',failed:'执行失败',completed:'执行已完成'};
-  const taskLabels = {queued:'等待中',running:'运行中',stopping:'正在停止',stopped:'已中断',completed:'已完成',failed:'失败'};
-  const tone = state => ({running:'blue',stopping:'amber',stopped:'amber',failed:'red',completed:'green',pending:'amber',applying:'blue',applied:'green',conflict:'red'}[state] || 'neutral');
-  const worker = (id,title,phase,mode,status,detail) => ({id,title,phase,mode,status,detail,attempt:1,cached:false});
-  const completedWorkers = () => [worker('w1','定位变更文件','审查','只读','completed','找到 2 个相关文件'),worker('w2','审查会话刷新逻辑','审查','只读','completed','发现一个边界问题'),worker('w3','检查测试覆盖','审查','只读','completed','定位缺失的回归用例'),worker('w4','复核发现的问题','核实','只读','completed','确认问题可以复现'),worker('w5','修复并补充测试','修复','写入','completed','隔离工作区中的 2 个文件已修改'),worker('w6','运行测试并复核差异','验证','写入','completed','示例测试 12 项通过')];
-  const runs = [
-    {id:'review',title:'审查会话刷新逻辑并修复问题',execution:'ready',change:'none',tick:-1,workers:[],logs:['动态脚本已生成，等待用户开始'],dirty:false},
-    {id:'stopped',title:'上次运行：修复会话刷新逻辑',execution:'stopped',change:'none',tick:3,workers:completedWorkers().slice(0,6).map((item,index)=>({...item,status:index<4?'completed':index===4?'stopped':'queued',detail:index===4?'停止时保留了工作区中的修改':index===5?'等待修复完成':item.detail})),logs:['用户开始执行','发现问题，创建修复任务','用户停止：中断写入 worker，保留已有进度'],dirty:true},
-    {id:'reviewable',title:'已完成：会话刷新边界检查',execution:'completed',change:'pending',tick:5,workers:completedWorkers(),logs:['工作流执行已完成','差异与测试结果已汇总，等待用户审查'],dirty:true},
-    {id:'conflict',title:'待审查：当前项目已有新改动',execution:'completed',change:'pending',tick:5,workers:completedWorkers(),logs:['隔离工作区中的执行已完成','等待审查，本次应用将演示工作区冲突'],dirty:true},
-    {id:'failed',title:'执行失败：检查接口返回类型',execution:'failed',change:'none',tick:0,workers:[worker('w1','检查测试入口','审查','只读','failed','测试入口未找到（示例错误）')],logs:['用户开始执行','测试入口未找到，脚本未处理此错误，执行结束'],dirty:false}
-  ];
-  let selectedRun = runs[0].id;
-  let selectedTab = 'overview';
-  let selectedWorker = null;
-  let scriptOpen = false;
-  const timers = new Map();
-  const delays = new Set();
-  function schedule(callback, milliseconds) { const handle=setTimeout(()=>{delays.delete(handle);callback();},milliseconds);delays.add(handle); }
-  function teardown() {for(const timer of timers.values())clearInterval(timer);timers.clear();for(const delay of delays)clearTimeout(delay);delays.clear();}
-  const run = () => runs.find(item => item.id === selectedRun);
-  const code = ["export const meta = { name: 'review-session',", "  description: '审查会话刷新边界，必要时修复',", "  phases: [{title:'审查'}, {title:'核实'},", "           {title:'修复'}, {title:'验证'}] };", "", "const schema = {type:'array', items:{type:'string'}};", "const files = await agent('找出相关变更文件', {schema});", "const findings = await pipeline(files ?? [],", "  file => agent(`审查 ${file}，返回问题列表`,", "    {schema, phase:'审查'}),", "  issues => agent(`复核 ${JSON.stringify(issues)}`,", "    {schema, phase:'核实'}));", "const issues = findings.flatMap(result => result ?? []);", "", "if (issues.length > 0) {", "  await agent(`修复 ${JSON.stringify(issues)}`,", "    {phase:'修复'});", "  await agent('运行测试并复核最终差异', {phase:'验证'});", "}", "return issues;"].join('\n');
-  function persistSelection() {
-    const host = window.openai;
-    if (host?.setWidgetState) host.setWidgetState({modelContent:{prototype:true,selectedRun,selectedTab,execution:run().execution,change:run().change},privateContent:{selectedRun,selectedTab}}).catch(()=>{});
-  }
-  function restoreSelection(state) {
-    const saved = state?.privateContent;
-    if (runs.some(item=>item.id===saved?.selectedRun)) selectedRun=saved.selectedRun;
-    if (['overview','tasks','diff','logs'].includes(saved?.selectedTab)) selectedTab=saved.selectedTab;
-  }
-  restoreSelection(window.openai?.widgetState);
-  window.addEventListener('openai:set_globals',event=>{restoreSelection(event.detail?.globals?.widgetState);render();});
-  function log(item,text) { item.logs.push(text); }
-  function badge(text,state) {return `<span class="wf-badge" data-tone="${tone(state)}">${escape(text)}</span>`;}
-  function counts(item) {
-    return {completed:item.workers.filter(w=>w.status==='completed').length,running:item.workers.filter(w=>w.status==='running'||w.status==='stopping').length,queued:item.workers.filter(w=>w.status==='queued').length,interrupted:item.workers.filter(w=>w.status==='stopped').length,failed:item.workers.filter(w=>w.status==='failed').length,cached:item.workers.filter(w=>w.cached).length};
-  }
-  function drawOverview(item) {
-    const phaseCards=phases.map(phase=>{const group=item.workers.filter(w=>w.phase===phase);const done=group.filter(w=>w.status==='completed').length;const active=group.filter(w=>w.status==='running'||w.status==='stopping').length;return `<div class="wf-phase"><div class="wf-phase-label">${phase}</div><div class="wf-phase-detail">${group.length?`${done} 已完成 · ${active} 运行中`:'任务由脚本动态生成'}</div></div>`;}).join('');
-    const note=item.execution==='ready'?'计划已生成，尚未启动 worker。':item.execution==='stopped'?'示例进度和工作区改动已保留，等待用户恢复。':item.execution==='completed'?'执行已完成；当前项目是否应用改动，仍由用户决定。':item.execution==='failed'?'执行错误见日志；失败重试规则仍待设计。':'脚本可根据发现继续创建任务，最终任务总数尚未确定。';
-    return `<h3 class="wf-section-title">任务目标</h3><p class="wf-goal">检查会话刷新逻辑，复核发现的问题，必要时修复并运行测试。</p><div class="wf-facts"><span>输入：本次变更文件</span><span>写入位置：隔离工作区</span></div><h3 class="wf-section-title">编排计划</h3><div class="wf-phase-grid">${phaseCards}</div><div class="wf-notice">${note}</div><details ${scriptOpen?'open':''}><summary class="cursor-interaction">查看动态脚本（示例）</summary><pre>${escape(code)}</pre></details>`;
-  }
-  function drawTasks(item) {
-    if (!item.workers.length) return '<div class="wf-empty">等待用户开始。任务将随脚本执行生成。</div>';
-    const groups=phases.map(phase=>{const items=item.workers.filter(w=>w.phase===phase);if(!items.length)return '';return `<section><h3 class="wf-section-title">${phase}</h3>${items.map(w=>`<div class="wf-worker"><button type="button" class="cursor-interaction" data-worker="${w.id}" aria-pressed="${selectedWorker===w.id}"><span class="wf-worker-name">${escape(w.title)}</span><span class="wf-worker-meta">${w.id} · ${w.mode} · 第 ${w.attempt} 次执行${w.cached?' · 复用结果':''}</span></button>${badge(taskLabels[w.status],w.status)}</div>`).join('')}</section>`;}).join('');
-    const selected=item.workers.find(w=>w.id===selectedWorker);
-    return groups+(selected?`<div class="wf-worker-detail"><h3 class="wf-section-title">${escape(selected.title)}</h3><div>${escape(selected.detail)}</div><div class="wf-muted">${selected.mode==='写入'?'使用隔离工作区；当前项目未因此自动修改':'只读任务'}${selected.cached?' · 恢复时复用了已完成结果':''}</div></div>`:'');
-  }
-  function drawDiff(item) {
-    if(item.execution!=='completed') return `<div class="wf-empty">整个工作流执行完成后统一汇总差异。${item.dirty?'已有的示例工作区改动保留。':''}</div>`;
-    return `${item.change==='conflict'?'<div class="wf-alert" role="alert">当前项目已有新改动，存在应用冲突。需要处理冲突，不自动覆盖。</div>':''}<div class="wf-test-result"><span>验证结果（示例）</span>${badge('12 项测试通过','completed')}</div><div class="wf-diff"><div class="wf-file-header"><span>src/session.ts</span><span>+2 −1</span></div><div class="wf-diff-line">  async function refreshSession() {</div><div class="wf-diff-line remove">−   return await refresh();</div><div class="wf-diff-line add">+   if (refreshPromise) return refreshPromise;</div><div class="wf-diff-line add">+   return refreshPromise = refresh();</div><div class="wf-diff-line">  }</div></div><div class="wf-diff"><div class="wf-file-header"><span>src/session.test.ts</span><span>+4</span></div><div class="wf-diff-line add">+ it('reuses a concurrent refresh request', async () =&gt; {</div><div class="wf-diff-line add">+   await Promise.all([refreshSession(), refreshSession()]);</div><div class="wf-diff-line add">+   expect(refresh).toHaveBeenCalledTimes(1);</div><div class="wf-diff-line add">+ });</div></div><div class="wf-notice">${item.change==='applied'?'示例改动已应用。原型未修改真实文件。':item.change==='applying'?'正在演示应用过程……':item.change==='conflict'?'当前改动未应用。冲突解决操作仍待设计。':'所有示例差异统一审查；点击“应用改动”后才进入应用阶段。'}</div>`;
-  }
-  function render() {
-    const item=run(), c=counts(item);
-    $('#wf-run-select').innerHTML=runs.map(r=>`<option value="${r.id}" ${r.id===selectedRun?'selected':''}>${escape(r.title)} — ${executionLabels[r.execution]}</option>`).join('');
-    $('#wf-run-title').textContent=item.title;
-    $('#wf-run-meta').textContent=`review-session.js · 运行记录 ${item.id} · 示例项目`;
-    $('#wf-execution-status').textContent=executionLabels[item.execution];$('#wf-execution-status').dataset.tone=tone(item.execution);
-    const changeText={none:item.dirty?'改动已保留 · 尚未汇总':'差异尚未汇总',pending:'改动待审查',applying:'正在应用',applied:'已应用 · 示例',conflict:'应用冲突'}[item.change];
-    $('#wf-change-status').textContent=changeText;$('#wf-change-status').dataset.tone=tone(item.change);
-    $('#wf-progress').textContent=item.workers.length?`已完成 ${c.completed} · 运行中 ${c.running} · 等待 ${c.queued}${c.interrupted?` · 已中断 ${c.interrupted}`:''}${c.failed?` · 失败 ${c.failed}`:''}${c.cached?` · 复用 ${c.cached}`:''}`:'任务数量将在执行中确定';
-    $('#wf-task-count').textContent=item.workers.length;
-    let action='';
-    if(item.execution==='ready')action='<button class="wf-primary cursor-interaction" type="button" data-action="start">开始</button>';
-    else if(item.execution==='running')action='<button class="cursor-interaction" type="button" data-action="stop">停止</button>';
-    else if(item.execution==='stopping')action='<button type="button" disabled>正在停止…</button>';
-    else if(item.execution==='stopped')action='<button class="wf-primary cursor-interaction" type="button" data-action="resume">恢复 / 继续</button>';
-    else if(item.execution==='failed')action='<button class="cursor-interaction" type="button" data-action="error">查看错误</button>';
-    else if(item.change==='pending')action=selectedTab==='diff'?'<button class="wf-primary cursor-interaction" type="button" data-action="apply">应用改动</button>':'<button class="wf-primary cursor-interaction" type="button" data-action="review">查看差异</button>';
-    else if(item.change==='applying')action='<button type="button" disabled>正在应用…</button>';
-    else if(item.change==='conflict')action='<button class="cursor-interaction" type="button" data-action="review">查看冲突</button>';
-    $('#wf-actions').innerHTML=action;
-    root.querySelectorAll('[data-tab]').forEach(button=>{const active=button.dataset.tab===selectedTab;button.setAttribute('aria-selected',String(active));$('#wf-panel-'+button.dataset.tab).hidden=!active;});
-    $('#wf-panel-overview').innerHTML=drawOverview(item);
-    $('#wf-panel-tasks').innerHTML=drawTasks(item);
-    $('#wf-panel-diff').innerHTML=drawDiff(item);
-    $('#wf-panel-logs').innerHTML=item.logs.map((text,index)=>`<div class="wf-log"><span class="wf-log-time">${String(index*2).padStart(2,'0')}s</span><span>${escape(text)}</span></div>`).join('');
-    const details=$('#wf-panel-overview details');details.addEventListener('toggle',()=>{scriptOpen=details.open;});
-    root.dataset.execution=item.execution;root.dataset.change=item.change;
-  }
-  function advance(item) {
-    if(item.execution!=='running')return;
-    item.tick++;
-    if(item.tick===0){item.workers=[worker('w1','定位变更文件','审查','只读','running','查找本次变更范围')];log(item,'启动扫描任务，任务数量由结果决定');}
-    if(item.tick===1){item.workers[0].status='completed';item.workers.push(worker('w2','审查会话刷新逻辑','审查','只读','running','检查刷新逻辑的并发边界'),worker('w3','检查测试覆盖','审查','只读','running','查找相关回归用例'));log(item,'发现 2 个相关文件，动态创建 2 个并行审查任务');}
-    if(item.tick===2){item.workers.find(w=>w.id==='w2').status='completed';item.workers.push(worker('w4','复核发现的问题','核实','只读','running','根据审查结果核实问题'));log(item,'一个审查任务发现问题，新增核实任务；其他审查继续执行');}
-    if(item.tick===3){item.workers.forEach(w=>w.status='completed');item.workers.push(worker('w5','修复并补充测试','修复','写入','running','在隔离工作区修改 2 个文件'),worker('w6','运行测试并复核差异','验证','写入','queued','等待修复完成'));item.dirty=true;log(item,'确认问题，创建写入任务；验证任务等待修复完成');}
-    if(item.tick===4){const writer=item.workers.find(w=>w.id==='w5');writer.status='completed';writer.detail='隔离工作区中的 2 个文件已修改';const verifier=item.workers.find(w=>w.id==='w6');verifier.status='running';verifier.detail='正在运行测试并复核最终差异';log(item,'修复完成，释放写入槽位，开始验证');}
-    if(item.tick===5){item.workers.forEach(w=>w.status='completed');item.workers.find(w=>w.id==='w6').detail='示例测试 12 项通过';item.execution='completed';item.change='pending';clearInterval(timers.get(item.id));timers.delete(item.id);log(item,'执行已完成，统一汇总差异和验证结果；等待用户审查并应用');}
-    render();
-  }
-  function start(item,resume=false) {
-    item.execution='running';
-    if(resume){const reused=item.workers.filter(w=>w.status==='completed');reused.forEach(w=>w.cached=true);item.workers.filter(w=>w.status==='stopped').forEach(w=>{w.status='running';w.attempt++;});log(item,`用户恢复：复用 ${reused.length} 个已完成结果，重新启动被中断任务`);}
-    else {log(item,'用户点击开始，执行动态脚本');advance(item);}
-    timers.set(item.id,setInterval(()=>advance(item),2200));render();
-  }
-  function stop(item) {
-    clearInterval(timers.get(item.id));timers.delete(item.id);
-    item.execution='stopping';item.workers.filter(w=>w.status==='running').forEach(w=>w.status='stopping');log(item,'用户停止：停止派发新任务，请求中断全部活跃 worker');render();
-    schedule(()=>{item.workers.filter(w=>w.status==='stopping').forEach(w=>w.status='stopped');item.execution='stopped';log(item,'worker 已结束；示例进度、结果和工作区改动保留');render();persistSelection();},750);
-  }
-  function apply(item) {
-    item.change='applying';log(item,'用户点击应用，检查当前项目与工作区差异');render();
-    schedule(()=>{item.change=item.id==='conflict'?'conflict':'applied';log(item,item.change==='conflict'?'发现应用冲突，保留当前项目，等待处理':'示例应用完成；没有修改真实文件');render();persistSelection();},900);
-  }
-  $('#wf-run-select').addEventListener('change',event=>{selectedRun=event.target.value;selectedWorker=null;render();persistSelection();});
-  root.addEventListener('click',event=>{
-    const tab=event.target.closest('[data-tab]');if(tab){selectedTab=tab.dataset.tab;render();persistSelection();return;}
-    const task=event.target.closest('[data-worker]');if(task){selectedWorker=task.dataset.worker;render();persistSelection();return;}
-    const action=event.target.closest('[data-action]')?.dataset.action;const item=run();
-    if(action==='start'&&item.execution==='ready')start(item);
-    if(action==='resume'&&item.execution==='stopped')start(item,true);
-    if(action==='stop'&&item.execution==='running')stop(item);
-    if(action==='review'){selectedTab='diff';render();}
-    if(action==='error'){selectedTab='logs';render();}
-    if(action==='apply'&&item.execution==='completed'&&item.change==='pending'&&selectedTab==='diff')apply(item);
-    if(action)persistSelection();
-  });
-  window.addEventListener('pagehide',teardown);
-  window.addEventListener('workflows-prototype-teardown',teardown);
-  render();
-})();
-</script>

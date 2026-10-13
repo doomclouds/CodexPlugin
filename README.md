@@ -7,7 +7,7 @@
 ```text
 .agents/plugins/marketplace.json  本仓库的本地插件目录
 plugins/
-  workflows/                    第一个插件：工作流基础骨架
+  workflows/                    动态工作流、独立定义库与任务面板
 scripts/validate-plugins.mjs     清单、目录和组件路径检查
 docs/codex-extension-boundaries.md  宿主能力与产品讨论依据
 ```
@@ -25,7 +25,7 @@ npm run dev:workflows
 npm run prototype:workflows
 ```
 
-`dev:workflows` 启动 stdio MCP 服务。`prototype:workflows` 是开发用的面板预览，使用示例数据，不执行真实任务。正式宿主入口通过 MCP App 资源与插件面板接入，不以临时 localhost 网页作为默认形式。`npm run check` 执行类型检查、构建、仓库结构检查及插件的协议冒烟验证。
+`dev:workflows` 启动 stdio MCP 服务。`prototype:workflows` 是开发用的布局预览；真实面板通过 MCP App 资源与宿主工具调用接入。`npm run check` 执行类型、构建、结构、独立 MCP 包和运行时、文件、模板、面板检查，测试替身不调用模型。可选 `npm run smoke:real --workspace=@codex-plugin/workflows` 调用真实模型验证完整流程。
 
 单独构建插件：
 
@@ -62,8 +62,10 @@ codex plugin add workflows@codex-plugin-workspace
 
 ## Workflows
 
-目标是动态工作流：根据任务生成脚本，并按执行结果动态分支、循环和调度 worker。当前实现模板查询与示例数据面板原型；真实代理执行、持久化和恢复尚未接入。
+`workflows 0.2.0` 已接入第一版动态执行器：预览 JavaScript 后在插件面板开始，按结果分支、循环并调度真实 Codex worker；停止后保存并手动恢复。写入在独立快照完成，全部结束后统一审查，用户点击应用才修改项目。
 
-使用方式见 [插件说明](plugins/workflows/README.md)，已确认的产品方向见 [设计记录](plugins/workflows/docs/design.md)，宿主扩展边界见 [能力核对](docs/codex-extension-boundaries.md)。
+独立工作流库保存脚本和默认输入，不绑定项目；同一定义可以为多个项目创建独立运行。面板按宿主上下文继承主题、样式变量、字体与字号。
 
-面板原型的 App 内嵌加载已经通过本机日志确认；具体已验证与未验证范围见 [宿主验证](docs/mcp-app-host-verification.md)。
+使用见 [插件说明](plugins/workflows/README.md)，规则见 [设计记录](plugins/workflows/docs/design.md) 与 [运行时设计](plugins/workflows/docs/runtime-design.md)，Claude 依据及差异见 [参考说明](plugins/workflows/docs/claude-reference.md)。宿主扩展边界见 [能力核对](docs/codex-extension-boundaries.md)。
+
+[0.2.0 验证记录](docs/workflows-0.2-verification.md) 区分自动测试与本机真实执行；[主题检查](design-qa.md) 记录开发浏览器的样式与窄窗口验证。[旧宿主记录](docs/mcp-app-host-verification.md) 只适用于 0.1.4 原型，不能证明新版原生宿主验收。本次开发和检查不包含安装插件、修改用户配置、提交或推送。

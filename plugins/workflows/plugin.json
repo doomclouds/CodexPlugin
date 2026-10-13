@@ -1,18 +1,18 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "workflows",
-  "version": "0.1.4",
-  "description": "Inspect and draft Codex workflow templates. Execution is not connected in this scaffold.",
+  "version": "0.2.0",
+  "description": "Dynamic JavaScript workflows with Codex workers, replay recovery, isolated changes, and a task panel.",
   "license": "MIT",
   "extensions": {
     "com.openai": {
       "interface": {
         "displayName": "Workflows",
-        "shortDescription": "动态工作流模板与面板原型",
-        "longDescription": "工作流插件开发骨架，包含模板查询和使用示例数据的面板原型。真实代理执行尚未接入。",
+        "shortDescription": "动态编排、停止恢复与改动审查",
+        "longDescription": "预览动态脚本后启动真实 Codex worker，支持停止、持久化恢复、隔离写入及最终差异审查与应用。",
         "category": "Productivity",
-        "capabilities": ["Read", "Interactive"],
-        "defaultPrompt": "打开 Workflows 面板原型，讨论动态编排和任务状态。"
+        "capabilities": ["Read", "Write", "Interactive"],
+        "defaultPrompt": "根据当前任务起草动态工作流，保存预览并打开 Workflows 面板。"
       }
     }
   }

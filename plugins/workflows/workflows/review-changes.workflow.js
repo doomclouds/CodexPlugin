@@ -1,4 +1,4 @@
-// 编排语法草案；由未来的受限工作流运行时执行，不是普通 Node 模块。
+// Executed by the isolated workflow runtime, not as a Node module.
 export const meta = {
   name: "review-changes",
   description: "逐文件审查改动，核实发现并汇总",

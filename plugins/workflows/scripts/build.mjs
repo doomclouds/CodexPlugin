@@ -16,6 +16,18 @@ const built = await build({
   banner: { js: 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);' },
   logLevel: "info",
 });
+const scriptBuild = await build({
+  absWorkingDir: pluginRoot,
+  entryPoints: ["src/script-worker.ts"],
+  outfile: "runtime/script-worker.js",
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node22",
+  metafile: true,
+  banner: { js: 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);' },
+  logLevel: "info",
+});
 
 const uiBuild = await build({
   absWorkingDir: pluginRoot,
@@ -30,10 +42,10 @@ const uiBuild = await build({
 });
 const panelFragment = await readFile(path.join(pluginRoot, "prototypes", "workflow-panel.html"), "utf8");
 const bridge = uiBuild.outputFiles[0].text.replaceAll("</script", "<\\/script");
-await writeFile(path.join(pluginRoot, "runtime", "panel.html"), `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workflows prototype</title><style>:root{color-scheme:light dark}body{margin:0}</style></head><body>${panelFragment}<script>${bridge}</script></body></html>`);
+await writeFile(path.join(pluginRoot, "runtime", "panel.html"), `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workflows</title><style>:root{color-scheme:light dark}body{margin:0}</style></head><body>${panelFragment}<script>${bridge}</script></body></html>`);
 
 const packageDirectories = new Set();
-for (const input of [...Object.keys(built.metafile.inputs), ...Object.keys(uiBuild.metafile.inputs)]) {
+for (const input of [...Object.keys(built.metafile.inputs), ...Object.keys(scriptBuild.metafile.inputs), ...Object.keys(uiBuild.metafile.inputs)]) {
   const normalized = input.replaceAll("\\", "/");
   const start = normalized.lastIndexOf("node_modules/");
   if (start < 0) continue;
