@@ -65,3 +65,5 @@ codex plugin add workflows@codex-plugin-workspace
 目标是动态工作流：根据任务生成脚本，并按执行结果动态分支、循环和调度 worker。当前实现模板查询与示例数据面板原型；真实代理执行、持久化和恢复尚未接入。
 
 使用方式见 [插件说明](plugins/workflows/README.md)，已确认的产品方向见 [设计记录](plugins/workflows/docs/design.md)，宿主扩展边界见 [能力核对](docs/codex-extension-boundaries.md)。
+
+面板原型的 App 内嵌加载已经通过本机日志确认；具体已验证与未验证范围见 [宿主验证](docs/mcp-app-host-verification.md)。

@@ -14,11 +14,11 @@ Hooks 包含 `SubagentStart`、`SubagentStop`，可以补充上下文。`statusM
 
 OpenAI 提供 MCP Apps 与 Extensions。插件注册自己的 UI resource，通过 UI bridge 交互；Extensions 的 `global`、`thread`、`file` 入口分别对应全局插件入口、会话内容 Tab 和文件查看器。它们允许添加自有界面，不能据此推出可以改写任意 App Tab。[Extensions 文档](https://developers.openai.com/plugins/build/extensions)
 
-官方规范的 Platform Support 以 ChatGPT Work、Desktop 和移动端为对象，没有单列独立 Codex App。规范包含 `codex://` 深链，而当前 ChatGPT Desktop 文档说明保留该 scheme 是兼容行为。因此，不能仅凭深链或 Desktop 一词确认用户当前 App 支持全部入口。工作流面板的内嵌位置需要实机验证，设计上保留本地浏览器承载方式。[支持表](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md#platform-support)、[深链说明](https://learn.chatgpt.com/docs/app/commands#deep-links)
+官方规范的 Platform Support 以 ChatGPT Work、Desktop 和移动端为对象，没有单列独立 Codex App。规范包含 `codex://` 深链，而当前 ChatGPT Desktop 文档说明保留该 scheme 是兼容行为。因此，不能仅凭深链或 Desktop 一词确认全部入口。面板优先使用经验证的宿主入口，localhost 只用于开发预览。[支持表](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md#platform-support)、[深链说明](https://learn.chatgpt.com/docs/app/commands#deep-links)
 
 本次进一步检查了当前 Windows 安装包 `OpenAI.Codex_26.1007.2314.0` 的本地代码，并用 REA 静态分析相关 UI chunk。已观察到开启的 MCP UI 总开关、本地工具 `ui://` 资源加载、`text/html;profile=mcp-app`、全局和会话插件入口，以及会话侧栏 iframe 承载链路。被分析的 UI JavaScript 未报告完整性矛盾；ASAR 中无关原生模块有完整性元数据矛盾，不能把结果当成整个应用包的完整性证明。
 
-这些观察支持优先用 MCP App 资源接入本机插件面板，不默认通过临时 localhost 网站打开。仍需验证本地 stdio 元数据是否实际进入菜单、面板是否加载以及 `ui/initialize` 握手。插件目前为此提供只读 `workflow_open_panel` 探针，不运行 worker。
+随后已通过本机日志确认 `workflow_open_panel` 的原生视图、资源读取、sandbox 附加、frame 提交及 widget 运行。验证使用 GitHub 源安装的 `0.1.4`，不运行 worker；像素、按钮和完整握手，以及会话侧栏菜单仍未单独验证。证据范围见 [本机 MCP App 验证](mcp-app-host-verification.md)。
 
 当前会话另有 `codex-app-tools` 提供的 `open_in_codex` 工具，可打开文件、浏览器、终端和审查面板。Skill 可以在这些工具可用时协作使用；这是已安装插件提供的有限宿主操作，不是任意第三方 MCP 服务注册或替换原生组件的通用接口。
 
