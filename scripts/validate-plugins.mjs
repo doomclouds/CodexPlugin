@@ -32,7 +32,19 @@ for (const name of pluginDirs) {
   if (pkg) assert.equal(manifest.version, pkg.version);
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
   const listing = manifest.extensions?.["com.openai"]?.interface;
-  if (listing) assert.ok(listing.shortDescription?.length <= 30, "Listing subtitle exceeds 30 characters");
+  if (listing) {
+    assert.ok(listing.shortDescription?.length <= 30, "Listing subtitle exceeds 30 characters");
+    for (const key of ["logo", "logoDark", "composerIcon"]) {
+      if (!listing[key]) continue;
+      const icon = await readFile(contained(directory, listing[key]));
+      assert.ok(icon.length <= 5 * 1024 * 1024, "Product icon exceeds 5 MiB");
+      if (listing[key].endsWith(".png")) {
+        assert.equal(icon.subarray(0, 8).toString("hex"), "89504e470d0a1a0a", "Invalid PNG icon");
+        const width = icon.readUInt32BE(16), height = icon.readUInt32BE(20);
+        assert.ok(width === height && width >= 48 && width <= 4096, "Icon must be square and 48-4096 px");
+      }
+    }
+  }
 
   const entry = marketplace.plugins.find(plugin => plugin.name === name);
   assert.ok(entry, `${name} is absent from the marketplace`);

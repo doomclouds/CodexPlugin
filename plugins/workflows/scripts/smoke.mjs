@@ -35,17 +35,33 @@ try {
     "workflow_save_template", "workflow_preview", "workflow_update", "workflow_list_runs", "workflow_get_run", "workflow_stop", "workflow_panel_lease", "workflow_start", "workflow_resume", "workflow_cancel_task", "workflow_apply",
   ].sort());
   const panelTool = tools.find(tool => tool.name === "workflow_open_panel");
+  assert.equal(panelTool._meta.ui.resourceUri, "ui://workflows/panel.html");
+  assert.equal(panelTool._meta["ui/resourceUri"], "ui://workflows/panel.html");
   assert.deepEqual(panelTool._meta["openai/ui"].entrypoints, [{ type: "thread" }, { type: "global" }]);
   const panelResult = await client.callTool({ name: "workflow_open_panel", arguments: {} });
+  assert.equal(panelResult.structuredContent.version, manifest.version);
   assert.equal(panelResult.structuredContent.prototype, false);
   assert.equal(panelResult.structuredContent.executionAvailable, true);
+  // Plugin upgrades may remove the old checkout after its MCP process starts.
+  await rm(path.join(isolatedRoot, "runtime", "panel.html"));
   const panelResource = await client.readResource({ uri: panelTool._meta.ui.resourceUri });
   assert.equal(panelResource.contents[0].mimeType, "text/html;profile=mcp-app");
   assert.match(panelResource.contents[0].text, /workflow-panel/);
+  const aliases = ["ui://workflows/prototype/0.1.4.html", "ui://workflows/panel/0.2.0.html", "ui://workflows/panel/0.2.1.html"];
+  const { resources } = await client.listResources();
+  for (const uri of [panelTool._meta.ui.resourceUri, ...aliases]) {
+    assert.ok(resources.some(resource => resource.uri === uri), `Missing panel resource: ${uri}`);
+    const resource = await client.readResource({ uri });
+    assert.equal(resource.contents[0].uri, uri);
+    assert.equal(resource.contents[0].mimeType, panelResource.contents[0].mimeType);
+    assert.equal(resource.contents[0].text, panelResource.contents[0].text, `Panel alias has different HTML: ${uri}`);
+    assert.deepEqual(resource.contents[0]._meta, panelResource.contents[0]._meta);
+  }
   for (const name of ["workflow_start", "workflow_resume", "workflow_apply", "workflow_cancel_task"]) assert.deepEqual(tools.find(tool => tool.name === name)._meta.ui.visibility, ["app"]);
 
   const capabilities = await client.callTool({ name: "workflow_get_capabilities", arguments: {} });
   assert.equal(capabilities.isError, undefined);
+  assert.equal(capabilities.structuredContent.version, manifest.version);
   assert.equal(capabilities.structuredContent.execution.available, true);
   const preview = await client.callTool({ name: "workflow_preview", arguments: { projectPath: tmpdir(), script: 'export const meta = { name: "smoke", description: "Standalone runtime check" }; return args.value + 1;', args: { value: 6 } } });
   assert.equal(preview.isError, undefined);
@@ -76,7 +92,7 @@ try {
   assert.equal(missing.isError, true);
   assert.match(missing.content[0].text, /Unknown workflow template/);
   assert.equal(stderr, "");
-  console.log("Workflows MCP smoke passed: discovery, capabilities, catalog, script read, unknown ID, independent cwd, standalone bundle.");
+  console.log("Workflows MCP smoke passed: discovery, versions, stable panel resource and cached aliases after file removal, capabilities, catalog, script read, unknown ID, independent cwd, standalone bundle.");
 } finally {
   await client.close();
   await transport.close();

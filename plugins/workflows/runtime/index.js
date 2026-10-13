@@ -28120,8 +28120,8 @@ var require_graceful_fs = __commonJS({
       fs2.createReadStream = createReadStream;
       fs2.createWriteStream = createWriteStream;
       var fs$readFile = fs2.readFile;
-      fs2.readFile = readFile6;
-      function readFile6(path5, options, cb) {
+      fs2.readFile = readFile5;
+      function readFile5(path5, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
         return go$readFile(path5, options, cb);
@@ -38991,7 +38991,7 @@ function N3(Z, $, J, X, V) {
 }
 
 // src/server.ts
-import { readFile as readFile5 } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 
 // src/catalog.ts
 import { readFile } from "node:fs/promises";
@@ -39014,7 +39014,7 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.2.0",
+    version: "0.2.1",
     stage: "runtime-v1",
     available: ["list-templates", "read-template", "save-template", "cross-project-reuse", "preview", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: true },
@@ -39351,7 +39351,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.2.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.2.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object3(object3(await session.request("config/read", { cwd: request.cwd })).config);
       const config2 = { "web_search": "disabled" };
@@ -46220,9 +46220,17 @@ function result(data2) {
   return { content: [{ type: "text", text: JSON.stringify(data2) }], structuredContent: data2 };
 }
 var annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
-var panelResourceUri = "ui://workflows/panel/0.2.0.html";
+var panelResourceUri = "ui://workflows/panel.html";
+var panelResourceUris = [
+  panelResourceUri,
+  "ui://workflows/prototype/0.1.4.html",
+  "ui://workflows/panel/0.2.0.html",
+  "ui://workflows/panel/0.2.1.html"
+];
 function createServer(engine2) {
-  const server2 = new McpServer({ name: "workflows", version: "0.2.0" });
+  const serverInfo = { name: "workflows", version: "0.2.1" };
+  const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
+  const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);
   K3(server2, "workflow_open_panel", {
     title: "Workflows",
@@ -46233,21 +46241,23 @@ function createServer(engine2) {
       ui: { resourceUri: panelResourceUri },
       "openai/ui": { entrypoints: [{ type: "thread" }, { type: "global" }] }
     }
-  }, async () => result({ prototype: false, executionAvailable: true, description: "\u52A8\u6001\u5DE5\u4F5C\u6D41\u4EFB\u52A1\u9762\u677F\uFF1A\u9884\u89C8\u811A\u672C\u540E\u5F00\u59CB\uFF0C\u5B8C\u6210\u540E\u5BA1\u67E5\u5E76\u5E94\u7528\u6539\u52A8\u3002" }));
-  N3(server2, "Workflows task panel", panelResourceUri, { mimeType: p }, async () => ({
-    contents: [{
-      uri: panelResourceUri,
-      mimeType: p,
-      text: await readFile5(new URL("../runtime/panel.html", import.meta.url), "utf8"),
-      _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] } }, "openai/ui": { availableDisplayModes: ["inline", "fullscreen"] } }
-    }]
-  }));
+  }, async () => result({ version: serverInfo.version, prototype: false, executionAvailable: true, description: "\u52A8\u6001\u5DE5\u4F5C\u6D41\u4EFB\u52A1\u9762\u677F\uFF1A\u9884\u89C8\u811A\u672C\u540E\u5F00\u59CB\uFF0C\u5B8C\u6210\u540E\u5BA1\u67E5\u5E76\u5E94\u7528\u6539\u52A8\u3002" }));
+  for (const uri of panelResourceUris) {
+    N3(server2, uri === panelResourceUri ? "Workflows task panel" : `Workflows task panel compatibility (${uri})`, uri, { mimeType: p }, async () => ({
+      contents: [{
+        uri,
+        mimeType: p,
+        text: panelHtml,
+        _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] } }, "openai/ui": { availableDisplayModes: ["inline", "fullscreen"] } }
+      }]
+    }));
+  }
   server2.registerTool("workflow_get_capabilities", {
     title: "\u67E5\u770B\u5DE5\u4F5C\u6D41\u63D2\u4EF6\u80FD\u529B",
     description: "Report the workflow runtime, Codex adapter, persistence, cancellation, recovery, and panel capabilities.",
     inputSchema: {},
     annotations
-  }, async () => result(getCapabilities()));
+  }, async () => result({ ...getCapabilities(), version: serverInfo.version }));
   server2.registerTool("workflow_list_templates", {
     title: "\u67E5\u770B\u5DE5\u4F5C\u6D41\u6A21\u677F\u76EE\u5F55",
     description: "List bundled workflow scripts. Listing does not start execution.",

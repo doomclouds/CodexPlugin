@@ -1,5 +1,7 @@
 # CodexPlugin
 
+<img src="assets/marketplace-icon.png" alt="Codex Plugin Workspace 图标" width="64" height="64">
+
 多个独立 Codex 插件的开发仓库。插件源码集中维护，各插件分别构建、安装和演进。
 
 ## 当前目录
@@ -62,10 +64,14 @@ codex plugin add workflows@codex-plugin-workspace
 
 ## Workflows
 
-`workflows 0.2.0` 已接入第一版动态执行器：预览 JavaScript 后在插件面板开始，按结果分支、循环并调度真实 Codex worker；停止后保存并手动恢复。写入在独立快照完成，全部结束后统一审查，用户点击应用才修改项目。
+`workflows 0.2.1` 已接入第一版动态执行器：预览 JavaScript 后在插件面板开始，按结果分支、循环并调度真实 Codex worker；停止后保存并手动恢复。写入在独立快照完成，全部结束后统一审查，用户点击应用才修改项目。
 
 独立工作流库保存脚本和默认输入，不绑定项目；同一定义可以为多个项目创建独立运行。面板按宿主上下文继承主题、样式变量、字体与字号。
 
+0.2.1 使用固定面板资源地址并在启动时缓存 HTML，兼容旧版地址，防止升级删除旧缓存后面板资源不可读。仍连接 0.1.4 的宿主必须重新加载服务。故障与修复范围见 [升级修复记录](docs/workflows-panel-upgrade-fix.md)。
+
+商城与插件图标使用 Image Gen 生成，资产和提示词见 [图标说明](assets/icon-prompts.md)。Workflows 图标已接入插件清单；当前 Codex 市场协议只提供市场名称，商城图标用于仓库及产品展示素材。
+
 使用见 [插件说明](plugins/workflows/README.md)，规则见 [设计记录](plugins/workflows/docs/design.md) 与 [运行时设计](plugins/workflows/docs/runtime-design.md)，Claude 依据及差异见 [参考说明](plugins/workflows/docs/claude-reference.md)。宿主扩展边界见 [能力核对](docs/codex-extension-boundaries.md)。
 
-[0.2.0 验证记录](docs/workflows-0.2-verification.md) 区分自动测试与本机真实执行；[主题检查](design-qa.md) 记录开发浏览器的样式与窄窗口验证。[旧宿主记录](docs/mcp-app-host-verification.md) 只适用于 0.1.4 原型，不能证明新版原生宿主验收。本次开发和检查不包含安装插件、修改用户配置、提交或推送。
+[0.2.0 验证记录](docs/workflows-0.2-verification.md) 区分自动测试与本机真实执行；[主题检查](design-qa.md) 记录开发浏览器的样式与窄窗口验证。[旧宿主记录](docs/mcp-app-host-verification.md) 只适用于 0.1.4 原型，不能证明新版原生宿主验收。构建与检查不会自动安装或提交推送；这些动作按用户请求执行。

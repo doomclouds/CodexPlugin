@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
-import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { getCapabilities, getTemplate, listTemplates } from "./catalog.ts";
@@ -12,10 +12,18 @@ function result(data: Record<string, unknown>): CallToolResult {
 }
 
 const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
-const panelResourceUri = "ui://workflows/panel/0.2.0.html";
+const panelResourceUri = "ui://workflows/panel.html";
+const panelResourceUris = [
+  panelResourceUri,
+  "ui://workflows/prototype/0.1.4.html",
+  "ui://workflows/panel/0.2.0.html",
+  "ui://workflows/panel/0.2.1.html",
+];
 
 export function createServer(engine: WorkflowEngine) {
-  const server = new McpServer({ name: "workflows", version: "0.2.0" });
+  const serverInfo = { name: "workflows", version: "0.2.1" };
+  const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
+  const server = new McpServer(serverInfo);
   const templates = new TemplateStore(engine.store);
 
   registerAppTool(server, "workflow_open_panel", {
@@ -27,23 +35,26 @@ export function createServer(engine: WorkflowEngine) {
       ui: { resourceUri: panelResourceUri },
       "openai/ui": { entrypoints: [{ type: "thread" }, { type: "global" }] },
     },
-  }, async () => result({ prototype: false, executionAvailable: true, description: "动态工作流任务面板：预览脚本后开始，完成后审查并应用改动。" }));
+  }, async () => result({ version: serverInfo.version, prototype: false, executionAvailable: true, description: "动态工作流任务面板：预览脚本后开始，完成后审查并应用改动。" }));
 
-  registerAppResource(server, "Workflows task panel", panelResourceUri, { mimeType: RESOURCE_MIME_TYPE }, async () => ({
-    contents: [{
-      uri: panelResourceUri,
-      mimeType: RESOURCE_MIME_TYPE,
-      text: await readFile(new URL("../runtime/panel.html", import.meta.url), "utf8"),
-      _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] } }, "openai/ui": { availableDisplayModes: ["inline", "fullscreen"] } },
-    }],
-  }));
+  // Versioned aliases preserve saved entrypoints after the host reconnects.
+  for (const uri of panelResourceUris) {
+    registerAppResource(server, uri === panelResourceUri ? "Workflows task panel" : `Workflows task panel compatibility (${uri})`, uri, { mimeType: RESOURCE_MIME_TYPE }, async () => ({
+      contents: [{
+        uri,
+        mimeType: RESOURCE_MIME_TYPE,
+        text: panelHtml,
+        _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] } }, "openai/ui": { availableDisplayModes: ["inline", "fullscreen"] } },
+      }],
+    }));
+  }
 
   server.registerTool("workflow_get_capabilities", {
     title: "查看工作流插件能力",
     description: "Report the workflow runtime, Codex adapter, persistence, cancellation, recovery, and panel capabilities.",
     inputSchema: {},
     annotations,
-  }, async () => result(getCapabilities()));
+  }, async () => result({ ...getCapabilities(), version: serverInfo.version }));
 
   server.registerTool("workflow_list_templates", {
     title: "查看工作流模板目录",

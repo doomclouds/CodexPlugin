@@ -22,7 +22,7 @@ export async function getTemplate(id: string) {
 
 export function getCapabilities() {
   return {
-    version: "0.2.0",
+    version: "0.2.1",
     stage: "runtime-v1",
     available: ["list-templates", "read-template", "save-template", "cross-project-reuse", "preview", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: true },
