@@ -2,124 +2,83 @@
 
 <img src="assets/workflows-icon.png" alt="Workflows 产品图标" width="64" height="64">
 
-`0.2.3` 提供动态工作流第一版：预览 JavaScript 脚本后启动真实 Codex worker，按结果分支、循环和调度任务；支持停止、磁盘保存和手动恢复。写入先在独立快照中完成，全部执行结束后统一审查，再由用户点击“应用改动”。
+`0.3.0` 让 Agent 根据任务创建和执行动态工作流。JavaScript 表达分支、循环、并行和按结果调度；真实 Codex worker 使用原生文件、命令和修改工具，以及本次授权的 MCP。运行可保存、停止、恢复、审查和跨项目复用。
 
-需要 Node.js 22 或更新版本、支持 `app-server` 的 Codex CLI 和已有登录。插件不负责登录或修改全局配置。打开面板前核对工具返回的运行版本；安装版本和当前连接的服务版本可能不同。
+需要 Node.js 22 或更新版本、支持 `app-server` 的 Codex CLI 和已有登录。安装版本与当前聊天实际加载的版本分别核对。插件不接管用户登录。
 
 ## 使用
 
-1. 描述任务，让 Codex 起草脚本，明确输入、结束条件和是否需要写入。
-2. 打开 Workflows 面板，填写目标项目的绝对路径、脚本和 JSON 输入。写入任务选择允许写入；目标必须是 Git 仓库根目录。
-3. 点击“保存预览”。此时不启动 worker。检查项目、脚本、输入与写入范围后点击“开始”。
-4. 在“任务”和“日志”中查看真实结果、执行尝试、线程标识、用量和命令输出。任务数按脚本执行动态增加。
-5. 点击“停止”后等待“已停止”。结果、日志和快照改动保留；重新打开只加载记录，点击“恢复／继续”才重新执行。
-6. 执行完成后查看统一差异和 worker 的实际验证报告，点击“应用改动”。冲突时保留当前项目，先处理冲突或创建新的预览。
+1. 描述任务、目标项目和允许的操作。Agent 生成脚本、输入与执行范围，通过 `workflow_preview` 保存计划。预览不执行。
+2. 已要求执行时，Agent 使用 `workflow_start` 启动；只要求方案时等待执行授权。无需打开面板手写脚本。
+3. 用 `workflow_get_run` 或 Workflows 面板查看真实任务、日志与结果。需要停止时调用 `workflow_stop`，它等待实际 worker 退出后保存进度。
+4. 重新打开只读取记录。明确要求继续时，Agent 用当前 revision 调用 `workflow_resume`。项目或维护产物变化可能使缓存无法安全重放，此时需要新预览。
+5. 执行完成后审查差异和实际验证结果。在已授权的应用范围内调用 `workflow_apply`；也可以在面板中审查并操作。冲突保留当前项目，不覆盖后续编辑。
 
-宿主没有提供项目目录时，手动填写，不从插件启动目录猜测目标。测试由真实 worker 执行并报告；面板不显示固定的示例测试通过数。应用不会提交、推送或部署。
+高级脚本编辑保留在面板中。目标目录由用户输入或宿主上下文提供，不从插件启动目录猜测。聊天启动不要求面板租约；面板启动绑定其生命周期，租约丢失会停止对应运行。
 
-## 工作流库与跨项目复用
+## 可表达的任务与工具
 
-编辑区的“保存到工作流库”保存脚本、默认输入、默认写入范围和限制，不绑定项目、运行结果或快照。定义按 `meta.name` 标识；更新已有定义需要当前 `revision`，避免覆盖另一处更新。
+脚本通过 `agent()` 请求真实任务，代理可以读取项目、分析代码、运行命令、修改代码并测试。网络授权与文件写入授权分别声明；网络权限不代表发送消息、发布、部署或修改外部数据的业务授权。
 
-选择定义，点击“载入到新运行”，填写项目 A 并保存预览。再次载入同一定义，填写项目 B，可创建独立运行。修改定义不会自动替换已保存的运行。
+外部 MCP 通过 `allowedMcpServers` 声明，`allowedMcpTools` 可进一步指定工具。有效集合保留用户已有的 allow/deny 和审批限制。只读文件沙箱不能让外部 MCP 自动只读；只读 worker 仅开放有只读声明的 MCP 工具，声明仍依赖服务端身份与实际权限。
 
-例如保存以下只读定义：
+这些能力足以组合审查与核实、批量处理、按发现修复和测试、联网研究、依赖构建和 Git 维护。具体命令、规则和结束条件是每次工作流的输入，不需要针对每种业务修改插件代码。独立 app-server 不能自动取得父桌面聊天的全部专属 apps、Image Gen、界面控制或交互式权限回调；缺少能力时明确报告，不返回模拟结果。
 
 ```javascript
 export const meta = {
   name: "review-files",
-  description: "逐文件审查，再汇总有证据支持的问题",
+  description: "逐文件审查，再核实和汇总问题",
   phases: [{ title: "审查" }, { title: "汇总" }],
 };
-
 const findings = await pipeline(args.files, file =>
-  agent(`只读审查 ${file}，返回有证据支持的问题。`, { label: file, phase: "审查" }),
+  agent(`只读审查 ${file}，返回有证据的问题。`, { label: file }),
 );
 phase("汇总");
-return await agent(`汇总并排除误报：${JSON.stringify(findings.filter(Boolean))}`);
+return await agent(`核实并汇总：${JSON.stringify(findings.filter(Boolean))}`);
 ```
 
-对应 MCP 参数如下；`script` 表示上述脚本文本，`projectAPath` 和 `projectBPath` 由用户提供，不预设机器目录：
+`parallel()` 等待各任务并保留输入顺序，失败项为 `null`；`pipeline()` 按条目独立推进，`null` 停止该条目。直接 `agent()` 失败可以在脚本中捕获。脚本本身运行于 Worker 内的 QuickJS WASM，只使用编排 API；实际工具由代理执行，脚本不直接访问 Node、文件或网络。时钟和随机数禁用，以保持重放确定性。
 
-```javascript
-workflow_save_template({ script, args: { files: ["src/Example.cs"] }, allowWrite: false });
+## 工作流库与跨项目复用
 
-workflow_preview({ projectPath: projectAPath, script, args: { files: ["src/Example.cs"] } });
-workflow_preview({ projectPath: projectBPath, script, args: { files: ["src/Other.cs"] } });
-```
+`workflow_save_template` 保存脚本、默认输入、默认范围和限制，不绑定项目、结果或工作区。定义 ID 为 `saved:<meta.name>`，更新需要当前 revision。`workflow_list_templates` 和 `workflow_get_template` 读取内置与用户定义。对同一个定义，分别指定项目 A 和 B 创建独立运行，缓存和改动互不共享。
 
-库同时列出内置定义与用户定义。内置 ID 为 `review-changes`；用户定义 ID 为 `saved:<meta.name>`。保存定义、读取定义和保存预览都不启动 worker。当前没有定义删除、导入导出或远端同步入口。
+保存定义不会开始执行，修改定义不会替换已有运行。当前没有定义删除、导入导出或远端同步入口。运行时项目路径只写入用户的数据目录，不写回发布插件。
 
-## 工具与执行边界
+## 工作区、维护与应用
 
-| 工具 | 行为 |
-| --- | --- |
-| `workflow_get_capabilities` | 返回当前执行器、恢复与面板能力 |
-| `workflow_list_templates`、`workflow_get_template` | 列出、读取内置或保存的定义 |
-| `workflow_save_template` | 保存独立定义 |
-| `workflow_preview`、`workflow_update` | 保存或更新计划，不执行 |
-| `workflow_list_runs`、`workflow_get_run` | 读取真实运行、任务、结果和差异 |
-| `workflow_open_panel` | 打开任务面板 |
-| `workflow_stop` | 中断 worker，等待退出并保存 |
-| `workflow_start`、`workflow_resume` | 用户面板动作，要求当前版本和有效租约 |
-| `workflow_cancel_task` | 面板取消单个任务，其他任务由脚本决定 |
-| `workflow_apply` | 面板应用最终审查的差异并检查冲突 |
-| `workflow_panel_lease` | 维护面板生命周期，失联到期停止运行 |
+默认 `workspaceMode: "snapshot"`：写入先在独立文件快照进行，最终按基线检查并应用文件改动。该模式保留已有编辑，不保留完整 Git 历史，不用来拉取分支。
 
-开始、恢复、单任务取消和应用仅声明给 App。Codex 可以起草和保存预览；用户开始与应用是两个独立步骤。
+`workspaceMode: "git-worktree"`：为干净 Git 仓库创建包含历史、分支与远端配置的独立 checkout。它拥有自己的 `.git`，不共享原仓库的可写元数据。维护操作使用此模式；完成后核对原分支与 HEAD 基线，只快进到已经验证的提交，不重新查询浮动远端。未提交的源码改动不会被插件自动提交。
 
-脚本由 Worker 线程内的 QuickJS WASM 执行，不使用 Node `vm`。脚本只调用编排 API，不能直接访问文件、shell、网络、定时器或模块；时钟和随机数不可用。`parallel()`、`pipeline()` 按输入顺序返回，单项失败记日志并返回 `null`，流水线遇 `null` 停止该输入。直接 `await agent()` 的错误可由脚本捕获。
+可选的 `maintenance.steps` 定义精确 argv、联网范围、超时和最多两次临时网络重试。脚本用 `await operation("step-id")` 执行；未声明的操作拒绝执行。自动重试须明确声明 `idempotent: true`。已开始但结果不确定的非幂等命令不会在恢复时重新发送，须核对实际效果后调整计划。此 API 用于需要确定命令的步骤，普通代理任务不要求声明全部 shell 命令。
 
-只读 worker 默认最多 4 个，可配置为 1—16。写入任务显式设置 `{ mode: "write" }`；同一数据目录下的多个服务进程同时最多 1 个写入 worker。只读沙箱禁止写入，但读取范围不限于 `cwd`。写入只允许修改快照；外部 MCP、apps、插件、其他代理和网络关闭，不自动提升权限或回答交互请求。
+`maintenance.activation` 可在审查后更新一个已有 stdio MCP 的 command/args。`${WORKSPACE}` 解析为保留的独立 checkout，构建产物经指纹检查。配置前像与私有备份保存在运行目录，以版本 CAS 写入，保留该服务器其他字段；不能安全回滚时明确失败。
 
-快照保留当前 tracked 脏内容和未忽略的 untracked 文件，不复制原 `.git`。忽略的新增构建产物不进入最终差异；已跟踪文件即使匹配忽略规则，仍可审查。内部相对符号链接保留；外部链接和符号链接父目录拒绝复制或应用。
+仓库快进与配置激活是两个阶段。激活失败时状态为 `partial`，审查后可以重试尚未完成的激活。配置写入成功不代表当前桌面连接已刷新，状态为 `pending_restart`；应重新加载并核对实际服务身份，再判断是否生效。插件不把新进程探测当成父聊天已更新。
 
-## 数据与恢复
+任意外部副作用无法承诺恰好执行一次。中断时应检查实际后置条件、固定提交与产物；非幂等远端写入需使用服务端幂等机制或明确核验，不能盲目重试。
 
-默认数据目录为 `~/.local/state/codex-workflows`，通过 MCP 进程的 `WORKFLOWS_DATA_DIR` 可改址：
+## 保存位置
 
-```text
-<data>/
-  templates/<name>.json             独立定义库
-  wf_<24位十六进制ID>/
-    run.json                       计划、状态、任务、尝试、结果、日志和差异
-    baseline/                      开始时文件基线
-    workspace/                     worker 使用的快照
-    apply-transaction/             应用记录与暂存内容
-  locks/                           定义、写入槽位和项目应用锁
-```
+默认数据根目录由当前用户主目录解析为 `~/.local/state/codex-workflows`，可以通过 `WORKFLOWS_DATA_DIR` 指定。
 
-只读运行不创建文件快照。定义与运行记录分开；跨项目复用定义不共享任务缓存。
+- `templates/`：用户工作流定义。
+- `wf_<id>/run.json`：脚本、输入、范围、状态、任务、尝试、结果与日志。
+- 各运行目录：快照或 Git checkout、基线、应用事务、激活备份与控制请求。
 
-恢复按调用顺序重放。匹配 prompt 和选项的已完成任务可复用；整次停止时中断的任务重新执行，可保留其前后独立完成的缓存。首个失败或调用指纹变化使该位置及后续缓存失效。项目变化使只读缓存全部失效；已有写入快照的运行要求新建预览。快照缺失时明确失败，不静默重建。
+这些是用户运行数据，不是发布包的一部分。构建产物被激活引用时，不能删除对应运行工作区。结果和日志可能包含项目内容，应按项目数据管理。
 
-正常关闭面板会停止其启动的运行，MCP 正常关闭也等待退出并保存。面板每 5 秒续租，租约有效期 90 秒；关闭事件未送达时由到期检测兜底。异常退出后的记录重新加载时整理为已停止或应用失败，用户手动继续。实际宿主事件送达仍需新版验证。
+## 验证与开发
 
-## 源码构建与验证
-
-发布完整插件目录，保留技能参考文件及全部清单引用资源。esbuild 将 MCP、内嵌 WASM 的脚本 Worker 和面板打包到 `runtime/`。`${PLUGIN_ROOT}` 定位真实入口，不依赖宿主工作目录；GitHub 市场安装直接使用运行包，不需要仓库外依赖或宿主构建。
-
-单独使用插件源码时，在插件目录安装声明的开发依赖即可构建和检查，不需要父工程配置：
-
-```sh
-npm install --ignore-scripts
+```shell
 npm run typecheck
 npm run build
 npm run smoke
-```
-
-日常检查覆盖类型、构建、结构、独立 MCP 包、沙箱、调度、持久化、工作区、模板与面板。测试中的 adapter 与协议进程夹具不调用模型。可选真实验证会调用模型：
-
-```powershell
 npm run smoke:real
+node --experimental-strip-types scripts/real-protocol-smoke.ts --real-workers
 ```
 
-`ui://workflows/panel.html` 是稳定的自包含 MCP App 资源，支持全局和会话入口。初次连接和更新时应用宿主主题、颜色、字体 CSS、字号、行高和相关变量；缺失变量使用回退。
+普通检查不调用模型。两个真实验证入口显式调用已登录 Codex 的默认模型；协议验证使用一次性仓库与私有临时配置，检查原生工具、授权 MCP、拉取、联网安装、构建、停止恢复、持久化和审查应用，不修改用户真实 MCP 配置。测试环境目录按系统 API 创建，没有固化开发者目录。
 
-## 升级后的宿主连接
-
-面板入口使用稳定的 `ui://workflows/panel.html`，避免每次发布改变宿主保存的资源地址。新服务同时保留 `ui://workflows/prototype/0.1.4.html`、`ui://workflows/panel/0.2.0.html` 与 `ui://workflows/panel/0.2.1.html` 兼容地址；这些地址都返回同一份当前面板 HTML。服务在启动时将 HTML 读入内存，因此以后安装新包移除旧缓存文件，也不会让已启动的新服务读取面板时出现文件不存在错误。
-
-GitHub 市场升级完成不代表已经运行的 MCP 进程重新加载。旧进程可能仍持有已被更新移除的缓存目录，或无法识别新版资源地址。升级后需要重新加载宿主中的 Workflows MCP 连接，再打开面板；兼容地址只能由新版服务提供，不能修复仍运行的旧进程。`workflow_get_capabilities` 和 `workflow_open_panel` 的结果包含 `version`，可与安装版本核对；面板工具的资源地址应为上述稳定地址。
-
-详细调用说明见技能目录内的 [接口与脚本参考](skills/workflows/references/runtime.md)。该资料随插件发布，不依赖开发工程。
+`runtime/` 包含自包含服务与脚本执行器，面板由 MCP App 资源打开。开发用 localhost 预览不代表原生宿主验收。更新后旧进程缓存面板、脚本执行器与内置定义，避免删除旧安装目录导致运行资源失效；新的能力仍须重新加载新版服务后才能使用。

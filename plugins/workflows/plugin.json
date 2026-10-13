@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "workflows",
-  "version": "0.2.3",
-  "description": "Dynamic JavaScript workflows with Codex workers, replay recovery, isolated changes, and a task panel.",
+  "version": "0.3.0",
+  "description": "Tool-driven dynamic workflows with native Codex execution, scoped MCP tools, replay recovery, and reviewed isolated changes.",
   "license": "MIT",
   "extensions": {
     "com.openai": {
@@ -12,14 +12,14 @@
         "logoDark": "./assets/workflows-icon.png",
         "composerIcon": "./assets/workflows-icon.png",
         "shortDescription": "动态编排、停止恢复与改动审查",
-        "longDescription": "预览动态脚本后启动真实 Codex worker，支持停止、持久化恢复、隔离写入及最终差异审查与应用。",
+        "longDescription": "Agent 创建和执行动态工作流，使用原生 Codex 工具与已授权 MCP，支持持久化恢复、独立 Git 工作区及改动审查。",
         "category": "Productivity",
         "capabilities": [
           "Read",
           "Write",
           "Interactive"
         ],
-        "defaultPrompt": "根据当前任务起草动态工作流，保存预览并打开 Workflows 面板。"
+        "defaultPrompt": "根据当前任务创建动态工作流，明确执行范围；按我的授权启动并验证实际结果。"
       }
     }
   }

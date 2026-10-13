@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowPanelController, applyPanelHostStyles, canApply, escapeHtml, jsonInput, toolPayload } from "../prototypes/panel.ts";
+import { WorkflowPanelController, applyPanelHostStyles, canApply, escapeHtml, jsonInput, parseToolGrants, summarizeMaintenanceReview, toolPayload } from "../prototypes/panel.ts";
 import type { WorkflowRun, ToolCaller } from "../prototypes/panel.ts";
 
 function draft(): WorkflowRun {
@@ -36,12 +36,10 @@ function fixture(overrides: Partial<WorkflowRun> = {}) {
   return { panel, calls, timers, fail: (message?: string) => { failure = message; }, update: (value: Partial<WorkflowRun>) => { run = { ...run, ...value }; } };
 }
 
-test("start needs a user action and carries the displayed revision and live lease", async () => {
+test("authorized tool automation carries the displayed revision and the UI live lease", async () => {
   const { panel, calls } = fixture();
   await panel.connected();
-  await assert.rejects(panel.perform("start"), /用户点击/);
-  assert.equal(calls.filter(call => call.name === "workflow_start").length, 0);
-  await panel.perform("start", true);
+  await panel.perform("start", false);
   assert.deepEqual(calls.find(call => call.name === "workflow_start")?.args, { id: "run-1", revision: 7, leaseId: "lease-1" });
   assert.equal(panel.selected?.execution, "running");
   await panel.teardown();
@@ -71,8 +69,7 @@ test("apply is unavailable until completed changes are visible in the difference
   await panel.perform("apply", true);
   assert.equal(calls.some(call => call.name === "workflow_apply"), false);
   panel.state.tab = "diff";
-  await assert.rejects(panel.perform("apply", false), /用户点击/);
-  await panel.perform("apply", true);
+  await panel.perform("apply", false);
   assert.deepEqual(calls.find(call => call.name === "workflow_apply")?.args, { id: "run-1", revision: 7 });
   await panel.teardown();
 });
@@ -250,4 +247,54 @@ test("editor JSON preserves null, strings, arrays and primitive workflow inputs"
   for (const value of [null, "a string input", [1, "second"], true, 12, { files: ["src/index.ts"] }]) {
     assert.deepEqual(JSON.parse(jsonInput(value)), value);
   }
+});
+
+test("preview and edit preserve the declared network, MCP, workspace and maintenance scope", async () => {
+  const { panel, calls } = fixture();
+  await panel.connected();
+  const input = {
+    projectPath: "/project", script: "return await operation('build')", args: {}, allowWrite: true,
+    networkAccess: true, allowedMcpServers: ["rea"], allowedMcpTools: { rea: ["binary_session"] }, workspaceMode: "git-worktree" as const,
+    maintenance: { steps: [{ id: "build", command: ["npm", "run", "build"], networkAccess: false }], activation: { serverName: "rea", command: "node", args: ["${WORKSPACE}/runtime/index.js"] } },
+  };
+  await panel.save(input);
+  assert.deepEqual(calls.find(call => call.name === "workflow_preview")?.args, input);
+  await panel.save(input, { id: "run-1", revision: 7 });
+  assert.deepEqual(calls.find(call => call.name === "workflow_update")?.args, {
+    id: "run-1", revision: 7, script: input.script, args: {}, allowWrite: true,
+    networkAccess: true, allowedMcpServers: ["rea"], allowedMcpTools: { rea: ["binary_session"] }, workspaceMode: "git-worktree", maintenance: input.maintenance,
+  });
+  await panel.teardown();
+});
+
+test("completed maintenance reviews can be applied from the difference tab without fabricated file diffs", () => {
+  const run = { ...draft(), execution: "completed" as const, maintenanceReview: { steps: [{ id: "build", exitCode: 0 }], diff: { files: [] } } };
+  assert.equal(canApply(run, "overview"), false);
+  assert.equal(canApply(run, "diff"), true);
+  assert.equal(canApply({ ...run, execution: "running" }, "diff"), false);
+});
+
+test("activation failure after repository application remains reviewable for an activation-only retry", () => {
+  const run = { ...draft(), execution: "completed" as const, application: "partial" as const, activation: { status: "failed" as const, serverName: "target" } };
+  assert.equal(canApply(run, "overview"), false);
+  assert.equal(canApply(run, "diff"), true);
+  assert.equal(canApply({ ...run, application: "applied" }, "diff"), false);
+});
+
+test("MCP grant input accepts exact name arrays and rejects malformed or prototype keys", () => {
+  assert.deepEqual(parseToolGrants('{"rea":["binary_session"],"other":[]}'), { rea: ["binary_session"], other: [] });
+  for (const value of ['[]', 'null', '{"rea":"all"}', '{"rea":[" "]}', '{"__proto__":["unsafe"]}']) assert.throws(() => parseToolGrants(value), /MCP/);
+});
+
+test("maintenance presentation bounds large artifact manifests while preserving review identifiers", () => {
+  const artifacts = Array.from({ length: 100000 }, (_, index) => ({ path: `node_modules/pkg-${index}/file.js`, size: index, kind: "file", hash: "full-manifest-hash" }));
+  const summary = summarizeMaintenanceReview({ base: "base", target: "target", branch: "main", artifacts, artifactFingerprint: "artifact-pin", fingerprint: "review-pin", preparedClean: true, diff: { text: "source changes" } });
+  assert.equal(summary.artifactCount, 100000);
+  assert.equal(summary.artifacts.length, 30);
+  assert.equal(summary.artifactFingerprint, "artifact-pin");
+  assert.equal(summary.fingerprint, "review-pin");
+  assert.equal(summary.preparedClean, true);
+  assert.equal(JSON.stringify(summary).includes("pkg-99999"), false);
+  assert.equal(JSON.stringify(summary).includes("full-manifest-hash"), false);
+  assert.ok(JSON.stringify(summary).length < 5000);
 });

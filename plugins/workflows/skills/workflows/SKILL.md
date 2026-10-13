@@ -1,40 +1,44 @@
 ---
 name: workflows
-description: 查看、起草、保存和跨项目复用 Workflows 动态工作流，通过插件面板预览、执行、停止恢复与审查改动。用户要求动态编排、工作流库或工作流执行时使用。
+description: 根据用户任务生成、保存并执行 Workflows 动态工作流，支持跨项目复用、并行 worker、维护操作、停止恢复和改动应用。
 ---
 
-先调用 `workflow_get_capabilities`，按当前服务返回的版本与能力工作，不把本地构建、旧安装或测试替身当作当前聊天已加载的执行器。
+先调用 `workflow_get_capabilities`，按当前服务返回的版本与能力工作。不把本地构建、安装结果或测试替身当作当前聊天已加载的执行器。具体字段见技能内的 [接口与脚本参考](references/runtime.md)。
 
-## 起草与预览
+## 根据任务创建并执行
 
-用 `workflow_list_templates`、`workflow_get_template` 查看内置或用户定义，再按任务调整脚本和 JSON 输入。需要具体字段或调用规则时读取 [接口与脚本参考](references/runtime.md)。
+用户描述目标后，由代理生成脚本、输入和执行范围，再调用 `workflow_preview` 保存计划。用户不需要打开编辑器手写 JavaScript；面板用于查看计划、进度、报告、差异，也保留操作按钮。
 
-脚本首条语句必须是纯字面量 `export const meta`，含小写短横线名称、描述和可选阶段。使用 `args`、`agent`、`parallel`、`pipeline`、`phase`、`log` 及普通分支循环，最终返回有用结果。不得直接调用 Node、文件、shell、网络、模块、定时器、时钟或随机数；不要把 DSL 当作 Node 程序执行。
+核对目标项目、允许写入的范围、是否需要网络、MCP 服务及工具授权、工作区类型、维护命令和激活配置。用户已授权创建并执行时，用预览返回的 `id` 和当前 `revision` 调用 `workflow_start`；聊天调用不传 `leaseId`。不要把已有授权拆成重复确认。用户只要求规划时，完成预览，不自行开始。
 
-明确输入、阶段、输出、结束条件与错误处理。`parallel` 接受函数数组，单项失败返回 `null` 并记日志；`pipeline` 各输入独立推进，失败或 `null` 停止该输入后续阶段。直接 `await agent` 的错误可以捕获。结构化输出传 JSON `schema`，不要假设纯文本自动变为 JSON。
+执行中用 `workflow_get_run` 读取真实状态、任务尝试、日志、用量与结果；需要多个记录时用 `workflow_list_runs`。等待运行达到真实终态，处理实际失败原因，不返回虚构结果。用户要求停止或取消任务时调用 `workflow_stop` 或 `workflow_cancel_task`，等待退出。恢复使用新读取的版本调用 `workflow_resume`；聊天启动的运行不依赖面板保持打开。
 
-目标项目必须明确，不从插件启动目录猜测。写入要求 Git 仓库根目录、预览 `allowWrite: true` 与任务 `{ mode: "write" }`。默认任务只读；只读读取范围不限于 `cwd`，外部工具与网络关闭。测试由快照内真实 worker 执行，按实际报告说明结果。
+脚本首条语句必须是纯字面量 `export const meta`，含小写短横线名称、非空描述和可选阶段。使用 `args`、`agent`、`parallel`、`pipeline`、`operation`、`phase`、`log` 及普通分支循环，最终返回有用结果。循环须有结束条件；不得直接调用 Node、文件、shell、网络、模块、定时器、时钟或随机数。
 
-用 `workflow_preview` 保存计划，或以当前 `revision` 用 `workflow_update` 更新，再 `workflow_open_panel` 展示。预览不执行。用户在面板开始；不得绕过用户动作调用仅 App 可见的开始或恢复工具。
+实际读取、命令执行和修改由 `agent` 内的真实 Codex worker 完成。worker 通过官方 app-server 使用原生文件读取、命令执行及补丁修改能力，并按授权复用配置的 MCP；JavaScript 只负责动态编排，不需要为每类实际任务增加插件代码或维护步骤。网络开放后，原生命令也可在授权范围内访问网络。桌面专有工具、Image Gen、原生 UI 和父聊天专有 apps 不等于 worker 全量继承。
 
-## 保存与复用
+默认只读。`agent` 写入任务使用 `{ mode: "write" }`，同时预览 `allowWrite: true`；只读任务可并行。`parallel` 接受函数数组，失败项返回 `null` 并记日志；`pipeline` 各输入独立推进，失败或 `null` 停止该输入后续阶段。直接 `await agent` 或 `await operation` 的错误可以捕获。结构化 worker 输出传 JSON `schema`，不要假设文本自动变为 JSON。
 
-用户希望保留定义时，用 `workflow_save_template` 保存脚本、默认输入、写入范围和限制，不绑定项目和运行结果。ID 为 `saved:<meta.name>`，更新前读取当前定义版本。
+## 网络、工作区与维护
 
-同一定义可为不同项目创建独立预览与运行。核对目标和输入，不借用另一项目的结果或快照当作缓存。库定义更新不自动更改历史运行。
+`networkAccess` 默认 `false`，与 `allowWrite` 独立。只读联网研究可保持 `allowWrite: false` 和 `agent` 默认只读模式，仅按授权打开 `networkAccess: true`；这不会开放文件写入。只有用户任务已授权相应网络访问时设置 `true`；维护步骤仍须声明自己的 `networkAccess: true` 才能联网。不能用命令、临时环境或其他工具绕过关闭的网络。worker 不隐式继承外部工具或父聊天能力。需要已配置的 MCP 时，在 `allowedMcpServers` 明确列出授权服务名称，并以 `allowedMcpTools` 按服务列出授权的实际工具名称；默认服务和工具均未开放。只使用现有配置工具的交集，不绕过审批。只读 worker 仅使用明确 `readOnlyHint: true` 的工具；写入 worker 也按工具授权限制。不包含 Workflows 自身，避免递归调度。父聊天专有 apps/连接器不属于用户 MCP 配置，不能声称已继承或可调用。
 
-## 执行、停止与恢复
+工作区默认 `workspaceMode: "snapshot"`。需要 Git 元数据的维护任务使用 `"git-worktree"`，并明确 Git 仓库根目录。写入首先在隔离工作区完成；已有工作区的运行不能通过更新输入扩大或改变执行范围，需要另建预览。
 
-用 `workflow_get_run`、`workflow_list_runs` 读取真实任务、尝试、用量、结果与日志。默认只读并发 4、最多 16；同一数据目录实际同时最多 1 个写入 worker。
+`agent` 用于通用分析、编程及已授权 MCP 任务，不要求为每种需求修改插件或添加维护命令。`operation` 是可选的确定性维护能力，shell/build 维护需要 `allowWrite: true` 与 `workspaceMode: "git-worktree"`。通用只读联网任务不需要维护步骤。维护命令必须在 `maintenance.steps` 中预声明 `id` 和 `command` argv 数组。脚本只调用 `operation(stepId)`，不能提供新命令或拼接 shell。每步可声明网络访问、超时和有限重试。`idempotent` 默认 `false`，只有核对实际命令后才能显式声明重复执行不会新增副作用。`retries > 0` 需要 `idempotent: true`。已开始却未确认结果的非幂等 operation，恢复时拒绝自动重发；先核验实际效果，不能把“没有收到结果”当作“没有发生副作用”。以实际退出、输出、日志与审查结果判断完成，不把启动进程当作成功。
 
-停止可调用 `workflow_stop`，等待真实退出与保存；正在停止不等于已停止。恢复由用户在面板触发：重放脚本，复用有效结果，重跑中断任务；首个失败或调用指纹变化使后续缓存失效。保留快照可能已有修改，重试先检查内容。
+需要应用后激活 MCP 时，在 `maintenance.activation` 声明 `serverName`、可执行文件 `command` 和 `args`。插件路径参数使用 `${WORKSPACE}`，由运行时替换为本次保留工作区；不能固化开发者机器目录。只运行已声明的激活配置。配置更新或进程启动不等于当前宿主已经重载；`pending_restart` 仍需宿主重新加载及实际版本核对，只有 `verified` 才可称激活已验证。`application: "partial"` 表示仓库已应用但激活失败；读取新的 revision 后可重试 apply，仅重试激活阶段，不再应用仓库修改。
 
-面板或 MCP 正常关闭停止并保存，未收到面板关闭事件由租约到期兜底。重开只加载，不自动执行或应用。快照缺失、项目变更和外部运行锁按实际错误处理，不静默重建后声称已经恢复。
+## 保存、复用与恢复
 
-## 审查与应用
+用 `workflow_list_templates`、`workflow_get_template` 查看内置或保存的定义。用户希望复用时，用 `workflow_save_template` 保存脚本、默认输入、写入和网络范围、MCP 服务和工具授权、工作区类型、维护计划及限制。定义不绑定项目或运行结果；ID 为 `saved:<meta.name>`，更新前读取当前定义版本。
 
-执行完成后汇总实际 worker 报告、测试输出与差异，保留未验证事项。快照修改尚未进入当前项目。
+同一定义为不同项目创建独立预览，不借用另一项目的缓存或工作区。库定义更新不自动更改历史运行。恢复重放脚本，复用有效结果，重跑中断任务；按实际缓存失效和范围检查结果处理。快照缺失、项目变更或版本冲突时，不静默重建后声称已恢复。外部 MCP 写入及未知结果没有 exactly-once 保证，应核对实际状态后继续。
 
-用户在差异页点击应用后才修改项目。指纹或基线变化时展示冲突或失败并保留日志，不自动覆盖。应用不是提交、推送或部署；这些动作按用户具体授权执行。
+## 审查、应用与交付
 
-优先使用 MCP App 宿主面板，localhost 仅供开发。主题、变量、字体和字号继承宿主；旧原型加载记录不证明新版宿主验收。
+执行完成后检查真实 worker 报告、维护输出、测试结果和统一差异，保留未验证事项。用户已授权应用改动时，用当前 `revision` 调用 `workflow_apply`；授权仅涵盖规划或执行时，先提供具体差异再请求应用授权。面板也可审查和应用。
+
+基线、范围或审查指纹变化时按工具冲突处理，不自动覆盖。应用、激活配置更新、宿主重载和版本验证分别报告。提交、推送、发布和部署按用户具体授权执行；已有授权不重复询问。
+
+优先使用真实 MCP 工具与 MCP App 面板；localhost 仅供开发预览。主题和字体继承宿主。报告须区分协议测试、测试替身、真实 worker 执行及当前宿主验证。

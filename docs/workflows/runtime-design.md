@@ -1,6 +1,6 @@
-# Workflows 第一版运行时设计
+# Workflows 0.3 运行时设计
 
-本文对应 `0.2.1` 源码。流程为“保存定义／预览 → 用户开始 → 动态编排 → 停止恢复或完成 → 统一审查 → 用户应用”。真实完整流程已在本机验证；原生宿主验收单独记录。
+本文对应 `0.3.0` 源码。流程为“Agent 生成定义／保存预览 → 按用户授权启动 → 原生工具与授权 MCP 动态执行 → 停止恢复或完成 → 统一审查 → 按授权应用”。工具协议与真实执行分别验证；父桌面宿主实际加载身份单独核对。
 
 ## 组件
 
@@ -21,13 +21,14 @@ flowchart LR
 
 | 模块 | 职责 |
 | --- | --- |
-| `server.ts` | MCP 参数、查询、预览与仅 App 可见的用户动作 |
+| `server.ts` | MCP 参数、查询、预览及 model／App 可见的执行工具 |
 | `templates.ts` | 独立定义、版本检查与加锁保存 |
 | `script.ts`、`script-worker.ts` | Acorn、隔离 QuickJS、RPC、资源限制与取消 |
 | `engine.ts` | 调度、尝试、缓存、停止、租约与状态 |
 | `adapter.ts` | 真实 app-server、sandbox 核对、结果、用量、中断与进程收尾 |
 | `store.ts` | 原子状态保存、运行锁与命名锁 |
 | `workspace.ts` | 当前文件快照、上下文、差异、冲突与应用 |
+| `maintenance.ts` | 独立 Git checkout、提交与产物检查点、快进及单服务器配置激活 |
 | `prototypes/panel.ts`、`app-bridge.ts` | 真实工具调用、用户动作、宿主生命周期与样式 |
 
 目录保留 `prototypes/` 名称，但新版面板读取真实服务端数据。开发布局预览不是实际 MCP App 握手。
@@ -41,11 +42,12 @@ flowchart LR
 | `agent(prompt, options?)` | 返回文本或按 schema 返回 JSON，错误可捕获 |
 | `parallel(functions)` | 等待全部函数，按输入位置返回；单项拒绝记日志并转 `null` |
 | `pipeline(items, ...stages)` | 各输入独立推进；失败或 `null` 停止该输入 |
+| `operation(id)` | 执行计划中声明的精确 argv；不直接给脚本 shell |
 | `phase(title)` | 设置后续任务默认阶段 |
 | `log(message)` | 写入调度日志 |
 | `return value` | 最终 JSON 可序列化结果或文本，可为 undefined |
 
-agent 选项支持 `label`、`phase`、`mode`、`model`、`schema`、`isolation`。默认 `mode: "read"`；`isolation: "worktree"` 当前映射到写入快照，不创建真实 Git worktree。其他选项拒绝，不提供未实现的 token `budget.remaining()`。
+agent 选项支持 `label`、`phase`、`mode`、`model`、`schema`、`isolation`。默认 `mode: "read"`；`isolation: "worktree"` 映射为隔离写入任务；实际工作区由运行的 `workspaceMode` 选择文件快照或完整独立 Git checkout，不创建共享原仓库元数据的 linked worktree。其他选项拒绝，不提供未实现的 token `budget.remaining()`。
 
 QuickJS WASM 在独立 Worker 中运行，不使用 Node vm。脚本没有文件、shell、网络、宿主定时器或模块入口，禁用时钟与随机数。JSON 和文本经 RPC 交给引擎，不暴露 Node 对象。
 
@@ -57,7 +59,7 @@ QuickJS WASM 在独立 Worker 中运行，不使用 Node vm。脚本没有文件
 
 adapter 为每次尝试启动独立 Codex app-server，创建 ephemeral thread，发送 turn/start，读真实事件和最终结果，结束后关闭进程。中断发送 turn/interrupt，等完成和实际退出；超时与协议失败也进入进程收尾。
 
-只读使用 readOnly，写入使用 workspaceWrite 且可写根仅为快照，临时目录写入豁免关闭，网络关闭。只读读取不限于 cwd。继承的 MCP、apps、插件、其他代理、浏览器、computer use、hooks 和 memories 禁用，并核对实际 sandbox 与 MCP 工具清单。无法确认限制时拒绝执行，需要升级权限或问答的 server request 明确失败。
+只读使用 readOnly，写入使用 workspaceWrite 且可写根仅为隔离工作区，临时目录写入豁免关闭。网络单独声明，只读任务可按授权联网。原生读取、命令、代码修改和授权后的搜索通过官方 app-server 执行。MCP 保留用户过滤与审批，按服务器及工具交集进一步收窄；只读任务仅开放声明只读的 MCP 工具。MCP 不受文件沙箱约束，注解不是服务端权限保证。父桌面专属 apps、插件工具实例、界面控制和动态权限回调不自动继承。无法确认限制或解决审批时明确失败。
 
 `maxTokens` 累计历次 attempt 报告的 totalTokens，后续任务真正派发前再次检查，包括排队任务；0 表示不限。并发中已经启动的任务可能超过门槛，不能在模型请求任意 token 处切断，不是硬费用上限。用量是本地协议报告，不是账单保证。
 
@@ -99,10 +101,20 @@ run.json 保存项目、完整脚本与输入、revision、三组状态、任务
 
 ## 面板、样式与验证
 
-资源 ui://workflows/panel.html 声明全局与会话入口，历史地址作为别名。启动时缓存 HTML，已运行的服务不依赖升级后仍存在旧缓存文件。开始、恢复、单任务取消和应用仅给 App；面板可信点击触发操作，提交当前revision，开始／恢复携带租约。
+资源 ui://workflows/panel.html 声明全局与会话入口，历史地址作为别名。启动时缓存 HTML、QuickJS worker 源码与内置定义，已运行的服务不依赖升级后仍存在旧缓存文件。开始、恢复、单任务取消和应用向 model 与 App 开放。用户任务授权为依据，revision 校验防止操作过期计划；面板开始／恢复携带租约，聊天启动不要求租约。合成点击与人工点击经过同一工具权限，不将 isTrusted 当作授权凭据。
 
 每 2 秒刷新、5 秒续租，90 秒失效后服务端停止。正常 teardown 主动停止并释放租约；突然失联依赖到期兜底，不承诺每种宿主关闭都会立即送达事件。
 
 主题、样式变量和字体 CSS 分别用 SDK helpers 应用，初始上下文与变化均同步。字号、行高、字重、颜色、圆角和等宽字体继承宿主，缺失时回退。
 
-自动检查区分真实 QuickJS、本地文件与显式 adapter 替身。本机真实只读、写入、中断及完整动态脚本、持久化重建和明确应用已通过；新版原生宿主按钮、样式和关闭仍待对应安装验收。证据见 [0.2.0 验证](../workflows-0.2-verification.md)、[主题检查](../../design-qa.md)。
+自动检查区分真实 QuickJS、本地文件与显式 adapter 替身。本机真实只读、写入、中断及完整动态脚本、持久化重建和明确应用已通过；新版原生宿主按钮、样式和关闭仍待对应安装验收。协议端到端覆盖原生工具、MCP、Git、联网安装、构建、停止恢复与最终应用；维护事务见 [0.3 维护验证](0.3-maintenance-verification.md)。历史证据见 [0.2.0 验证](../workflows-0.2-verification.md) 和 [主题检查](../../design-qa.md)。
+
+## 维护与不确定结果
+
+Git 模式采用独立 clone，不共用原仓库的 .git 或对象 alternates；初始仓库必须干净，保留历史与远端配置，覆盖继承的 hooks／模板以避免未声明代码在准备或快进中执行。原 HEAD／分支和隔离文件／构建产物指纹在恢复和应用前复查。应用只前进到已审查的 target，不重新拉取浮动远端。
+
+确定命令在 owned app-server 的 command/exec 沙箱中执行，支持精确 argv、明确网络、超时和实际进程组退出。步骤 idempotent 默认 false；自动重试要求显式声明安全重复。已执行的操作如果无法在正确前序条件下复用结果，不自动重新发送非幂等命令。未确认返回的 attempt 标记 outcome=unknown，保留实际副作用供核验。
+
+配置激活使用单服务器前像、私有备份、版本 CAS 和写后核验。失败只在版本仍匹配时回滚；崩溃恢复识别已达到的目标。Git 与激活部分完成显示 partial，重试只处理未完成激活。配置写入成功返回 pending_restart，不替代当前父聊天的实际连接验证。
+
+来自其他 MCP 实例的停止／取消经用户数据目录的带执行 token 请求传给持锁执行器，等待实际任务退出与结果回执。返回终态前完成差异、检查点、状态保存和锁收尾，避免过早暴露 completed。总体任务说明或执行范围变化会使任务缓存失效。

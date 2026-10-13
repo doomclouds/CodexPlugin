@@ -1,5 +1,6 @@
 import { parse } from "acorn";
 import { Worker } from "node:worker_threads";
+import { readFileSync } from "node:fs";
 
 export interface WorkflowMeta {
   name: string;
@@ -9,6 +10,7 @@ export interface WorkflowMeta {
 
 export interface ScriptHooks {
   agent(prompt: string, options: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
+  operation?(id: string, signal: AbortSignal): Promise<unknown>;
   phase(title: string): void;
   log(message: string): void;
 }
@@ -22,6 +24,10 @@ export interface ScriptLimits {
 }
 
 type AstNode = { type: string; start: number; end: number; [key: string]: unknown };
+// Keep runtime assets alive when a marketplace upgrade removes the old checkout.
+const scriptWorkerUrl = new URL(import.meta.url.endsWith(".ts") ? "../runtime/script-worker.js" : "./script-worker.js", import.meta.url);
+const scriptWorkerSource = readFileSync(scriptWorkerUrl, "utf8");
+const scriptWorkerDataUrl = new URL(`data:text/javascript;base64,${Buffer.from(scriptWorkerSource).toString("base64")}`);
 const forbiddenNames = new Set([
   "process", "require", "module", "exports", "Buffer", "fs", "fetch", "XMLHttpRequest",
   "WebSocket", "Worker", "SharedWorker", "window", "document", "navigator",
@@ -160,8 +166,7 @@ export async function executeScript(source: string, args: unknown, hooks: Script
     memoryMb: limit(limits.memoryMb, 64, 256, "memoryMb"),
   };
   const argsJson = encode(args);
-  const url = new URL(import.meta.url.endsWith(".ts") ? "../runtime/script-worker.js" : "./script-worker.js", import.meta.url);
-  const worker = new Worker(url, { workerData: { body, argsJson, limits: resolvedLimits }, execArgv: [] });
+  const worker = new Worker(scriptWorkerDataUrl, { workerData: { body, argsJson, limits: resolvedLimits, moduleBaseUrl: scriptWorkerUrl.href }, execArgv: [] });
   const controller = new AbortController();
   const pending = new Set<Promise<void>>();
   return await new Promise<unknown>((resolve, reject) => {
@@ -184,8 +189,10 @@ export async function executeScript(source: string, args: unknown, hooks: Script
     worker.on("exit", code => { if (!finishing) void finish(new Error(`Workflow sandbox exited before returning a result (${code})`)); });
     worker.on("message", (message: { type: string; id?: number; prompt?: string; options?: Record<string, unknown>; text?: string; resultJson?: string; error?: string }) => {
       if (finishing) return;
-      if (message.type === "agent") {
-        const task = Promise.resolve().then(() => hooks.agent(message.prompt!, message.options!, controller.signal)).then(result => {
+      if (message.type === "agent" || message.type === "operation") {
+        const task = Promise.resolve().then(() => message.type === "operation"
+          ? hooks.operation ? hooks.operation(message.prompt!, controller.signal) : Promise.reject(new Error("No operations were approved for this workflow"))
+          : hooks.agent(message.prompt!, message.options!, controller.signal)).then(result => {
           if (!finishing) worker.postMessage({ type: "agent-result", id: message.id, resultJson: encode(result) });
         }).catch(error => {
           if (!finishing) worker.postMessage({ type: "agent-result", id: message.id, error: error instanceof Error ? error.message : String(error) });

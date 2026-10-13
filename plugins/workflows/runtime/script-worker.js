@@ -1,4 +1,4 @@
-import { createRequire } from "node:module"; const require = createRequire(import.meta.url);
+import { createRequire } from "node:module"; import { workerData as workflowRuntimeData } from "node:worker_threads"; const require = createRequire(workflowRuntimeData.moduleBaseUrl ?? import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -3820,6 +3820,16 @@ async function main() {
       port.postMessage({ type: "agent", id: callCount, prompt, options });
       return deferred.handle;
     });
+    setFunction("__workflowOperation", (idHandle) => {
+      if (++callCount > data.limits.maxCalls) throw new Error("Workflow call limit exceeded");
+      const id = context.getString(idHandle);
+      if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id)) throw new Error("operation requires a declared step ID");
+      chargeMessage(id);
+      const deferred = context.newPromise();
+      pending.set(callCount, deferred);
+      port.postMessage({ type: "operation", id: callCount, prompt: id });
+      return deferred.handle;
+    });
     for (const type of ["phase", "log"]) setFunction(`__workflow${type}`, (handle2) => {
       const text = context.getString(handle2);
       if (!text.trim() || text.length > 4096) throw new Error(`${type} requires a non-empty string of at most 4096 characters`);
@@ -3833,9 +3843,11 @@ async function main() {
       Object.defineProperty(Math, "random", { value: () => { throw new Error("Math.random is unavailable because workflows must replay deterministically"); }, writable: false, configurable: false });
       Object.freeze(Math);
       const __hostAgent = __workflowAgent;
+      const __hostOperation = __workflowOperation;
       const __hostPhase = __workflowphase;
       const __hostLog = __workflowlog;
       delete globalThis.__workflowAgent;
+      delete globalThis.__workflowOperation;
       delete globalThis.__workflowphase;
       delete globalThis.__workflowlog;
       const args = ${data.argsJson === void 0 ? "undefined" : `JSON.parse(${JSON.stringify(data.argsJson)})`};
@@ -3843,6 +3855,10 @@ async function main() {
         if (typeof prompt !== "string") throw new TypeError("agent prompt must be a string");
         if (!options || typeof options !== "object" || Array.isArray(options)) throw new TypeError("agent options must be an object");
         return __hostAgent(prompt, JSON.stringify(options));
+      };
+      const operation = id => {
+        if (typeof id !== "string") throw new TypeError("operation ID must be a string");
+        return __hostOperation(id);
       };
       const parallel = async tasks => {
         if (!Array.isArray(tasks) || tasks.length > 4096 || tasks.some(task => typeof task !== "function")) throw new TypeError("parallel requires at most 4096 functions");

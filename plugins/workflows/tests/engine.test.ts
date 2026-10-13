@@ -291,3 +291,41 @@ test("a write task changes only the snapshot until the completed diff is explici
   assert.equal(applied.application, "applied", applied.error);
   assert.equal(await readFile(path.join(project, "source.txt"), "utf8"), "edited in snapshot\n");
 });
+
+test("changing the overall delegated task invalidates otherwise identical agent calls", async t => {
+  const {project,engine,adapter}=await fixture(t);
+  const source=script('return await agent("inspect");');
+  const first=await engine.preview({projectPath:project,script:source});
+  await engine.start({id:first.id,revision:first.revision});
+  const done=await engine.wait(first.id);
+  const updated=await engine.update({id:first.id,revision:done.revision,script:source.replace("Exercise orchestration with an explicit test adapter","A different overall delegated task"),args:{}});
+  await engine.start({id:updated.id,revision:updated.revision});
+  const result=await engine.wait(first.id);
+  assert.equal(result.execution,"completed",result.error);
+  assert.equal(adapter.calls.length,2);
+  assert.equal(result.tasks[0]?.cached,false);
+});
+
+test("resuming an operation with lost acknowledgment does not duplicate its existing side effect", async t => {
+  let begun!: () => void;const started=new Promise<void>(resolve=>{begun=resolve;});
+  let commandCalls=0;
+  const adapter=new TestAdapter();
+  const {project,engine}=await fixture(t,adapter);
+  await writeFile(path.join(project,".gitignore"),"effect-count.txt\n");
+  await exec("git",["add","-A"],{cwd:project});
+  await exec("git",["-c","user.name=Workflow Test","-c","user.email=workflow-test@example.invalid","commit","--quiet","-m","Add operation recovery fixture"],{cwd:project});
+  (adapter as TestAdapter & WorkerAdapter).command=async (request,signal)=>{
+    commandCalls++;
+    await writeFile(path.join(request.cwd,"effect-count.txt"),String(commandCalls));
+    await new Promise<void>((_resolve,reject)=>{signal.addEventListener("abort",()=>reject(new Error("Acknowledgment lost after effect")),{once:true});begun();});
+    return {exitCode:0,stdout:"",stderr:"",attempts:1};
+  };
+  const run=await engine.preview({projectPath:project,allowWrite:true,workspaceMode:"git-worktree",maintenance:{steps:[{id:"increment",command:["node","-e","0"]}]},script:script('return await operation("increment");')});
+  await engine.start({id:run.id,revision:run.revision});await started;
+  const stopped=await engine.stop(run.id);
+  assert.equal(stopped.tasks[0]?.attempts[0]?.outcome,"unknown");
+  await engine.start({id:run.id,revision:stopped.revision},true);
+  const refused=await engine.wait(run.id);
+  assert.equal(refused.execution,"failed");assert.match(refused.error??"",/will not be repeated/);
+  assert.equal(commandCalls,1);assert.equal(await readFile(path.join(refused.workspacePath!,"effect-count.txt"),"utf8"),"1");
+});

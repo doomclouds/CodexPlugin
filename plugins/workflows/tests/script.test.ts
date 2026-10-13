@@ -161,3 +161,18 @@ test("unawaited agents cannot continue invisibly after a script returns", async 
   await assert.rejects(execution, /unawaited agent/);
   assert.equal(exited, true);
 });
+
+test("declared operations cross the sandbox RPC without host code execution", async () => {
+  const calls: string[] = [];
+  const result = await executeScript('export const meta = {name:"operations",description:"Approved argv steps"}; const report = await operation("build_main"); return report.exitCode;', {}, {
+    agent: async () => { throw new Error("No agent needed"); }, phase() {}, log() {},
+    operation: async id => { calls.push(id); return { exitCode: 0 }; },
+  }, new AbortController().signal);
+  assert.deepEqual(calls, ["build_main"]);
+  assert.equal(result, 0);
+});
+
+test("operations require a host grant and must be awaited", async () => {
+  const hooks = {agent: async () => ({}), phase() {}, log() {}};
+  await assert.rejects(executeScript('export const meta = {name:"no-grant",description:"No operation grant"}; return await operation("build");', {}, hooks, new AbortController().signal), /No operations were approved/);
+});

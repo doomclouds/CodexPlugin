@@ -25,7 +25,7 @@ const scriptBuild = await build({
   format: "esm",
   target: "node22",
   metafile: true,
-  banner: { js: 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);' },
+  banner: { js: 'import { createRequire } from "node:module"; import { workerData as workflowRuntimeData } from "node:worker_threads"; const require = createRequire(workflowRuntimeData.moduleBaseUrl ?? import.meta.url);' },
   logLevel: "info",
 });
 

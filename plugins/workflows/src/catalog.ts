@@ -1,4 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+
+const reviewScript = readFileSync(new URL("../workflows/review-changes.workflow.js", import.meta.url), "utf8");
 
 const template = {
   id: "review-changes",
@@ -16,16 +18,15 @@ export function listTemplates() {
 
 export async function getTemplate(id: string) {
   if (id !== template.id) return undefined;
-  const script = await readFile(new URL("../workflows/review-changes.workflow.js", import.meta.url), "utf8");
-  return { ...template, script };
+  return { ...template, script: reviewScript };
 }
 
 export function getCapabilities() {
   return {
-    version: "0.2.3",
-    stage: "runtime-v1",
-    available: ["list-templates", "read-template", "save-template", "cross-project-reuse", "preview", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel"],
-    execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: true },
+    version: "0.3.0",
+    stage: "runtime-v2",
+    available: ["list-templates", "read-template", "save-template", "cross-project-reuse", "preview", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review"],
+    execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: true, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree"] },
     ui: { available: true, stage: "live", hostIntegration: "requires-version-specific-verification", exampleDataOnly: false },
     recovery: { automatic: false, mode: "launch-order-replay", stoppedAgentsRestart: true },
     pendingDesign: ["multiple-concurrent-writing-workers"],

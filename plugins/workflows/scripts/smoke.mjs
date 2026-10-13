@@ -44,6 +44,8 @@ try {
   assert.equal(panelResult.structuredContent.executionAvailable, true);
   // Plugin upgrades may remove the old checkout after its MCP process starts.
   await rm(path.join(isolatedRoot, "runtime", "panel.html"));
+  await rm(path.join(isolatedRoot, "runtime", "script-worker.js"));
+  await rm(path.join(isolatedRoot, "workflows", "review-changes.workflow.js"));
   const panelResource = await client.readResource({ uri: panelTool._meta.ui.resourceUri });
   assert.equal(panelResource.contents[0].mimeType, "text/html;profile=mcp-app");
   assert.match(panelResource.contents[0].text, /workflow-panel/);
@@ -57,7 +59,8 @@ try {
     assert.equal(resource.contents[0].text, panelResource.contents[0].text, `Panel alias has different HTML: ${uri}`);
     assert.deepEqual(resource.contents[0]._meta, panelResource.contents[0]._meta);
   }
-  for (const name of ["workflow_start", "workflow_resume", "workflow_apply", "workflow_cancel_task"]) assert.deepEqual(tools.find(tool => tool.name === name)._meta.ui.visibility, ["app"]);
+  for (const name of ["workflow_start", "workflow_resume", "workflow_apply", "workflow_cancel_task"]) assert.deepEqual(tools.find(tool => tool.name === name)._meta.ui.visibility, ["model", "app"]);
+  assert.deepEqual(tools.find(tool => tool.name === "workflow_panel_lease")._meta.ui.visibility, ["app"]);
 
   const capabilities = await client.callTool({ name: "workflow_get_capabilities", arguments: {} });
   assert.equal(capabilities.isError, undefined);
@@ -68,7 +71,7 @@ try {
   assert.equal(preview.structuredContent.run.execution, "draft");
   const lease = await client.callTool({ name: "workflow_panel_lease", arguments: {} });
   const runId = preview.structuredContent.run.id;
-  const started = await client.callTool({ name: "workflow_start", arguments: { id: runId, revision: preview.structuredContent.run.revision, leaseId: lease.structuredContent.leaseId } });
+  const started = await client.callTool({ name: "workflow_start", arguments: { id: runId, revision: preview.structuredContent.run.revision } });
   assert.equal(started.isError, undefined);
   let finished;
   for (let index = 0; index < 100; index++) {
