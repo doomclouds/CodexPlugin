@@ -97,6 +97,15 @@ function omitUnsetConfig(value: unknown): unknown {
   return value;
 }
 
+function catalogueConfigKey(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(catalogueConfigKey);
+  if (value !== null && typeof value === "object") {
+    const entries = value as JsonObject;
+    return Object.fromEntries(Object.keys(entries).sort().map(key => [key, catalogueConfigKey(entries[key])]));
+  }
+  return value;
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: Error) => void;
@@ -356,7 +365,10 @@ export class CodexAdapter implements WorkerAdapter {
   private async modelEnvironment(session: ProtocolSession, config: unknown, cwd: string): Promise<ExecutionEnvironment> {
     // Re-read configuration on every owned session. Only the catalogue is cached,
     // scoped to cwd and the entire fresh configuration, never a worker or grant.
-    const key = `${cwd}:${createHash("sha256").update(JSON.stringify(config)).digest("hex")}`;
+    // Rust map serialization can reorder equivalent objects between sessions.
+    // Stabilize only the cache key; retain every value and ordered array, and
+    // use the untouched fresh config for defaults and permission checks.
+    const key = `${cwd}:${createHash("sha256").update(JSON.stringify(catalogueConfigKey(config))).digest("hex")}`;
     const cached = this.modelCatalogues.get(key);
     if (cached && cached.expiresAt > Date.now()) return parseExecutionEnvironment(config, cached.models);
     const models: unknown[] = [];
@@ -386,7 +398,7 @@ export class CodexAdapter implements WorkerAdapter {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.3" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.4" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config = object(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config, cwd);
@@ -493,7 +505,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.3" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.4" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer); startupTimer = undefined;
       if (canceled || signal.aborted) throw canceled ?? abortError();
@@ -664,7 +676,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.3" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.4" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object(object(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== undefined || request.reasoningEffort !== undefined) {

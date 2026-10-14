@@ -83,6 +83,33 @@ test("catalogue reuse keeps fresh config reads and separate worker processes wit
   } finally { await context.cleanup(); }
 });
 
+test("catalogue cache survives reordered fresh configuration objects in the same cwd", async () => {
+  const context = await setup("catalog-cache-order");
+  try {
+    const first = await context.adapter.executionEnvironment(context.request.cwd, context.controller.signal);
+    for (let index = 0; index < 2; index++) {
+      assert.deepEqual(await context.adapter.executionEnvironment(context.request.cwd, context.controller.signal), first);
+    }
+    const transcript = await context.transcript();
+    assert.equal(transcript.filter(message => message.method === "config/read").length, 3);
+    assert.equal(transcript.filter(message => message.method === "model/list").length, 1);
+    assert.equal(transcript.some(message => /thread\/|turn\//.test(String(message.method))), false);
+  } finally { await context.cleanup(); }
+});
+
+for (const change of ["command", "env", "argv-order"] as const) {
+  test(`catalogue cache misses for real fresh configuration changes: ${change}`, async () => {
+    const context = await setup(`catalog-cache-${change}`);
+    try {
+      for (let index = 0; index < 3; index++) await context.adapter.executionEnvironment(context.request.cwd, context.controller.signal);
+      const transcript = await context.transcript();
+      assert.equal(transcript.filter(message => message.method === "config/read").length, 3);
+      assert.equal(transcript.filter(message => message.method === "model/list").length, 2,
+        "A real value or argument order change invalidates the directory; unchanged subsequent reads reuse it.");
+    } finally { await context.cleanup(); }
+  });
+}
+
 test("native item notifications produce safe live actions followed by terminal activity", async () => {
   const context = await setup("native-items");
   try {

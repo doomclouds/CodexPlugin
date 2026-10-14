@@ -30,9 +30,9 @@ async function main() {
   const signedCommand = process.env.CODEX_CLI_PATH;
   if (!signedCommand) throw new Error("CODEX_CLI_PATH must identify the actual desktop CLI for this smoke test.");
   const source = path.resolve(argument("--plugin-root") ?? fileURLToPath(new URL("../plugins/workflows", import.meta.url)));
-  const expectedVersion = argument("--expected-version") ?? "0.5.3";
   const reportPath = argument("--report");
   const manifest = JSON.parse(await readFile(path.join(source, "plugin.json"), "utf8"));
+  const expectedVersion = argument("--expected-version") ?? manifest.version;
   assert.equal(manifest.version, expectedVersion, "Build the requested patch before running the real smoke test.");
   const root = await mkdtemp(path.join(tmpdir(), "workflows-retry-mcp-"));
   const project = path.join(root, "project"), state = path.join(root, "state"), isolatedPackage = path.join(root, "package");

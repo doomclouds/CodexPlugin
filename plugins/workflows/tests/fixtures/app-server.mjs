@@ -56,7 +56,23 @@ createInterface({ input: process.stdin }).on("line", line => {
   } else if (!handshake) {
     send({ id, error: { code: -32000, message: "Not initialized" } });
   } else if (method === "config/read") {
-    response(id, { config: { model: scenario === "config-invalid-defaults" ? "removed-model" : "test-inherited-model", model_reasoning_effort: scenario === "config-invalid-defaults" ? "unsupported" : "medium", mcp_servers: { [configuredName]: { command: "must-never-start", enabled: scenario !== "mcp-user-disabled", tool_timeout_sec: null, ...(scenario === "mcp-user-filter" ? { enabled_tools: ["read_tool"], disabled_tools: ["write_tool"], tools: { read_tool: { approval_mode: "prompt" } } } : {}) } } } });
+    let config = { model: scenario === "config-invalid-defaults" ? "removed-model" : "test-inherited-model", model_reasoning_effort: scenario === "config-invalid-defaults" ? "unsupported" : "medium", mcp_servers: { [configuredName]: { command: "must-never-start", enabled: scenario !== "mcp-user-disabled", tool_timeout_sec: null, ...(scenario === "mcp-user-filter" ? { enabled_tools: ["read_tool"], disabled_tools: ["write_tool"], tools: { read_tool: { approval_mode: "prompt" } } } : {}) } } };
+    if (scenario.startsWith("catalog-cache-")) {
+      const reads = readFileSync(traceFile, "utf8").split("\n").filter(line => line.includes('"method":"config/read"')).length;
+      const selected = config.mcp_servers[configuredName];
+      selected.env = { FIRST: "stable", SECOND: "stable" };
+      selected.args = ["--first", "--second"];
+      config.mcp_servers.other = { command: "also-never-start", enabled: false };
+      if (reads > 1 && scenario === "catalog-cache-command") selected.command = "changed-never-start";
+      if (reads > 1 && scenario === "catalog-cache-env") selected.env.FIRST = "changed";
+      if (reads > 1 && scenario === "catalog-cache-argv-order") selected.args.reverse();
+      if (scenario === "catalog-cache-order" && reads % 2 === 0) {
+        const reverseObjects = value => Array.isArray(value) ? value.map(reverseObjects)
+          : value !== null && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, entry]) => [key, reverseObjects(entry)])) : value;
+        config = reverseObjects(config);
+      }
+    }
+    response(id, { config });
   } else if (method === "model/list") {
     if (scenario === "catalog-hang") return;
     if (scenario === "catalog-invalid") { response(id, { data: [{ id: "invalid" }], nextCursor: null }); return; }

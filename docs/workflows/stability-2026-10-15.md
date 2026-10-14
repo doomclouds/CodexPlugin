@@ -84,3 +84,36 @@ node --experimental-strip-types scripts/workflows-stability.ts --real-workers --
 今后的夹具记录结构化 data，便于区分模型内容、schema 契约、编排判断和工具执行的问题。业务工作流应对条件字段声明合适的枚举，并检查意外值；当前自由字符串示例默认落入右分支，所以无法在首轮给出更明确的错误位置。
 
 三批专项的临时项目和状态均已清理，原始摘要分别保留在测试指定的外部报告文件中。这仍是源码 Engine 的专项，不能代替安装包 MCP 传输、真实 App 面板或嵌套协作功能的验收。
+
+## 0.5.3 已安装完整包与真实授权 REA MCP
+
+本专项使用从 GitHub 市场安装的 **0.5.3 完整缓存包**，将整个插件复制到新的私有目录。对 `runtime/index.js`、`script-worker.js`、`launcher.mjs` 和 `panel.html` 逐个核对复制前后的 SHA-256，再用 MCP SDK client 启动隔离包的正式启动器。没有导入开发源码 Engine，也没有以源码或仓库依赖补齐运行包。测试客户端自身及独立 CLI 预检属于仓库开发脚本。
+
+签名桌面 CLI 仍为 `0.162.0-alpha.17.2`，由当前宿主环境选择；仅在该测试进程中用 PATH 精确选择此 CLI，不改用户配置。数据目录通过 `WORKFLOWS_DATA_DIR` 指向私有 fixture，目标项目是新建的空白 Git 测试仓库。
+
+运行前先通过 CLI 公共 `config/read` 确认实际 server 名为 `rea`，再用公共 `mcpServerStatus/list` 查询该 server。实际返回 REA 6.4.0、173 个工具，`binary_session` 的声明为：
+
+```json
+{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+```
+
+若工具缺少 `readOnlyHint: true`，脚本会报告 scope 不可用并停止，不升级写入授权或绕过声明。本轮真实工具满足只读要求。
+
+正式执行范围为 `allowWrite: false`、`networkAccess: false`、`allowedMcpServers: ["rea"]`、`allowedMcpTools: {"rea":["binary_session"]}`。只有一个 `gpt-6-luna/max` worker，要求只调用一次 `binary_session({})`，不打开目标、不使用 shell/文件、其他 MCP、网络、构建或配置写入。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 正式工具协议 | `workflow_get_capabilities` 返回 0.5.3；`workflow_preview` 为 draft 且无 task；随后 start/get 到 completed |
+| 执行配置 | CLI 确认 `gpt-6-luna/max`，provenance 为 configured |
+| 实际工具调用 | `toolsUsed` 只有 `mcp:rea/binary_session` |
+| REA 事实 | `open: false`；package/server 版本均为 6.4.0；server 名 rea；catalog 工具数 173 |
+| 身份交叉核验 | worker 返回的版本、工具数及 tools/combined catalog digest 与主聊天独立 `binary_session` 的对应事实完全一致 |
+| 节点简要过程 | 正式 `workflow_get_node_process` 的 brief 读取成功，节点有真实活动与工具执行过程 |
+| 项目保护 | Git 状态不变；没有隔离写入 workspace |
+| 彻底清理 | 正式 preview_deletion/delete 返回 deleted=true、partial=false、remaining=[]、blocked=[]；list_runs 为空，run 目录与 `.deletions` 不存在 |
+
+本轮 1 次真实模型请求，全程约 17.8 秒；用量上报为 input 34,385、output 906、total 35,291。随后清理整份自建 fixture（包括复制的包与私有状态），原安装缓存和用户数据保持原位。
+
+该结果证明正式 **0.5.3 安装包 → MCP 工具协议 → 真实只读 worker → 精确授权的 REA MCP** 路径可用，补充前述源码矩阵；不证明所有 MCP、写入工具、目标分析或父 App 当前连接已加载新版。
+
+开发入口为 `scripts/workflows-mcp-compatibility.ts`。复跑时必须提供当前主聊天独立读取的 REA 身份 JSON，通过 `WORKFLOWS_REA_EXPECTED_IDENTITY_FILE` 传入；它应只包含 open、packageVersion、serverName、serverVersion、mcpToolCount、toolsDigest、combinedDigest。脚本显式要求 `--real-workers`，预检不匹配或目标事实不同均报告实际失败，不循环放宽范围重试。

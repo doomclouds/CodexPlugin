@@ -45008,7 +45008,7 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.5.3",
+    version: "0.5.4",
     stage: "runtime-v2",
     available: ["explicit-task-retry", "snapshot-checkpoint", "git-context-cache", "preparation-progress", "node-activity", "node-process", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: true, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree"], submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
@@ -45519,6 +45519,14 @@ function omitUnsetConfig(value) {
   if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== null && entry !== void 0).map(([key, entry]) => [key, omitUnsetConfig(entry)]));
   return value;
 }
+function catalogueConfigKey(value) {
+  if (Array.isArray(value)) return value.map(catalogueConfigKey);
+  if (value !== null && typeof value === "object") {
+    const entries = value;
+    return Object.fromEntries(Object.keys(entries).sort().map((key) => [key, catalogueConfigKey(entries[key])]));
+  }
+  return value;
+}
 function deferred() {
   let resolve;
   let reject;
@@ -45784,7 +45792,7 @@ var CodexAdapter = class {
     });
   }
   async modelEnvironment(session, config2, cwd) {
-    const key = `${cwd}:${createHash("sha256").update(JSON.stringify(config2)).digest("hex")}`;
+    const key = `${cwd}:${createHash("sha256").update(JSON.stringify(catalogueConfigKey(config2))).digest("hex")}`;
     const cached2 = this.modelCatalogues.get(key);
     if (cached2 && cached2.expiresAt > Date.now()) return parseExecutionEnvironment(config2, cached2.models);
     const models = [];
@@ -45814,7 +45822,7 @@ var CodexAdapter = class {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.3" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.4" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config2 = object4(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config2, cwd);
@@ -45961,7 +45969,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.3" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.4" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -46174,7 +46182,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.3" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.4" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object4(object4(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== void 0 || request.reasoningEffort !== void 0) {
@@ -48054,7 +48062,7 @@ async function readDeletionConfig(projectPaths = []) {
   const session = new ProtocolSession(process.env.WORKFLOWS_CODEX_COMMAND ?? "codex", ["app-server", "--disable", "plugins", "--disable", "apps", "--disable", "remote_plugin"], process.cwd(), 15e3, 5e3, () => {
   });
   try {
-    await session.request("initialize", { clientInfo: { name: "workflows_deletion_preflight", version: "0.5.3" }, capabilities: { experimentalApi: true } });
+    await session.request("initialize", { clientInfo: { name: "workflows_deletion_preflight", version: "0.5.4" }, capabilities: { experimentalApi: true } });
     session.send({ method: "initialized", params: {} });
     const scopes = [];
     for (const cwd of [void 0, ...new Set(projectPaths)].slice(0, 101)) {
@@ -48148,7 +48156,7 @@ function registerPanelToolWithIcons(server2, register) {
   }
 }
 function createServer(engine2, options = {}) {
-  const serverInfo = { name: "workflows", version: "0.5.3", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.5.4", icons: panelIcons };
   const panelHtml = readFileSync3(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);
