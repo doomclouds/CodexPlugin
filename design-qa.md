@@ -2,7 +2,57 @@
 
 final result: passed
 
+## 2026-10-14：0.4.1 Codex 项目下拉补验
+
+项目下拉的生产前端已重新打包并通过本轮指定交互检查，未发现 P0/P1/P2 问题。此轮仅补验项目选择，不重复弹窗、图标和 dark/320px 检查。新项目接口使用受控 `workflow_get_projects` DTO，返回三个本机示例项目及可选 `currentProjectId`；没有把示例项目声称为真实 Codex 清单，也没有调用真实模型或 worker。
+
+| 场景 | 浏览器结果 |
+| --- | --- |
+| 项目聊天中打开 | 自动选中 DTO 的 `currentProjectId`，显示当前项目名称和只读执行目录。 |
+| 全局页面打开 | 列表可用但没有 current ID；保持“选择项目”，启动按钮禁用，不擅自选首项。 |
+| 用户手动选择其他项目 | 显示其只读目录；刷新项目后仍保留用户选择，没有被返回的当前聊天 ID 覆盖。 |
+| 启动 | 预览的 `projectPath` 精确等于所选项目目录，Bug 编号和描述原样传入；随后使用返回的运行 ID/revision 启动。 |
+| 运行期间 | 项目下拉与刷新项目均禁用，提示不能切换项目。 |
+| 停止后切换项目 | 选择第三项目后，上一项目任务记录不再显示，恢复当前定义的尚未派发阶段；夹具 `workflow_list_runs` 按请求的 `projectPath` 筛选。 |
+| 输入方式 | 主界面只有项目下拉与只读目录，旧 `wf-project-path` 及手工目录字段不存在。 |
+
+[聊天当前项目](artifacts/workflows-ui-qa/v041-project-thread.jpg)、[全局待选择](artifacts/workflows-ui-qa/v041-project-global.jpg)、[所选项目运行中](artifacts/workflows-ui-qa/v041-project-running.jpg)截图已实际打开核对。交互、参数和记录隔离证据保存在 [项目调用记录](artifacts/workflows-ui-qa/v041-project-audit.json)；浏览器 error/warn 日志为空。
+
+通过范围为真实生产前端在受控宿主响应下的行为；真实 native 项目枚举、当前聊天项目识别及 MCP 宿主接入由后端另行验证，本页不证明这些集成。较早截图和报告中的手动目录输入保留为历史，不作为最终项目设计。
+
+## 2026-10-14：0.4.1 节点设置弹窗与状态图标复验
+
+节点弹窗、状态图标及窄窗口检查结果通过，未发现本次检查范围内的 P0/P1/P2 问题。用户随后要求将目录输入改为 Codex 项目下拉选择，已在上面的补验完成前端检查；下列截图中的目录输入属于该轮历史状态，不代表最终项目设计。
+
+继续使用同一生产 HTML、图标 CSS 与 TypeScript 控制器重新打包的受控浏览器夹具；页面标明“界面验证 · 示例记录，不执行真实任务”。模型目录、返回的任务身份和轮询修订均为夹具值，没有真实模型、worker、用户设置或原生 Codex 项目调用。
+
+### 弹窗交互证据
+
+- 阶段与实际任务 gear 均打开原生模态 `dialog`，不展开下方高级区。基于当前截图的实际任务 gear 点击，页面 `scrollY` 保持 `0 → 0`；定位器自动居中产生的滚动没有当作产品滚动缺陷。
+- 保存、取消、Esc、X 和背景点击均关闭弹窗并将焦点返回触发节点。关闭夹具修订后，修改再取消/Esc/X并立即重开同一节点，还原保存值，不保留未保存草稿；实际任务保存 `qa-model-a/deep` 后再取消/Esc，重开仍为该保存值。
+- 开启真实夹具轮询修订时，运行版本 `82 → 90`，弹窗内未保存的 `qa-model-a/deep` 保持不变；保存后历史 attempt 的 `qa-model-b/extended` 显示没有被未来配置改写。
+- 新预览精确保留参数和阶段覆盖，实际任务覆盖携带生产边界返回的 opaque identity，再以返回 ID/revision 启动。示例值只证明前端传递，不证明模型权限或真实执行。
+- [浅色任务弹窗](artifacts/workflows-ui-qa/modal-task-light.jpg)、[深色任务弹窗](artifacts/workflows-ui-qa/v041-modal-task-dark.jpg)、[320px 深色弹窗](artifacts/workflows-ui-qa/v041-modal-task-320-dark.jpg)均已打开检查。320 × 900 CSS 视口下，文档 `clientWidth=scrollWidth=305`（含纵向滚动条）；弹窗宽 271px、右边 288px，保存按钮底部位于视口内。
+
+### 状态图标与主题证据
+
+此前第一版检查遗漏了“等待中”图例的同色 mask 问题：旧规则让浅色圆环 `color/background=rgb(255,255,255)`，与底色相同。用户截图暴露问题后，生产规则移除冲突；本轮单独读取 computed style 并开图复验，不沿用先前通过结论。
+
+| 图标位置 | 浅色 | 深色 |
+| --- | --- | --- |
+| 图例等待中 | mask 存在，17 × 17px，`rgb(104,104,104)` | mask 存在，`rgb(165,165,165)` |
+| 实际 queued 节点 | 两个圆环与图例颜色一致、mask 存在 | 两个圆环与图例颜色一致、mask 存在 |
+| 尚未派发 planned 节点 | 四个圆环为 `rgb(104,104,104)`、mask 存在 | 四个圆环为 `rgb(165,165,165)`、mask 存在 |
+
+[浅色完整运行页面](artifacts/workflows-ui-qa/v041-light-running.jpg)和[深色完整运行页面](artifacts/workflows-ui-qa/v041-dark-running.jpg)均已打开检查，底部等待圆环可见。字体继续按宿主正文 14px、节点名称 18px、语义颜色变量；模型长值换行，弹窗边框、圆角、表单和按钮跟随主题。图标仍为包内 Tabler 资产，连线仅表示阶段顺序。
+
+[本轮规范化并排比较](artifacts/workflows-ui-qa/v041-comparison-normalized.png)已与来源共同打开，保留原图阶段顺序和并行分组布局；新增参数、配置来源、弹窗和后续项目设计属于用户追加需求，不宣称逐像素一致。桌面仍为 1536 × 1024 CSS 视口，参考按 CUA 返回的 1521 × 1014 图像尺寸等比缩放。
+
+浏览器 error/warn 记录为空；[本轮交互与尺寸证据](artifacts/workflows-ui-qa/v041-interaction-audit.json)保存了工具宿主调用、草稿跨修订、取消重开和主题尺寸记录。项目输入历史证据不作为新的项目下拉验收依据；真实宿主集成由后端独立确认。
+
 ## 2026-10-14：第一版流程图、输入参数与模型设置
+
+以下为首轮历史检查记录；其图例资产结论已由上面的 0.4.1 专项复验修正。
 
 本次验收使用生产的 `prototypes/workflow-panel.html`、`icons.css`、`panel.ts` 和图、参数组件，通过 esbuild 建立本地验证页。工具响应、模型目录和任务记录都是受控夹具；页面明确显示“界面验证 · 示例记录，不执行真实任务”。没有调用模型、运行 worker、修改用户真实默认设置或连接其他聊天。
 

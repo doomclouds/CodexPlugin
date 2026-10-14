@@ -19,6 +19,8 @@ export interface ExecutionSettingsResponse {
   source: string;
   mainAgentContextAvailable: false;
 }
+export interface CodexProject { projectId: string; label: string; path: string; hostId: string }
+export interface ProjectsResponse { available: boolean; projects: CodexProject[]; currentProjectId?: string; reason?: string }
 
 export interface WorkflowAttempt {
   id: string;
@@ -130,6 +132,12 @@ export interface PanelState {
   busy: boolean;
   error: string;
   projectPath: string;
+  projects: CodexProject[];
+  projectsLoaded: boolean;
+  projectsBusy: boolean;
+  projectsError: string;
+  selectedProjectId?: string | undefined;
+  currentProjectId?: string | undefined;
   settings?: ExecutionSettingsResponse;
   settingsProjectPath: string;
   settingsBusy: boolean;
@@ -146,6 +154,17 @@ export function executionSettingsPayload(value: Record<string, unknown>): Execut
     if (!model || typeof model.id !== "string" || typeof model.displayName !== "string" || !Array.isArray(model.supportedReasoningEfforts) || model.supportedReasoningEfforts.some((effort: unknown) => typeof effort !== "string") || typeof model.defaultReasoningEffort !== "string") throw new Error("宿主返回的模型目录格式无效");
   }
   return value as unknown as ExecutionSettingsResponse;
+}
+
+export function projectsPayload(value: Record<string, unknown>): ProjectsResponse {
+  if (typeof value.available !== "boolean" || !Array.isArray(value.projects) || value.reason !== undefined && typeof value.reason !== "string" || value.currentProjectId !== undefined && typeof value.currentProjectId !== "string") throw new Error("宿主未返回有效的项目列表");
+  const ids = new Set<string>();
+  for (const project of value.projects) {
+    if (!project || typeof project.projectId !== "string" || !project.projectId || typeof project.label !== "string" || typeof project.path !== "string" || !project.path || typeof project.hostId !== "string" || ids.has(project.projectId)) throw new Error("宿主项目列表包含无效项目");
+    ids.add(project.projectId);
+  }
+  if (value.currentProjectId !== undefined && !ids.has(value.currentProjectId)) throw new Error("当前项目不在可选项目列表中");
+  return value as unknown as ProjectsResponse;
 }
 
 const executionLabels: Record<string, string> = { draft: "待开始", running: "运行中", stopping: "正在停止", stopped: "已停止", completed: "执行已完成", failed: "执行失败" };
@@ -212,7 +231,7 @@ export function partialApplicationMessage(run: WorkflowRun): string {
 
 // Every timer reads the server; no timer invents execution state.
 export class WorkflowPanelController {
-  readonly state: PanelState = { connection: "offline", runs: [], templates: [], templatesLoaded: false, selectedTemplate: undefined, selectedRun: undefined, tab: "overview", task: undefined, busy: false, error: "", projectPath: "", settingsProjectPath: "", settingsBusy: false, settingsError: "" };
+  readonly state: PanelState = { connection: "offline", runs: [], templates: [], templatesLoaded: false, selectedTemplate: undefined, selectedRun: undefined, tab: "overview", task: undefined, busy: false, error: "", projectPath: "", projects: [], projectsLoaded: false, projectsBusy: false, projectsError: "", settingsProjectPath: "", settingsBusy: false, settingsError: "" };
   private readonly callTool: ToolCaller;
   private readonly changed: () => void;
   private readonly every: (callback: () => void, milliseconds: number) => () => void;
@@ -221,11 +240,14 @@ export class WorkflowPanelController {
   private ownedRuns = new Set<string>();
   private closing = false;
   private shutdown: Promise<void> | undefined;
-  private polling = false;
+  private pollingProject: string | undefined;
+  private pollRequest = 0;
   private leasing = false;
   private definitionSelected = false;
   private templateRequest = 0;
   private settingsRequest = 0;
+  private projectsRequest = 0;
+  private projectSelectionChanged = false;
 
   constructor(callTool: ToolCaller, changed: () => void = () => {}, every = (callback: () => void, milliseconds: number): (() => void) => {
     const timer = setInterval(callback, milliseconds);
@@ -240,7 +262,59 @@ export class WorkflowPanelController {
   get canAct(): boolean { return this.state.connection === "connected" && !this.state.busy && !this.closing; }
 
   setProjectPath(projectPath: string): void {
-    if (!this.state.projectPath && projectPath) { this.state.projectPath = projectPath; this.changed(); if (this.state.connection === "connected") void this.refreshExecutionSettings(projectPath); }
+    if (!this.state.projectPath && projectPath) {
+      this.state.projectPath = projectPath;
+      this.state.selectedProjectId = this.state.projects.find(project => project.path === projectPath)?.projectId;
+      this.projectSelectionChanged = true;
+      this.changed();
+      if (this.state.connection === "connected") void this.refreshExecutionSettings(projectPath);
+    }
+  }
+
+  async refreshProjects(): Promise<void> {
+    if (this.closing || this.state.connection !== "connected" || this.state.projectsBusy) return;
+    const request = ++this.projectsRequest;
+    this.state.projectsBusy = true;
+    this.state.projectsError = "";
+    this.changed();
+    try {
+      const data = projectsPayload(await this.request("workflow_get_projects", {}));
+      if (this.closing || request !== this.projectsRequest) return;
+      const previousContext = this.state.currentProjectId;
+      this.state.projects = data.projects;
+      this.state.projectsLoaded = true;
+      if (!data.available) { this.state.projectsError = data.reason || "当前宿主无法提供 Codex 项目列表"; return; }
+      this.state.currentProjectId = data.currentProjectId;
+      const selected = data.projects.find(project => project.projectId === this.state.selectedProjectId) ?? (this.projectSelectionChanged ? data.projects.find(project => project.path === this.state.projectPath) : undefined);
+      const automatic = !this.projectSelectionChanged && (!selected || previousContext !== data.currentProjectId);
+      const project = automatic ? data.projects.find(project => project.projectId === data.currentProjectId) : selected;
+      this.state.selectedProjectId = project?.projectId;
+      this.state.projectPath = project?.path ?? "";
+    } catch (error) { if (!this.closing && request === this.projectsRequest) this.state.projectsError = `读取项目失败：${errorMessage(error)}`; }
+    finally { if (request === this.projectsRequest) this.state.projectsBusy = false; this.changed(); }
+  }
+
+  async selectProject(projectId: string): Promise<void> {
+    if (!this.canAct || this.selected && ["running", "stopping"].includes(this.selected.execution)) return;
+    const project = this.state.projects.find(project => project.projectId === projectId);
+    if (projectId && !project) { this.state.projectsError = "项目已不在 Codex 项目列表中，请刷新后重新选择"; this.changed(); return; }
+    this.projectSelectionChanged = true;
+    const previousRun = this.selected;
+    this.state.projectsError = "";
+    this.state.selectedProjectId = project?.projectId;
+    this.state.projectPath = project?.path ?? "";
+    if (previousRun && previousRun.projectPath !== this.state.projectPath) {
+      const definition = this.state.templates.find(template => template.id === previousRun.meta.name || template.id === `saved:${previousRun.meta.name}`);
+      this.selectTemplate(definition?.id ?? this.state.selectedTemplate);
+    }
+    this.changed();
+    await Promise.all([this.refresh(), this.refreshExecutionSettings(this.state.projectPath)]);
+  }
+
+  private useRunProject(run: WorkflowRun): void {
+    this.projectSelectionChanged = true;
+    this.state.projectPath = run.projectPath;
+    this.state.selectedProjectId = this.state.projects.find(project => project.path === run.projectPath)?.projectId;
   }
 
   connecting(): void { this.state.connection = "connecting"; this.changed(); }
@@ -258,6 +332,7 @@ export class WorkflowPanelController {
     if (this.closing) return;
     this.timers.push(this.every(() => { void this.heartbeat(); }, 5000));
     this.timers.push(this.every(() => { void this.refresh(); }, 2000));
+    await this.refreshProjects();
     await Promise.all([this.refresh(), this.refreshTemplates()]);
     if (!this.closing) await this.refreshExecutionSettings();
   }
@@ -280,6 +355,7 @@ export class WorkflowPanelController {
         const run = parseRun(data.run);
         this.definitionSelected = false;
         this.state.selectedRun = run.id;
+        this.useRunProject(run);
         this.replace(run);
         this.setProjectPath(run.projectPath);
       } else if (typeof data.projectPath === "string") this.setProjectPath(data.projectPath);
@@ -301,12 +377,15 @@ export class WorkflowPanelController {
   }
 
   async refresh(): Promise<void> {
-    if (this.closing || this.polling || this.state.connection === "offline" || this.state.connection === "connecting") return;
-    this.polling = true;
+    const projectPath = this.state.selectedProjectId ? this.state.projectPath : "";
+    if (this.closing || this.pollingProject === projectPath || this.state.connection === "offline" || this.state.connection === "connecting") return;
+    const request = ++this.pollRequest;
+    this.pollingProject = projectPath;
     const knownRuns = new Set(this.state.runs.map(run => run.id));
     try {
-      const data = await this.request("workflow_list_runs", {});
-      if (this.closing) return;
+      const data = await this.request("workflow_list_runs", projectPath ? { projectPath } : {});
+      if (this.closing || request !== this.pollRequest) return;
+      if (projectPath !== (this.state.selectedProjectId ? this.state.projectPath : "")) return;
       if (!Array.isArray(data.runs)) throw new Error("宿主未返回运行列表");
       const runs = data.runs.map(parseRun);
       // Keep the newer response when polling overlaps an explicit action.
@@ -318,8 +397,8 @@ export class WorkflowPanelController {
       if (!this.definitionSelected && !this.state.runs.some(run => run.id === this.state.selectedRun)) this.state.selectedRun = this.state.runs[0]?.id;
       if (this.state.error.startsWith("宿主连接中断：")) this.state.error = "";
       this.changed();
-    } catch (error) { this.disconnected(error); }
-    finally { this.polling = false; }
+    } catch (error) { if (request === this.pollRequest) this.disconnected(error); }
+    finally { if (request === this.pollRequest) this.pollingProject = undefined; }
   }
 
   async refreshTemplates(): Promise<void> {
@@ -425,10 +504,12 @@ export class WorkflowPanelController {
     this.state.selectedRun = id;
     this.state.task = undefined;
     this.state.tab = "overview";
+    const cached = this.selected;
+    if (cached) this.useRunProject(cached);
     this.changed();
     try {
       const run = parseRun((await this.request("workflow_get_run", { id })).run);
-      if (!this.closing && this.state.selectedRun === id) this.replace(run);
+      if (!this.closing && this.state.selectedRun === id) { this.useRunProject(run); this.replace(run); }
     } catch (error) { if (!this.closing && this.state.selectedRun === id) { this.state.error = errorMessage(error); this.changed(); } }
   }
 
@@ -605,10 +686,11 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   const defaultModel = element<HTMLSelectElement>("#wf-default-model");
   const defaultEffort = element<HTMLSelectElement>("#wf-default-effort");
   const settingsError = element("#wf-settings-error");
-  const nodeTarget = element<HTMLSelectElement>("#wf-node-settings-target");
+  const nodeDialog = element<HTMLDialogElement>("#wf-node-settings-dialog");
+  const nodeTarget = element("#wf-node-settings-target");
   const nodeModel = element<HTMLSelectElement>("#wf-node-model");
   const nodeEffort = element<HTMLSelectElement>("#wf-node-effort");
-  const project = element<HTMLInputElement>("#wf-project-path");
+  const project = element<HTMLSelectElement>("#wf-project-select");
   const script = element<HTMLTextAreaElement>("#wf-script");
   const args = element<HTMLTextAreaElement>("#wf-args");
   const write = element<HTMLInputElement>("#wf-allow-write");
@@ -641,9 +723,11 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   let settingsRevision = "";
   let nodeEditorSignature = "";
   let nodeNotice = "";
+  let nodeDraftDirty = false;
+  let nodeReturnKey = "";
   let lastRender = "";
   const applyInput = (input: Partial<WorkflowInput>): void => {
-    project.value = input.projectPath ?? (project.value.trim() || controller.state.projectPath);
+    if (nodeDialog.open) nodeDialog.close();
     script.value = input.script ?? "";
     args.value = jsonInput(input.args === undefined ? {} : input.args);
     write.checked = input.allowWrite ?? false;
@@ -656,15 +740,18 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     nodeTargetKey = "";
     nodeEditorSignature = "";
     nodeNotice = "";
+    nodeDraftDirty = false;
   };
   const currentDefinition = (): TemplateDefinition | undefined => controller.state.definition?.id === controller.state.selectedTemplate ? controller.state.definition : undefined;
+  const selectedProject = (): CodexProject | undefined => controller.state.projects.find(item => item.projectId === controller.state.selectedProjectId);
+  const selectedProjectPath = (): string => selectedProject()?.path ?? "";
   const declaredParameters = (): WorkflowParameter[] | undefined => controller.selected ? controller.selected.meta.parameters : currentDefinition()?.meta?.parameters;
   const readInput = (): WorkflowInput => {
     const parsed: unknown = JSON.parse(args.value);
     const parameters = declaredParameters();
     const values = new Map(Array.from(parameterFields.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-parameter]")).map(control => [control.dataset.parameter!, control.dataset.parameterType === "boolean" ? (control as HTMLInputElement).checked : control.value]));
     return {
-      projectPath: project.value.trim(), script: script.value,
+      projectPath: selectedProjectPath(), script: script.value,
       args: parameters?.length ? readParameters(parameters, values, parsed) : parsed,
       allowWrite: write.checked, networkAccess: network.checked,
       allowedMcpServers: mcpServers.value.split(/[,，]/).map(name => name.trim()).filter(Boolean),
@@ -678,7 +765,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const run = controller.selected;
     if (run?.executionSettings) return run.executionSettings;
     const upcoming = !run || run.execution === "draft" && !run.executionSettings && !run.workspacePath && !run.tasks.length;
-    return upcoming && controller.state.settingsProjectPath === project.value.trim() ? controller.state.settings?.effectiveDefaults : undefined;
+    return upcoming && controller.state.settingsProjectPath === selectedProjectPath() ? controller.state.settings?.effectiveDefaults : undefined;
   };
   const inheritedNodeSettings = (): ExecutionChoice => {
     const run = controller.selected;
@@ -696,16 +783,26 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const phases = (meta?.phases ?? []).map(phase => typeof phase === "string" ? phase : phase.title ?? phase.name ?? "").filter(Boolean);
     return [...new Map([...phases.map(title => [`phase:${title}`, `阶段：${title}`] as const), ...(run?.tasks ?? []).filter(task => !Object.hasOwn(task.options, "operation")).map(task => [`task:${task.index}`, `任务：${task.label || task.prompt.split("\n")[0] || task.id}`] as const)]).entries()].map(([key, label]) => ({ key, label }));
   };
-  const showSettings = (key?: string): void => {
-    if (key?.startsWith("task:")) {
+  const showSettings = (): void => {
+    secondary.open = true;
+    settingsDrawer.open = true;
+    render();
+    if (!controller.state.settings || controller.state.settingsError || controller.state.settingsProjectPath !== selectedProjectPath()) void controller.refreshExecutionSettings(selectedProjectPath());
+  };
+  const showNodeSettings = (key: string): void => {
+    if (!nodeTargets().some(target => target.key === key)) return;
+    if (key.startsWith("task:")) {
       try { bindObservedNodeChoice(key, {}, controller.selected?.tasks ?? []); }
       catch (error) { parameterError.textContent = errorMessage(error); parameterError.hidden = false; return; }
     }
-    secondary.open = true;
-    settingsDrawer.open = true;
-    if (key) { nodeTargetKey = key; nodeEditorSignature = ""; nodeNotice = ""; }
+    nodeTargetKey = nodeReturnKey = key;
+    nodeEditorSignature = nodeNotice = "";
+    nodeDraftDirty = false;
+    lastRender = "";
     render();
-    if (!controller.state.settings || controller.state.settingsError || controller.state.settingsProjectPath !== project.value.trim()) void controller.refreshExecutionSettings(project.value.trim());
+    nodeDialog.showModal();
+    if (!nodeModel.disabled) nodeModel.focus({ preventScroll: true });
+    if (!controller.state.settings || controller.state.settingsError || controller.state.settingsProjectPath !== selectedProjectPath()) void controller.refreshExecutionSettings(selectedProjectPath());
   };
   const loadSelectedTemplate = (id: string, key: string): void => {
     loadingTemplate = key;
@@ -734,7 +831,6 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const detailStates = new Map(Array.from(root.querySelectorAll<HTMLDetailsElement>("details[data-detail]")).map(details => [details.dataset.detail, details.open]));
     const connection = { offline: "离线预览 · 不执行任务", connecting: "正在连接宿主…", connected: "已连接宿主 · 真实运行记录", degraded: "宿主连接异常 · 操作已禁用", closed: "面板已关闭 · 正在保存与停止" }[state.connection];
     element("#wf-connection").textContent = connection;
-    element("#wf-project").textContent = run?.projectPath ?? (project.value.trim() || state.projectPath || "尚未选择");
     const notification = element("#wf-notification");
     notification.hidden = !state.error;
     notification.textContent = state.error;
@@ -776,19 +872,22 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     settingsError.textContent = state.settingsError;
     element("#wf-settings-status").textContent = state.settingsBusy ? "正在读取或保存执行设置…" : settings?.effectiveDefaults ? `当前已保存默认：${settings.effectiveDefaults.model} · ${settings.effectiveDefaults.reasoningEffort}（${settings.source === "workflow-settings" ? "工作流设置" : "Codex 配置"}）。修改只影响新运行。` : settings ? `默认配置不可用：${settings.defaultsStatus.reason ?? "宿主未提供有效默认值"}。可选择可用模型与思考深度并保存。` : "模型目录尚未读取；可以刷新设置后重试。";
     const targets = nodeTargets();
-    if (!targets.some(target => target.key === nodeTargetKey)) nodeTargetKey = "";
-    nodeTarget.innerHTML = '<option value="">从流程图选择节点</option>' + targets.map(target => `<option value="${escapeHtml(target.key)}" ${target.key === nodeTargetKey ? "selected" : ""}>${escapeHtml(target.label)}</option>`).join("");
+    if (!targets.some(target => target.key === nodeTargetKey)) {
+      nodeTargetKey = "";
+      if (nodeDialog.open) nodeDialog.close();
+    }
+    if (state.connection === "closed" && nodeDialog.open) nodeDialog.close();
+    nodeTarget.textContent = targets.find(target => target.key === nodeTargetKey)?.label ?? "";
     const inherited = inheritedNodeSettings();
     const defaultUnavailable = !workflowDefaultView() && !!settings && !settings.defaultsStatus.available && (!run || run.execution === "draft" && !run.workspacePath && !run.tasks.length);
     const missingDefault = defaultUnavailable ? "当前默认不可用" : "当前默认未记录";
     const nodeSignature = JSON.stringify([owner, nodeTargetKey, nodeSettings[nodeTargetKey], inherited, models]);
-    if (nodeSignature !== nodeEditorSignature) {
+    if (nodeSignature !== nodeEditorSignature && !nodeDraftDirty) {
       nodeEditorSignature = nodeSignature;
       const choice = nodeSettings[nodeTargetKey];
       nodeModel.innerHTML = modelSelectOptions(models, choice?.model ?? "", `继承上级配置（${inherited.model ?? missingDefault}）`);
       nodeEffort.innerHTML = effortSelectOptions(models, nodeModel.value || inherited.model, choice?.reasoningEffort ?? "", `继承上级配置（${inherited.reasoningEffort ?? missingDefault}）`);
     }
-    nodeTarget.disabled = !controller.canAct || executing || !targets.length;
     let bindingError = "";
     if (nodeTargetKey.startsWith("task:")) {
       try { bindObservedNodeChoice(nodeTargetKey, {}, run?.tasks ?? []); }
@@ -796,7 +895,9 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     }
     nodeModel.disabled = nodeEffort.disabled = !controller.canAct || state.settingsBusy || !settings || !models.length || !nodeTargetKey || executing || !!bindingError;
     element<HTMLButtonElement>("#wf-save-node-settings").disabled = nodeModel.disabled;
-    element("#wf-node-settings-status").textContent = executing ? "执行期间不可修改当前节点设置。" : bindingError || nodeNotice || (defaultUnavailable ? `默认配置不可用：${settings.defaultsStatus.reason ?? "请先修正默认设置"}` : nodeTargetKey ? `上级配置：${inherited.model ?? "模型未记录"} · ${inherited.reasoningEffort ?? "思考深度未记录"}。节点修改在下次启动生效；现有执行记录保持原配置。` : "从流程图或上方列表选择阶段／任务，可覆盖模型与思考深度。");
+    element("#wf-node-settings-status").textContent = executing ? "执行期间不可修改当前节点设置。" : nodeNotice || (state.settingsBusy ? "正在读取模型与思考深度…" : state.settingsError ? `模型目录读取失败：${state.settingsError}` : bindingError || (defaultUnavailable ? `默认配置不可用：${settings.defaultsStatus.reason ?? "请先修正默认设置"}` : nodeTargetKey ? `上级配置：${inherited.model ?? "模型未记录"} · ${inherited.reasoningEffort ?? "思考深度未记录"}。保存后在下次启动生效。` : "点击流程图的节点设置按钮修改配置。"));
+    element<HTMLButtonElement>("#wf-refresh-node-settings").hidden = !!settings && !!models.length && !state.settingsError;
+    element<HTMLButtonElement>("#wf-refresh-node-settings").disabled = state.connection !== "connected" || state.settingsBusy;
     const selector = element<HTMLSelectElement>("#wf-run-select");
     selector.innerHTML = state.runs.length ? state.runs.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === state.selectedRun ? "selected" : ""}>${escapeHtml(item.meta.name)} — ${escapeHtml(executionLabels[item.execution])}</option>`).join("") : '<option value="">暂无运行记录</option>';
     selector.disabled = !state.runs.length || state.busy;
@@ -811,10 +912,13 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     element<HTMLButtonElement>("#wf-load-template").disabled = !controller.canAct || !state.selectedTemplate;
     element<HTMLButtonElement>("#wf-save-definition").disabled = !controller.canAct;
     element("#wf-template-help").textContent = loadedTemplate ? `载入 ${loadedTemplate.name}${loadedTemplate.revision !== undefined ? ` · 定义版本 ${loadedTemplate.revision}` : ""}。选择目标项目并填写参数，点击启动后创建独立运行。` : "工作流定义可在不同项目复用；运行结果和工作区属于各次运行。";
-    project.disabled = !controller.canAct || !!editing || executing;
+    project.innerHTML = '<option value="">选择项目</option>' + state.projects.map(item => `<option value="${escapeHtml(item.projectId)}" ${item.projectId === state.selectedProjectId ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("");
+    project.disabled = !controller.canAct || !!editing || executing || state.projectsBusy || !state.projects.length;
+    element<HTMLButtonElement>("#wf-refresh-projects").disabled = state.connection !== "connected" || state.projectsBusy || executing;
+    element("#wf-project-help").textContent = state.projectsBusy ? "正在读取 Codex 项目…" : state.projectsError || (executing ? "正在此项目中执行，运行期间不能切换项目。" : editing ? "正在编辑已有运行，项目保持固定。收起高级编辑后可以切换。" : selectedProject() ? `${state.selectedProjectId === state.currentProjectId ? "已选中当前对话所属项目。" : "工作流将在所选项目中执行。"}写入任务先使用隔离工作区。` : "请选择一个本机 Codex 项目，再启动工作流。");
+    element("#wf-project-directory").textContent = selectedProject() ? `执行目录：${selectedProjectPath()}` : run ? `此记录的执行目录：${run.projectPath}` : "";
     script.disabled = args.disabled = write.disabled = network.disabled = mcpServers.disabled = mcpTools.disabled = workspaceMode.disabled = !controller.canAct || executing;
     element<HTMLButtonElement>("#wf-save").disabled = !controller.canAct;
-    if (!project.value && state.projectPath) project.value = state.projectPath;
     element("#wf-run-title").textContent = run?.meta.name ?? definition?.name ?? "暂无运行记录";
     element("#wf-run-meta").textContent = run ? `运行 ${run.id} · 版本 ${run.revision} · ${run.updatedAt}` : definition ? definition.description : "选择工作流并填写参数，点击启动后创建运行。";
     runInformation.innerHTML = run ? runDetails(run) : "";
@@ -827,7 +931,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     element("#wf-task-count").textContent = String(run?.tasks.length ?? 0);
     element("#wf-progress").textContent = run?.tasks.length ? `已完成 ${run.tasks.filter(task => task.status === "completed").length} · 运行中 ${run.tasks.filter(task => task.status === "running").length} · 等待 ${run.tasks.filter(task => task.status === "queued").length} · 中断 ${run.tasks.filter(task => task.status === "interrupted").length}` : "任务数量将在执行中确定";
     const action = (id: string, label: string, primary = false, enabled = controller.canAct, icon?: string): string => `<button type="button" data-action="${id}" class="${primary ? "wf-primary" : ""}" ${enabled ? "" : "disabled"}>${icon ? `<span class="wf-icon" data-icon="${icon}" aria-hidden="true"></span>` : ""}${label}</button>`;
-    let actions = action("start", run && ["stopped", "failed"].includes(run.execution) ? "继续" : "启动", true, controller.canAct && !!owner && !executing && !loadingTemplate && run?.application !== "applying", "player-play") + action("stop", run?.execution === "stopping" ? "正在停止…" : "停止", false, controller.canAct && run?.execution === "running", "player-stop");
+    let actions = action("start", run && ["stopped", "failed"].includes(run.execution) ? "继续" : "启动", true, controller.canAct && !!owner && !!selectedProject() && !executing && !loadingTemplate && run?.application !== "applying", "player-play") + action("stop", run?.execution === "stopping" ? "正在停止…" : "停止", false, controller.canAct && run?.execution === "running", "player-stop");
     if (run?.execution === "completed" && (run.diff?.files.length || run.maintenanceReview !== undefined || run.activation !== undefined) && run.application !== "applied") actions += canApply(run, state.tab) ? action("apply", run.application === "partial" ? "重试未完成步骤" : "应用改动") : action("review", "查看差异");
     element("#wf-actions").innerHTML = actions;
     root.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach(button => {
@@ -919,7 +1023,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       } catch (error) { notice.textContent = errorMessage(error); notice.hidden = false; }
     })();
   });
-  element("#wf-editor-cancel").addEventListener("click", () => { editor.open = false; });
+  element("#wf-editor-cancel").addEventListener("click", () => { editor.open = false; editing = undefined; element("#wf-save").textContent = "保存预览"; render(); });
   const validateChoice = (choice: ExecutionChoice, inherited: ExecutionChoice): void => {
     const models = controller.state.settings?.models ?? [];
     if (choice.model && !models.some(model => model.id === choice.model)) throw new Error("请选择模型目录中可用的模型");
@@ -929,7 +1033,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (model && effort && !model.supportedReasoningEfforts.includes(effort)) throw new Error(`模型 ${model.displayName || model.id} 不支持思考深度 ${effort}，请明确选择支持的值`);
   };
   element("#wf-settings-toggle").addEventListener("click", () => showSettings());
-  element("#wf-refresh-settings").addEventListener("click", () => { settingsRevision = ""; void controller.refreshExecutionSettings(project.value.trim()); });
+  element("#wf-refresh-settings").addEventListener("click", () => { settingsRevision = ""; void controller.refreshExecutionSettings(selectedProjectPath()); });
   defaultModel.addEventListener("change", () => {
     defaultEffort.innerHTML = effortSelectOptions(controller.state.settings?.models ?? [], defaultModel.value || controller.state.settings?.codexDefaults.model, defaultEffort.value, "继承 Codex 配置");
     controller.state.settingsError = "";
@@ -942,15 +1046,31 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const choice: ExecutionChoice = { ...(defaultModel.value ? { model: defaultModel.value } : {}), ...(defaultEffort.value ? { reasoningEffort: defaultEffort.value } : {}) };
     try {
       if (choice.model || choice.reasoningEffort) validateChoice(choice, controller.state.settings.codexDefaults);
-      void controller.saveExecutionSettings(choice, project.value.trim());
+      void controller.saveExecutionSettings(choice, selectedProjectPath());
     } catch (error) { controller.state.settingsError = errorMessage(error); render(); }
   });
-  nodeTarget.addEventListener("change", () => { nodeTargetKey = nodeTarget.value; nodeEditorSignature = ""; nodeNotice = ""; render(); });
+  const dismissNodeSettings = (): void => { if (nodeDialog.open) nodeDialog.close(); };
+  element("#wf-close-node-settings").addEventListener("click", dismissNodeSettings);
+  element("#wf-cancel-node-settings").addEventListener("click", dismissNodeSettings);
+  element("#wf-refresh-node-settings").addEventListener("click", () => { void controller.refreshExecutionSettings(selectedProjectPath()); });
+  nodeDialog.addEventListener("close", () => {
+    nodeDraftDirty = false;
+    nodeEditorSignature = "";
+    const trigger = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-node-settings]")).find(button => button.dataset.nodeSettings === nodeReturnKey);
+    if (trigger && !trigger.disabled) trigger.focus({ preventScroll: true });
+  });
+  nodeDialog.addEventListener("click", event => {
+    if (event.target !== nodeDialog) return;
+    const bounds = nodeDialog.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dismissNodeSettings();
+  });
   nodeModel.addEventListener("change", () => {
     nodeEffort.innerHTML = effortSelectOptions(controller.state.settings?.models ?? [], nodeModel.value || inheritedNodeSettings().model, nodeEffort.value, "继承上级配置");
     nodeNotice = "";
+    nodeDraftDirty = true;
+    render();
   });
-  nodeEffort.addEventListener("change", () => { nodeNotice = ""; });
+  nodeEffort.addEventListener("change", () => { nodeNotice = ""; nodeDraftDirty = true; render(); });
   element<HTMLFormElement>("#wf-node-settings-form").addEventListener("submit", event => {
     event.preventDefault();
     if (!controller.canAct || !nodeTargetKey || nodeModel.disabled) return;
@@ -961,10 +1081,13 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       if (choice.model || choice.reasoningEffort) nodeSettings[nodeTargetKey] = boundChoice;
       else delete nodeSettings[nodeTargetKey];
       nodeNotice = "节点配置已加入待启动计划，点击启动后生效；保存到工作流库可复用。";
+      nodeDraftDirty = false;
       render();
+      dismissNodeSettings();
     } catch (error) { nodeNotice = errorMessage(error); render(); }
   });
-  project.addEventListener("change", () => { render(); void controller.refreshExecutionSettings(project.value.trim()); });
+  project.addEventListener("change", () => { parameterError.hidden = true; void controller.selectProject(project.value); });
+  element("#wf-refresh-projects").addEventListener("click", () => { void controller.refreshProjects(); });
   parameterFields.addEventListener("input", () => { parameterError.hidden = true; });
   args.addEventListener("change", () => {
     const parameters = declaredParameters();
@@ -988,7 +1111,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   root.addEventListener("click", event => {
     const target = event.target instanceof Element ? event.target : undefined;
     const nodeSettingsButton = target?.closest<HTMLButtonElement>("[data-node-settings]");
-    if (nodeSettingsButton && !nodeSettingsButton.disabled) { showSettings(nodeSettingsButton.dataset.nodeSettings); nodeModel.focus(); return; }
+    if (nodeSettingsButton && !nodeSettingsButton.disabled) { showNodeSettings(nodeSettingsButton.dataset.nodeSettings!); return; }
     const zoomButton = target?.closest<HTMLButtonElement>("[data-zoom]");
     if (zoomButton && !zoomButton.disabled) {
       zoom = zoomButton.dataset.zoom === "reset" ? 1 : Math.max(.5, Math.min(1.75, Math.round((zoom + (zoomButton.dataset.zoom === "in" ? .25 : -.25)) * 100) / 100));
@@ -1009,7 +1132,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       void (async () => {
         try {
           const input = readInput();
-          if (!input.projectPath) { secondary.open = true; editor.open = true; project.focus(); throw new Error("请在高级编辑中填写目标项目目录"); }
+          if (!input.projectPath) { project.focus(); throw new Error("请在上方选择目标项目"); }
           parameterError.hidden = true;
           args.value = jsonInput(input.args);
           await controller.startWithInput(input);

@@ -38,9 +38,17 @@ try {
   assert.deepEqual(tools.map(tool => tool.name).sort(), [
     "workflow_get_capabilities", "workflow_get_template", "workflow_list_templates", "workflow_open_panel",
     "workflow_get_execution_settings", "workflow_update_execution_settings",
+    "workflow_get_projects",
     "workflow_save_template", "workflow_preview", "workflow_update", "workflow_list_runs", "workflow_get_run", "workflow_stop", "workflow_panel_lease", "workflow_start", "workflow_resume", "workflow_cancel_task", "workflow_apply",
   ].sort());
   const panelTool = tools.find(tool => tool.name === "workflow_open_panel");
+  const projectTool = tools.find(tool => tool.name === "workflow_get_projects");
+  assert.deepEqual(projectTool._meta.ui.visibility, ["model", "app"]);
+  assert.equal(projectTool.annotations.readOnlyHint, true);
+  const noProjectContext = await client.callTool({ name: "workflow_get_projects", arguments: {} });
+  assert.equal(noProjectContext.structuredContent.available, false);
+  assert.deepEqual(noProjectContext.structuredContent.projects, []);
+  assert.match(noProjectContext.structuredContent.reason, /real thread identity/);
   assert.equal(panelTool._meta.ui.resourceUri, "ui://workflows/panel.html");
   assert.equal(panelTool._meta["ui/resourceUri"], "ui://workflows/panel.html");
   assert.deepEqual(panelTool._meta["openai/ui"].entrypoints, [{ type: "thread" }, { type: "global" }]);

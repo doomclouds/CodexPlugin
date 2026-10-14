@@ -16,7 +16,13 @@
         <div id="wf-actions" class="wf-actions"><button type="button" data-action="start" disabled>启动</button><button type="button" data-action="stop" class="wf-stop" disabled>停止</button></div>
       </div>
     </div>
-    <div class="wf-project-row"><span>项目：</span><span id="wf-project" class="wf-project">尚未选择</span></div>
+    <div class="wf-project-row">
+      <label for="wf-project-select">目标项目</label>
+      <select id="wf-project-select" aria-describedby="wf-project-help wf-project-directory" disabled><option value="">选择项目</option></select>
+      <button id="wf-refresh-projects" type="button" disabled>刷新项目</button>
+      <p id="wf-project-help" class="wf-muted" role="status">从 Codex 项目中选择工作流要操作的项目。</p>
+      <p id="wf-project-directory" class="wf-muted"></p>
+    </div>
     <div id="wf-notification" class="wf-alert" role="alert" hidden></div>
     <section id="wf-parameters" class="wf-parameters" aria-labelledby="wf-parameters-title">
       <h2 id="wf-parameters-title">工作流参数</h2>
@@ -64,26 +70,11 @@
             <div id="wf-settings-error" class="wf-alert" role="alert" hidden></div>
             <div id="wf-settings-status" class="wf-muted" role="status" aria-live="polite"></div>
           </form>
-          <section class="wf-node-settings" aria-labelledby="wf-node-settings-title">
-            <h3 id="wf-node-settings-title" class="wf-section-title">节点设置</h3>
-            <form id="wf-node-settings-form" class="wf-settings-form">
-              <label for="wf-node-settings-target">配置节点</label>
-              <select id="wf-node-settings-target" disabled><option value="">从流程图选择节点</option></select>
-              <label for="wf-node-model">模型</label>
-              <select id="wf-node-model" disabled><option value="">继承上级配置</option></select>
-              <label for="wf-node-effort">思考深度</label>
-              <select id="wf-node-effort" disabled><option value="">继承上级配置</option></select>
-              <button id="wf-save-node-settings" type="submit" disabled>使用节点设置</button>
-              <div id="wf-node-settings-status" class="wf-muted" role="status" aria-live="polite"></div>
-            </form>
-          </section>
         </details>
         <details id="wf-editor" class="wf-editor">
           <summary>高级编辑（通常由 Codex 生成计划）</summary>
           <form id="wf-form">
             <div class="wf-actions"><button id="wf-load-template" type="button" disabled>载入所选工作流到新运行</button></div>
-            <label for="wf-project-path">项目目录（绝对路径）</label>
-            <input id="wf-project-path" name="projectPath" type="text" required autocomplete="off" spellcheck="false" placeholder="从宿主读取不到项目时，请填写目录" disabled>
             <label for="wf-args">输入参数（JSON）</label>
             <textarea id="wf-args" name="args" rows="3" required spellcheck="false" disabled>{}</textarea>
             <label for="wf-script">动态脚本</label>
@@ -109,6 +100,25 @@
         </div>
       </div>
     </details>
+    <dialog id="wf-node-settings-dialog" class="wf-node-dialog" aria-labelledby="wf-node-settings-title" aria-describedby="wf-node-settings-target">
+      <div class="wf-dialog-header">
+        <h2 id="wf-node-settings-title">节点设置</h2>
+        <button id="wf-close-node-settings" type="button" aria-label="关闭节点设置">×</button>
+      </div>
+      <p id="wf-node-settings-target" class="wf-dialog-target"></p>
+      <form id="wf-node-settings-form" class="wf-settings-form">
+        <label for="wf-node-model">模型</label>
+        <select id="wf-node-model" disabled><option value="">继承上级配置</option></select>
+        <label for="wf-node-effort">思考深度</label>
+        <select id="wf-node-effort" disabled><option value="">继承上级配置</option></select>
+        <div id="wf-node-settings-status" class="wf-muted" role="status" aria-live="polite"></div>
+        <div class="wf-dialog-actions">
+          <button id="wf-refresh-node-settings" type="button" hidden>刷新模型</button>
+          <button id="wf-cancel-node-settings" type="button">取消</button>
+          <button id="wf-save-node-settings" class="wf-primary" type="submit" disabled>保存节点设置</button>
+        </div>
+      </form>
+    </dialog>
     <footer class="wf-footer"><span>只读任务可并行 · 写入任务上限 1</span><span>按你的请求执行 · 按授权审查与应用</span></footer>
   </section>
 </div>
@@ -242,8 +252,10 @@ font:var(--wf-weight) var(--wf-sm)/var(--wf-line-sm) var(--wf-font);color:var(--
 #workflow-panel-prototype #wf-actions button[data-action="stop"]{border-color:var(--wf-red);color:var(--wf-red);background:var(--wf-bg)}
 #workflow-panel-prototype #wf-actions button[data-action="stop"]:hover:not(:disabled){background:var(--wf-red-bg)}
 #workflow-panel-prototype #wf-actions button[data-action="stop"]:disabled{border-color:var(--wf-border);color:var(--wf-muted)}
-#workflow-panel-prototype .wf-project-row{display:flex;align-items:baseline;gap:4px;margin:9px 0 0;color:var(--wf-muted);font-size:var(--wf-xs);line-height:var(--wf-line-xs);min-width:0}
-#workflow-panel-prototype .wf-project-row>span:first-child{white-space:nowrap}
+#workflow-panel-prototype .wf-project-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin:16px 0 0;min-width:0}
+#workflow-panel-prototype .wf-project-row>label{font-weight:var(--wf-medium);white-space:nowrap}
+#workflow-panel-prototype #wf-project-select{flex:1;width:100%;min-width:min(100%,240px);padding:9px 11px}
+#workflow-panel-prototype #wf-project-help,#workflow-panel-prototype #wf-project-directory{flex-basis:100%;margin:0;overflow-wrap:anywhere}
 #workflow-panel-prototype .wf-project{margin:0;overflow-wrap:anywhere;min-width:0}
 #workflow-panel-prototype .wf-parameters{display:grid;gap:10px;margin:18px 0 0;min-width:0}
 #workflow-panel-prototype .wf-parameters>h2{margin:0;font-size:var(--wf-sm);line-height:var(--wf-line-sm)}
@@ -321,11 +333,10 @@ font:var(--wf-weight) var(--wf-sm)/var(--wf-line-sm) var(--wf-font);color:var(--
 #workflow-panel-prototype .wf-canvas-footer{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 20px 18px;background:var(--wf-bg)}
 #workflow-panel-prototype .wf-state-legend{list-style:none;padding:0;margin:0;display:flex;align-items:center;gap:22px;flex-wrap:wrap;color:var(--wf-muted);font-size:var(--wf-xs);line-height:var(--wf-line-xs)}
 #workflow-panel-prototype .wf-state-legend li{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
-#workflow-panel-prototype .wf-state-mark{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border:2px solid var(--wf-muted);border-radius:50%;color:var(--wf-bg);flex-shrink:0}
-#workflow-panel-prototype .wf-state-mark svg{width:13px;height:13px}
-#workflow-panel-prototype .wf-state-legend [data-status="completed"] .wf-state-mark{background:var(--wf-green);border-color:var(--wf-green)}
-#workflow-panel-prototype .wf-state-legend [data-status="running"] .wf-state-mark{background:var(--wf-blue);border-color:var(--wf-blue);width:13px;height:13px;margin:2px}
-#workflow-panel-prototype .wf-state-legend [data-status="failed"] .wf-state-mark{background:var(--wf-red);border-color:var(--wf-red)}
+#workflow-panel-prototype .wf-state-mark{width:17px;height:17px;flex-shrink:0;color:var(--wf-muted)}
+#workflow-panel-prototype .wf-state-legend [data-status="completed"] .wf-state-mark{color:var(--wf-green)}
+#workflow-panel-prototype .wf-state-legend [data-status="running"] .wf-state-mark{color:var(--wf-blue)}
+#workflow-panel-prototype .wf-state-legend [data-status="failed"] .wf-state-mark{color:var(--wf-red)}
 #workflow-panel-prototype .wf-zoom-controls{display:inline-flex;align-items:center;border:var(--wf-border-width) solid var(--wf-border);border-radius:var(--wf-radius-sm);overflow:hidden;flex-shrink:0}
 #workflow-panel-prototype .wf-zoom-controls button{border:0;border-radius:0;padding:7px 10px;min-width:36px;min-height:34px;color:var(--wf-muted);font-variant-numeric:tabular-nums}
 #workflow-panel-prototype .wf-zoom-controls button+button{border-left:var(--wf-border-width) solid var(--wf-border)}
@@ -342,7 +353,13 @@ font:var(--wf-weight) var(--wf-sm)/var(--wf-line-sm) var(--wf-font);color:var(--
 #workflow-panel-prototype .wf-settings-form{display:grid;gap:8px;min-width:0}
 #workflow-panel-prototype .wf-settings-form select{width:100%;min-width:0}
 #workflow-panel-prototype .wf-settings-form .wf-alert{margin:0}
-#workflow-panel-prototype .wf-node-settings{margin-top:18px;padding-top:16px;border-top:var(--wf-border-width) solid var(--wf-border)}
+#workflow-panel-prototype .wf-node-dialog{position:fixed;inset:0;margin:auto;width:min(480px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:20px;border:var(--wf-border-width) solid var(--wf-border);border-radius:var(--wf-radius-lg);background:var(--wf-bg);color:var(--wf-text);font:inherit;box-shadow:0 16px 48px #0003;overflow:auto;overscroll-behavior:contain}
+#workflow-panel-prototype .wf-node-dialog::backdrop{background:#0006}
+#workflow-panel-prototype .wf-dialog-header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+#workflow-panel-prototype .wf-dialog-header h2{font-size:var(--wf-heading);line-height:var(--wf-heading-line);font-weight:var(--wf-medium);margin:0}
+#workflow-panel-prototype #wf-close-node-settings{border:0;padding:0;width:32px;min-height:32px;font-size:20px;color:var(--wf-muted)}
+#workflow-panel-prototype .wf-dialog-target{margin:4px 0 20px;color:var(--wf-muted);overflow-wrap:anywhere}
+#workflow-panel-prototype .wf-dialog-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:16px}
 #workflow-panel-prototype .wf-footer{padding:12px 0;border-top:0}
 @media(max-width:780px){
   #workflow-panel-prototype .wf-toolbar{align-items:stretch;flex-direction:column;gap:12px}

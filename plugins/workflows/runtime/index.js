@@ -269,10 +269,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path8) {
-  if (!path8)
+function getElementAtPath(obj, path9) {
+  if (!path9)
     return obj;
-  return path8.reduce((acc, key) => acc?.[key], obj);
+  return path9.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -531,11 +531,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path8, issues) {
+function prefixIssues(path9, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path8);
+    iss.path.unshift(path9);
     return iss;
   });
 }
@@ -1068,16 +1068,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path8 = []) => {
+  const processError = (error63, path9 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path9, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else {
-        const fullpath = [...path8, ...issue2.path];
+        const fullpath = [...path9, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1116,17 +1116,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result2 = { errors: [] };
-  const processError = (error63, path8 = []) => {
+  const processError = (error63, path9 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path9, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else {
-        const fullpath = [...path8, ...issue2.path];
+        const fullpath = [...path9, ...issue2.path];
         if (fullpath.length === 0) {
           result2.errors.push(mapper(issue2));
           continue;
@@ -1165,8 +1165,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path8 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path8) {
+  const path9 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path9) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -16231,8 +16231,8 @@ function rewriteKeyNames(ctx) {
       bySchema.set(entry.schema, entry);
   }
   const rewrites = /* @__PURE__ */ new Map();
-  for (const record4 of pendingRecords.get(ctx) ?? []) {
-    const seen = ctx.seen.get(record4);
+  for (const record5 of pendingRecords.get(ctx) ?? []) {
+    const seen = ctx.seen.get(record5);
     const names = (seen?.def ?? seen?.schema)?.propertyNames;
     if (!names || names === true || rewrites.has(names))
       continue;
@@ -19198,13 +19198,13 @@ function resolveRef(ref2, ctx) {
   if (!ref2.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path8 = ref2.slice(1).split("/").filter(Boolean);
-  if (path8.length === 0) {
+  const path9 = ref2.slice(1).split("/").filter(Boolean);
+  if (path9.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path8[0] === defsKey) {
-    const key = path8[1] === void 0 ? void 0 : decodeJSONPointerSegment(path8[1]);
+  if (path9[0] === defsKey) {
+    const key = path9[1] === void 0 ? void 0 : decodeJSONPointerSegment(path9[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref2}`);
     }
@@ -23691,8 +23691,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path8) {
-      let input2 = path8;
+    function removeDotSegments(path9) {
+      let input2 = path9;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -24101,8 +24101,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path8 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path8 && path8 !== "/" ? path8 : void 0;
+        const path9 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path9 && path9 !== "/" ? path9 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -27680,14 +27680,14 @@ var require_polyfills = __commonJS({
       fs.fstatSync = statFixSync(fs.fstatSync);
       fs.lstatSync = statFixSync(fs.lstatSync);
       if (fs.chmod && !fs.lchmod) {
-        fs.lchmod = function(path8, mode, cb) {
+        fs.lchmod = function(path9, mode, cb) {
           if (cb) process.nextTick(cb);
         };
         fs.lchmodSync = function() {
         };
       }
       if (fs.chown && !fs.lchown) {
-        fs.lchown = function(path8, uid, gid, cb) {
+        fs.lchown = function(path9, uid, gid, cb) {
           if (cb) process.nextTick(cb);
         };
         fs.lchownSync = function() {
@@ -27754,9 +27754,9 @@ var require_polyfills = __commonJS({
         };
       })(fs.readSync);
       function patchLchmod(fs2) {
-        fs2.lchmod = function(path8, mode, callback) {
+        fs2.lchmod = function(path9, mode, callback) {
           fs2.open(
-            path8,
+            path9,
             constants3.O_WRONLY | constants3.O_SYMLINK,
             mode,
             function(err, fd) {
@@ -27772,8 +27772,8 @@ var require_polyfills = __commonJS({
             }
           );
         };
-        fs2.lchmodSync = function(path8, mode) {
-          var fd = fs2.openSync(path8, constants3.O_WRONLY | constants3.O_SYMLINK, mode);
+        fs2.lchmodSync = function(path9, mode) {
+          var fd = fs2.openSync(path9, constants3.O_WRONLY | constants3.O_SYMLINK, mode);
           var threw = true;
           var ret;
           try {
@@ -27794,8 +27794,8 @@ var require_polyfills = __commonJS({
       }
       function patchLutimes(fs2) {
         if (constants3.hasOwnProperty("O_SYMLINK") && fs2.futimes) {
-          fs2.lutimes = function(path8, at2, mt, cb) {
-            fs2.open(path8, constants3.O_SYMLINK, function(er, fd) {
+          fs2.lutimes = function(path9, at2, mt, cb) {
+            fs2.open(path9, constants3.O_SYMLINK, function(er, fd) {
               if (er) {
                 if (cb) cb(er);
                 return;
@@ -27807,8 +27807,8 @@ var require_polyfills = __commonJS({
               });
             });
           };
-          fs2.lutimesSync = function(path8, at2, mt) {
-            var fd = fs2.openSync(path8, constants3.O_SYMLINK);
+          fs2.lutimesSync = function(path9, at2, mt) {
+            var fd = fs2.openSync(path9, constants3.O_SYMLINK);
             var ret;
             var threw = true;
             try {
@@ -27926,11 +27926,11 @@ var require_legacy_streams = __commonJS({
         ReadStream,
         WriteStream
       };
-      function ReadStream(path8, options) {
-        if (!(this instanceof ReadStream)) return new ReadStream(path8, options);
+      function ReadStream(path9, options) {
+        if (!(this instanceof ReadStream)) return new ReadStream(path9, options);
         Stream.call(this);
         var self = this;
-        this.path = path8;
+        this.path = path9;
         this.fd = null;
         this.readable = true;
         this.paused = false;
@@ -27975,10 +27975,10 @@ var require_legacy_streams = __commonJS({
           self._read();
         });
       }
-      function WriteStream(path8, options) {
-        if (!(this instanceof WriteStream)) return new WriteStream(path8, options);
+      function WriteStream(path9, options) {
+        if (!(this instanceof WriteStream)) return new WriteStream(path9, options);
         Stream.call(this);
-        this.path = path8;
+        this.path = path9;
         this.fd = null;
         this.writable = true;
         this.flags = "w";
@@ -28121,14 +28121,14 @@ var require_graceful_fs = __commonJS({
       fs2.createWriteStream = createWriteStream;
       var fs$readFile = fs2.readFile;
       fs2.readFile = readFile7;
-      function readFile7(path8, options, cb) {
+      function readFile7(path9, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$readFile(path8, options, cb);
-        function go$readFile(path9, options2, cb2, startTime) {
-          return fs$readFile(path9, options2, function(err) {
+        return go$readFile(path9, options, cb);
+        function go$readFile(path10, options2, cb2, startTime) {
+          return fs$readFile(path10, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$readFile, [path9, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$readFile, [path10, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28138,14 +28138,14 @@ var require_graceful_fs = __commonJS({
       }
       var fs$writeFile = fs2.writeFile;
       fs2.writeFile = writeFile6;
-      function writeFile6(path8, data2, options, cb) {
+      function writeFile6(path9, data2, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$writeFile(path8, data2, options, cb);
-        function go$writeFile(path9, data3, options2, cb2, startTime) {
-          return fs$writeFile(path9, data3, options2, function(err) {
+        return go$writeFile(path9, data2, options, cb);
+        function go$writeFile(path10, data3, options2, cb2, startTime) {
+          return fs$writeFile(path10, data3, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$writeFile, [path9, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$writeFile, [path10, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28156,14 +28156,14 @@ var require_graceful_fs = __commonJS({
       var fs$appendFile = fs2.appendFile;
       if (fs$appendFile)
         fs2.appendFile = appendFile;
-      function appendFile(path8, data2, options, cb) {
+      function appendFile(path9, data2, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$appendFile(path8, data2, options, cb);
-        function go$appendFile(path9, data3, options2, cb2, startTime) {
-          return fs$appendFile(path9, data3, options2, function(err) {
+        return go$appendFile(path9, data2, options, cb);
+        function go$appendFile(path10, data3, options2, cb2, startTime) {
+          return fs$appendFile(path10, data3, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$appendFile, [path9, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$appendFile, [path10, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28194,31 +28194,31 @@ var require_graceful_fs = __commonJS({
       var fs$readdir = fs2.readdir;
       fs2.readdir = readdir5;
       var noReaddirOptionVersions = /^v[0-5]\./;
-      function readdir5(path8, options, cb) {
+      function readdir5(path9, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path9, options2, cb2, startTime) {
-          return fs$readdir(path9, fs$readdirCallback(
-            path9,
+        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path10, options2, cb2, startTime) {
+          return fs$readdir(path10, fs$readdirCallback(
+            path10,
             options2,
             cb2,
             startTime
           ));
-        } : function go$readdir2(path9, options2, cb2, startTime) {
-          return fs$readdir(path9, options2, fs$readdirCallback(
-            path9,
+        } : function go$readdir2(path10, options2, cb2, startTime) {
+          return fs$readdir(path10, options2, fs$readdirCallback(
+            path10,
             options2,
             cb2,
             startTime
           ));
         };
-        return go$readdir(path8, options, cb);
-        function fs$readdirCallback(path9, options2, cb2, startTime) {
+        return go$readdir(path9, options, cb);
+        function fs$readdirCallback(path10, options2, cb2, startTime) {
           return function(err, files2) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
               enqueue([
                 go$readdir,
-                [path9, options2, cb2],
+                [path10, options2, cb2],
                 err,
                 startTime || Date.now(),
                 Date.now()
@@ -28289,7 +28289,7 @@ var require_graceful_fs = __commonJS({
         enumerable: true,
         configurable: true
       });
-      function ReadStream(path8, options) {
+      function ReadStream(path9, options) {
         if (this instanceof ReadStream)
           return fs$ReadStream.apply(this, arguments), this;
         else
@@ -28309,7 +28309,7 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function WriteStream(path8, options) {
+      function WriteStream(path9, options) {
         if (this instanceof WriteStream)
           return fs$WriteStream.apply(this, arguments), this;
         else
@@ -28327,22 +28327,22 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function createReadStream(path8, options) {
-        return new fs2.ReadStream(path8, options);
+      function createReadStream(path9, options) {
+        return new fs2.ReadStream(path9, options);
       }
-      function createWriteStream(path8, options) {
-        return new fs2.WriteStream(path8, options);
+      function createWriteStream(path9, options) {
+        return new fs2.WriteStream(path9, options);
       }
       var fs$open = fs2.open;
       fs2.open = open4;
-      function open4(path8, flags, mode, cb) {
+      function open4(path9, flags, mode, cb) {
         if (typeof mode === "function")
           cb = mode, mode = null;
-        return go$open(path8, flags, mode, cb);
-        function go$open(path9, flags2, mode2, cb2, startTime) {
-          return fs$open(path9, flags2, mode2, function(err, fd) {
+        return go$open(path9, flags, mode, cb);
+        function go$open(path10, flags2, mode2, cb2, startTime) {
+          return fs$open(path10, flags2, mode2, function(err, fd) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$open, [path9, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$open, [path10, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28871,7 +28871,7 @@ var require_mtime_precision = __commonJS({
 var require_lockfile = __commonJS({
   "../../node_modules/proper-lockfile/lib/lockfile.js"(exports, module) {
     "use strict";
-    var path8 = __require("path");
+    var path9 = __require("path");
     var fs = require_graceful_fs();
     var retry = require_retry2();
     var onExit = require_signal_exit();
@@ -28882,7 +28882,7 @@ var require_lockfile = __commonJS({
     }
     function resolveCanonicalPath(file2, options, callback) {
       if (!options.realpath) {
-        return callback(null, path8.resolve(file2));
+        return callback(null, path9.resolve(file2));
       }
       options.fs.realpath(file2, callback);
     }
@@ -31218,8 +31218,8 @@ function getErrorMap2() {
 
 // ../../node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data: data2, path: path8, errorMaps, issueData } = params;
-  const fullPath = [...path8, ...issueData.path || []];
+  const { data: data2, path: path9, errorMaps, issueData } = params;
+  const fullPath = [...path9, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -31334,11 +31334,11 @@ var errorUtil;
 
 // ../../node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path8, key) {
+  constructor(parent, value, path9, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path8;
+    this._path = path9;
     this._key = key;
   }
   get path() {
@@ -34901,11 +34901,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path8) {
-  if (path8.length === 0) {
+function getDotPath(path9) {
+  if (path9.length === 0) {
     return "object root";
   }
-  return path8.reduce((acc, seg, index) => {
+  return path9.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -45008,9 +45008,9 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.4.0",
+    version: "0.4.1",
     stage: "runtime-v2",
-    available: ["list-templates", "read-template", "save-template", "cross-project-reuse", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
+    available: ["list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: true, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree"], submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
     ui: { available: true, stage: "live", hostIntegration: "requires-version-specific-verification", exampleDataOnly: false },
     recovery: { automatic: false, mode: "launch-order-replay", stoppedAgentsRestart: true },
@@ -45578,7 +45578,7 @@ var CodexAdapter = class {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config2 = object3(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config2);
@@ -45715,7 +45715,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -45881,7 +45881,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object3(object3(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== void 0 || request.reasoningEffort !== void 0) {
@@ -46074,8 +46074,8 @@ async function parents(root, name) {
   }
 }
 async function readGitIndex(project) {
-  return (await gitCommand(project, ["ls-files", "--stage", "-z"])).split("\0").filter(Boolean).map((record4) => {
-    const match = /^(\d{6}) ([a-f0-9]{40,64}) ([0-3])\t([\s\S]+)$/.exec(record4);
+  return (await gitCommand(project, ["ls-files", "--stage", "-z"])).split("\0").filter(Boolean).map((record5) => {
+    const match = /^(\d{6}) ([a-f0-9]{40,64}) ([0-3])\t([\s\S]+)$/.exec(record5);
     if (!match) throw new Error("Unsupported Git index record");
     relative(path4.resolve(project), match[4]);
     return { mode: match[1], commit: match[2], stage: Number(match[3]), path: match[4] };
@@ -46822,6 +46822,196 @@ var TemplateStore = class {
   }
 };
 
+// src/projects.ts
+import { randomUUID } from "node:crypto";
+import { createConnection } from "node:net";
+import path7 from "node:path";
+var maximumFrameBytes = 8 * 1024 * 1024;
+var defaultTimeoutMs = 1e4;
+var nonempty = external_exports.string().refine((value) => value.trim().length > 0, "Expected a non-empty source value");
+function record3(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function sourceId(value, label) {
+  if (value === void 0) return void 0;
+  const result2 = nonempty.safeParse(value);
+  if (!result2.success) throw new Error(`Codex caller metadata contains an invalid ${label}.`);
+  return result2.data;
+}
+function sameIdentity(values, label) {
+  const present = values.filter((value) => value !== void 0);
+  if (new Set(present).size > 1) throw new Error(`Codex caller metadata contains conflicting ${label} values.`);
+  return present[0];
+}
+function metadataId(meta3, names, nested) {
+  const values = names.map((name) => sourceId(meta3[name], name));
+  const object5 = record3(meta3[nested]);
+  if (object5.id !== void 0) values.push(sourceId(object5.id, `${nested}.id`));
+  return sameIdentity(values, nested);
+}
+function callerContext(metaValue) {
+  const meta3 = record3(metaValue);
+  const hostThread = sameIdentity([sourceId(meta3.threadId, "threadId"), sourceId(meta3.thread_id, "thread_id")], "host thread");
+  const encoded = meta3["x-codex-turn-metadata"];
+  let compatibility = {};
+  if (encoded !== void 0) {
+    if (typeof encoded === "string" && Buffer.byteLength(encoded, "utf8") > maximumFrameBytes) throw new Error("Codex turn metadata exceeds the 8 MiB pipe bound.");
+    try {
+      compatibility = record3(typeof encoded === "string" ? JSON.parse(encoded) : encoded);
+    } catch {
+      if (hostThread === void 0) throw new Error("Codex turn metadata is not valid JSON.");
+    }
+  }
+  const threadId = hostThread ?? sameIdentity([metadataId(meta3, ["openai/threadId", "openai/thread_id", "codexThreadId", "codex_thread_id"], "thread"), sourceId(compatibility.thread_id, "thread_id")], "compatible thread");
+  if (!threadId) throw new Error("The Codex host did not provide this request's real thread identity.");
+  return {
+    threadId,
+    callId: metadataId(meta3, ["openai/toolCallId", "openai/tool_call_id", "codexCallId", "codex_call_id", "callId", "call_id"], "call") ?? randomUUID(),
+    turnId: sameIdentity([metadataId(meta3, ["openai/turnId", "openai/turn_id", "codexTurnId", "codex_turn_id", "turnId", "turn_id"], "turn"), sourceId(compatibility.turn_id, "turn_id")], "turn") ?? randomUUID()
+  };
+}
+var projectResponse = external_exports.object({ schemaVersion: external_exports.literal(2), projects: external_exports.array(external_exports.object({
+  projectId: nonempty,
+  label: external_exports.string(),
+  projectKind: nonempty,
+  hostId: external_exports.string().nullable(),
+  path: external_exports.string().nullable().optional()
+}).passthrough()) }).passthrough();
+var threadEntry = external_exports.object({ id: nonempty, projectId: external_exports.string().nullable().optional(), hostId: external_exports.string().nullable().optional() }).passthrough();
+var threadsResponse = external_exports.object({ schemaVersion: external_exports.literal(4), pinnedThreads: external_exports.array(threadEntry), threads: external_exports.array(threadEntry) }).passthrough();
+function mapProjects(projectsValue, threadsValue, threadId) {
+  const inventory = projectResponse.parse(projectsValue);
+  const roster = threadsResponse.parse(threadsValue);
+  const projects = inventory.projects.filter((project) => project.projectKind === "local" && project.hostId === "local" && typeof project.path === "string" && path7.isAbsolute(project.path)).map((project) => ({ projectId: project.projectId, label: project.label, path: project.path, hostId: "local" }));
+  if (new Set(projects.map((project) => project.projectId)).size !== projects.length) throw new Error("Codex returned duplicate local project identities.");
+  const matches = [...roster.pinnedThreads, ...roster.threads].filter((thread) => thread.id === threadId);
+  if (new Set(matches.map((thread) => thread.projectId ?? null)).size > 1) throw new Error("Codex returned conflicting current-project ownership.");
+  const projectId = sameIdentity(matches.map((thread) => thread.projectId ?? void 0), "current project");
+  const current2 = matches.length > 0 && matches.every((thread) => thread.hostId === "local") ? projects.find((project) => project.projectId === projectId) : void 0;
+  return { available: true, projects, ...current2 ? { currentProjectId: current2.projectId } : {}, contextSource: current2 ? "thread" : "global-or-unassigned" };
+}
+var pipeResponse = external_exports.union([
+  external_exports.object({ jsonrpc: external_exports.literal("2.0"), id: external_exports.string(), result: external_exports.unknown() }).strict(),
+  external_exports.object({ jsonrpc: external_exports.literal("2.0"), id: external_exports.string(), error: external_exports.object({ code: external_exports.number(), message: external_exports.string() }).passthrough() }).strict()
+]);
+var toolResponse = external_exports.object({ success: external_exports.boolean(), contentItems: external_exports.array(external_exports.object({ type: external_exports.literal("inputText"), text: external_exports.string() })) }).passthrough();
+function frame(value) {
+  const json2 = JSON.stringify(value);
+  const bytes = Buffer.byteLength(json2, "utf8");
+  if (bytes > maximumFrameBytes) throw new Error("Codex project request exceeds the 8 MiB pipe limit.");
+  const result2 = Buffer.allocUnsafe(4 + bytes);
+  result2.writeUInt32LE(bytes, 0);
+  result2.write(json2, 4, bytes, "utf8");
+  return result2;
+}
+function toolData(value) {
+  const response = toolResponse.parse(value);
+  if (!response.success) throw new Error(response.contentItems.map((item) => item.text).join("\n") || "Codex could not read the project inventory for this caller.");
+  if (response.contentItems.length !== 1) throw new Error("Codex project tool returned an unexpected content structure.");
+  return JSON.parse(response.contentItems[0].text);
+}
+async function query(pipePath, caller, tool, argumentsValue, signal, timeoutMs) {
+  if (signal.aborted) throw new Error("Codex project discovery was cancelled.");
+  const id = randomUUID();
+  const callId = `${caller.callId}:${tool}:${randomUUID()}`;
+  const request = frame({ jsonrpc: "2.0", id, method: "tools/call", params: { namespace: "codex_app", tool, arguments: argumentsValue, callerSource: "codex", ...caller, callId } });
+  const socket = createConnection({ path: pipePath });
+  const closed = new Promise((resolve) => socket.once("close", resolve));
+  let abort = () => {
+  };
+  let timer;
+  try {
+    return await new Promise((resolve, reject) => {
+      let finished = false;
+      let sent = false;
+      let headerBytes = 0;
+      let payloadBytes = 0;
+      const header = Buffer.allocUnsafe(4);
+      let payload;
+      const fail = (error62) => {
+        if (!finished) {
+          finished = true;
+          reject(error62);
+        }
+      };
+      abort = () => {
+        if (sent && !socket.destroyed) socket.write(frame({ jsonrpc: "2.0", id, method: "tools/cancel" }));
+        fail(new Error("Codex project discovery was cancelled."));
+      };
+      socket.once("connect", () => {
+        sent = true;
+        socket.write(request);
+      });
+      socket.on("error", () => fail(new Error("The Codex desktop project pipe is unavailable.")));
+      socket.once("end", () => fail(new Error("The Codex project pipe ended before a complete response.")));
+      socket.once("close", () => fail(new Error("The Codex project pipe closed before a complete response.")));
+      socket.on("data", (chunk) => {
+        if (finished) return;
+        try {
+          let offset2 = 0;
+          if (headerBytes < 4) {
+            const length2 = Math.min(4 - headerBytes, chunk.length);
+            chunk.copy(header, headerBytes, 0, length2);
+            headerBytes += length2;
+            offset2 += length2;
+            if (headerBytes < 4) return;
+            const lengthValue = header.readUInt32LE(0);
+            if (lengthValue < 1 || lengthValue > maximumFrameBytes) throw new Error("Codex project response violates the 8 MiB pipe frame limit.");
+            payload = Buffer.allocUnsafe(lengthValue);
+          }
+          const length = Math.min(payload.length - payloadBytes, chunk.length - offset2);
+          chunk.copy(payload, payloadBytes, offset2, offset2 + length);
+          payloadBytes += length;
+          if (payloadBytes < payload.length) return;
+          if (offset2 + length !== chunk.length) throw new Error("Codex project pipe returned unexpected trailing data.");
+          const response = pipeResponse.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payload)));
+          if (response.id !== id) throw new Error("Codex project pipe response did not match this request.");
+          if ("error" in response) throw new Error(`Codex project tool request failed: ${response.error.message}`);
+          const data2 = toolData(response.result);
+          finished = true;
+          resolve(data2);
+        } catch (error62) {
+          fail(error62 instanceof Error ? error62 : new Error("Codex project pipe returned invalid data."));
+        }
+      });
+      timer = setTimeout(() => {
+        if (sent && !socket.destroyed) socket.write(frame({ jsonrpc: "2.0", id, method: "tools/cancel" }));
+        fail(new Error("Codex project discovery timed out."));
+      }, timeoutMs);
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) abort();
+    });
+  } catch (error62) {
+    throw new Error(`Codex ${tool}: ${error62 instanceof Error ? error62.message : "project query failed"}`);
+  } finally {
+    if (timer) clearTimeout(timer);
+    signal.removeEventListener("abort", abort);
+    socket.destroy();
+    await closed;
+  }
+}
+var CodexProjectsProvider = class {
+  pipePath;
+  timeoutMs;
+  constructor(options = {}) {
+    this.pipePath = options.pipePath ?? process.env.CODEX_APP_TOOLS_PIPE_PATH;
+    this.timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
+    if (!Number.isSafeInteger(this.timeoutMs) || this.timeoutMs < 1 || this.timeoutMs > defaultTimeoutMs) throw new Error("Project discovery timeout must be within the 10 second request bound.");
+  }
+  async getProjects(context) {
+    try {
+      const caller = callerContext(context.meta);
+      if (!this.pipePath?.trim()) throw new Error("Codex did not provide CODEX_APP_TOOLS_PIPE_PATH to this MCP connection.");
+      if (process.platform === "win32" ? !/^\\\\[.?]\\pipe\\/i.test(this.pipePath) : !path7.isAbsolute(this.pipePath)) throw new Error("Codex did not provide a local desktop project pipe.");
+      const projects = await query(this.pipePath, caller, "list_projects", {}, context.signal, this.timeoutMs);
+      const threads = await query(this.pipePath, caller, "list_threads", { limit: 50 }, context.signal, this.timeoutMs);
+      return mapProjects(projects, threads, caller.threadId);
+    } catch (error62) {
+      return { available: false, projects: [], reason: error62 instanceof Error ? error62.message : "Codex project discovery is unavailable." };
+    }
+  }
+};
+
 // src/server.ts
 function result(data2) {
   return { content: [{ type: "text", text: JSON.stringify(data2) }], structuredContent: data2 };
@@ -46857,11 +47047,12 @@ function registerPanelToolWithIcons(server2, register) {
     protocol.setRequestHandler = original;
   }
 }
-function createServer(engine2) {
-  const serverInfo = { name: "workflows", version: "0.4.0", icons: panelIcons };
+function createServer(engine2, options = {}) {
+  const serverInfo = { name: "workflows", version: "0.4.1", icons: panelIcons };
   const panelHtml = readFileSync3(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);
+  const projects = options.projects ?? new CodexProjectsProvider();
   registerPanelToolWithIcons(server2, () => K3(server2, "workflow_open_panel", {
     title: "Workflows",
     description: "Open the Workflows task panel. Preview, execution, and reviewed changes follow the user-authorized tool workflow; the panel shows progress and also provides controls.",
@@ -46931,6 +47122,13 @@ function createServer(engine2) {
     ...input2.nodeSettings !== void 0 ? { nodeSettings: input2.nodeSettings } : {}
   });
   const safe = (operation) => Promise.resolve().then(operation).then(result).catch((error62) => ({ isError: true, content: [{ type: "text", text: error62 instanceof Error ? error62.message : String(error62) }] }));
+  server2.registerTool("workflow_get_projects", {
+    title: "\u8BFB\u53D6 Codex \u672C\u673A\u9879\u76EE",
+    description: "Read the current Codex desktop's local projects and this request's real thread/project ownership through the host's read-only app tools. Returns explicit unavailable status if pipe, caller metadata or schemas are unsupported. Global/unassigned callers receive no automatic project selection. Does not infer a project from cwd or shared server environment, inspect GUI databases, validate path existence, or start workers.",
+    inputSchema: {},
+    annotations,
+    _meta: { ui: { visibility: ["model", "app"] } }
+  }, async (_input, extra) => safe(async () => ({ ...await projects.getProjects({ meta: extra._meta, signal: extra.signal }) })));
   server2.registerTool("workflow_get_execution_settings", {
     title: "\u8BFB\u53D6\u5DE5\u4F5C\u6D41\u9ED8\u8BA4\u6A21\u578B",
     description: "Read Workflows' own default model/effort and the real Codex model catalogue without starting a turn. Main desktop dialogue settings are unavailable. Unset Workflows defaults use effective Codex CLI configuration, never claim main-dialogue inheritance.",
@@ -46983,16 +47181,16 @@ import { execFile as execFile2 } from "node:child_process";
 import { promisify as promisify2 } from "node:util";
 import { createHash as createHash3, randomBytes as randomBytes4 } from "node:crypto";
 import { copyFile, lstat as lstat4, mkdir as mkdir7, readFile as readFile6, readlink as readlink3, realpath as realpath4, rename as rename5, rm as rm4, symlink, writeFile as writeFile5, chmod as chmod2 } from "node:fs/promises";
-import path7 from "node:path";
+import path8 from "node:path";
 var exec2 = promisify2(execFile2);
 var hash3 = (value) => createHash3("sha256").update(value).digest("hex");
 function resolveFile(root, name) {
   if (!name || name.includes("\0") || name.split(/[\\/]/).some((part) => part === ".." || part === ".git")) throw new Error(`Unsafe workspace path: ${name}`);
-  const target = path7.resolve(root, name);
-  if (!target.startsWith(root + path7.sep)) throw new Error(`Workspace path escapes root: ${name}`);
+  const target = path8.resolve(root, name);
+  if (!target.startsWith(root + path8.sep)) throw new Error(`Workspace path escapes root: ${name}`);
   return target;
 }
-async function record3(root, name) {
+async function record4(root, name) {
   await safeParents(root, name, false);
   const target = resolveFile(root, name);
   let stat2;
@@ -47004,8 +47202,8 @@ async function record3(root, name) {
   }
   if (stat2.isSymbolicLink()) {
     const value = await readlink3(target);
-    const destination = path7.resolve(path7.dirname(target), value);
-    if (path7.isAbsolute(value) || !destination.startsWith(root + path7.sep)) throw new Error(`External symbolic link is unsupported: ${name}`);
+    const destination = path8.resolve(path8.dirname(target), value);
+    if (path8.isAbsolute(value) || !destination.startsWith(root + path8.sep)) throw new Error(`External symbolic link is unsupported: ${name}`);
     return { hash: hash3(value), kind: "link", mode: stat2.mode & 511 };
   }
   if (!stat2.isFile()) throw new Error(`Unsupported workspace entry: ${name}`);
@@ -47013,10 +47211,10 @@ async function record3(root, name) {
   return { hash: hash3(await readFile6(target)), kind: "file", mode: stat2.mode & 511 };
 }
 async function safeParents(root, name, create = true) {
-  const pieces = name.split(path7.sep).slice(0, -1);
+  const pieces = name.split(path8.sep).slice(0, -1);
   let directory = root;
   for (const piece of pieces) {
-    directory = path7.join(directory, piece);
+    directory = path8.join(directory, piece);
     try {
       const stat2 = await lstat4(directory);
       if (!stat2.isDirectory() || stat2.isSymbolicLink()) throw new Error(`Unsafe parent directory: ${name}`);
@@ -47060,7 +47258,7 @@ async function projectFiles(project) {
 }
 async function contextDigest(project) {
   const files2 = await projectFiles(project);
-  const records2 = await Promise.all(files2.map(async (name) => [name, await record3(project, name)]));
+  const records2 = await Promise.all(files2.map(async (name) => [name, await record4(project, name)]));
   return hash3(JSON.stringify(records2));
 }
 async function createWorkspace(project, directory) {
@@ -47069,8 +47267,8 @@ async function createWorkspace(project, directory) {
   if (await realpath4(stdout.trim()) !== canonical2) throw new Error("Writing workflows require the Git repository root as projectPath");
   const gitlinks = await listGitlinks(canonical2);
   if (gitlinks.length) throw new Error("Snapshot writing does not copy Git submodules. Create a new preview with workspaceMode: git-worktree to retain their commit and initialization state.");
-  const root = path7.join(directory, "workspace");
-  const base = path7.join(directory, "baseline");
+  const root = path8.join(directory, "workspace");
+  const base = path8.join(directory, "baseline");
   await rm4(root, { recursive: true, force: true });
   await rm4(base, { recursive: true, force: true });
   await mkdir7(root, { recursive: true, mode: 448 });
@@ -47078,7 +47276,7 @@ async function createWorkspace(project, directory) {
   const baseline = {};
   let size = 0;
   for (const name of await projectFiles(canonical2)) {
-    const entry = await record3(canonical2, name);
+    const entry = await record4(canonical2, name);
     if (!entry) continue;
     size += (await lstat4(resolveFile(canonical2, name))).size;
     if (size > 256 * 1024 * 1024) throw new Error("Workspace snapshot exceeds 256 MiB");
@@ -47101,12 +47299,12 @@ async function workspaceDiff(workspace) {
   const parts = [];
   for (const name of names) {
     const before = workspace.baseline[name];
-    const after = await record3(workspace.root, name);
+    const after = await record4(workspace.root, name);
     if (equal(before, after)) continue;
     files2.push({ path: name, status: !before ? "added" : !after ? "deleted" : "modified" });
     details.push([name, before ?? null, after ?? null]);
     const nullFile = process.platform === "win32" ? "NUL" : "/dev/null";
-    const left = before ? resolveFile(path7.join(path7.dirname(workspace.root), "baseline"), name) : nullFile;
+    const left = before ? resolveFile(path8.join(path8.dirname(workspace.root), "baseline"), name) : nullFile;
     const right = after ? resolveFile(workspace.root, name) : nullFile;
     if (before?.kind === "link" || after?.kind === "link") {
       parts.push(`diff -- ${name}
@@ -47125,7 +47323,7 @@ Symbolic link or file type changed
   }
   const raw = parts.join("\n");
   if (raw.length > 4 * 1024 * 1024) throw new Error("Review diff exceeds 4 MiB");
-  const text = raw.replaceAll(path7.join(path7.dirname(workspace.root), "baseline") + path7.sep, "").replaceAll(workspace.root + path7.sep, "");
+  const text = raw.replaceAll(path8.join(path8.dirname(workspace.root), "baseline") + path8.sep, "").replaceAll(workspace.root + path8.sep, "");
   return { text, files: files2, fingerprint: hash3(JSON.stringify(details)) };
 }
 async function applyWorkspace(workspace, reviewed) {
@@ -47134,25 +47332,25 @@ async function applyWorkspace(workspace, reviewed) {
   const conflicts = [];
   const targets = /* @__PURE__ */ new Map();
   for (const file2 of current2.files) {
-    const before = await record3(workspace.original, file2.path);
-    const after = await record3(workspace.root, file2.path);
+    const before = await record4(workspace.original, file2.path);
+    const after = await record4(workspace.root, file2.path);
     if (!equal(workspace.baseline[file2.path], before) && !equal(after, before)) conflicts.push(file2.path);
     targets.set(file2.path, after);
   }
   if (conflicts.length) return { applied: false, conflicts };
-  const transaction = path7.join(path7.dirname(workspace.root), "apply-transaction");
-  const staged = path7.join(transaction, "staged");
+  const transaction = path8.join(path8.dirname(workspace.root), "apply-transaction");
+  const staged = path8.join(transaction, "staged");
   await mkdir7(transaction, { recursive: true, mode: 448 });
   await mkdir7(staged, { recursive: true, mode: 448 });
   for (const file2 of current2.files) {
     const after = targets.get(file2.path);
     if (after) await copyEntry(workspace.root, staged, file2.path, after);
   }
-  await writeFile5(path7.join(transaction, "journal.json"), JSON.stringify({ files: current2.files, fingerprint: current2.fingerprint, state: "prepared" }), { mode: 384 });
+  await writeFile5(path8.join(transaction, "journal.json"), JSON.stringify({ files: current2.files, fingerprint: current2.fingerprint, state: "prepared" }), { mode: 384 });
   const changed = [];
   try {
     for (const file2 of current2.files) {
-      const before = await record3(workspace.original, file2.path);
+      const before = await record4(workspace.original, file2.path);
       const after = targets.get(file2.path);
       if (equal(before, after)) continue;
       if (!equal(workspace.baseline[file2.path], before)) throw new Error(`Project changed during application: ${file2.path}`);
@@ -47160,13 +47358,13 @@ async function applyWorkspace(workspace, reviewed) {
       if (after) await replaceEntry(staged, workspace.original, file2.path, after);
       else await rm4(resolveFile(workspace.original, file2.path));
     }
-    await writeFile5(path7.join(transaction, "journal.json"), JSON.stringify({ files: current2.files, state: "completed" }), { mode: 384 });
+    await writeFile5(path8.join(transaction, "journal.json"), JSON.stringify({ files: current2.files, state: "completed" }), { mode: 384 });
     return { applied: true, conflicts: [] };
   } catch (error62) {
-    const base = path7.join(path7.dirname(workspace.root), "baseline");
+    const base = path8.join(path8.dirname(workspace.root), "baseline");
     for (const name of changed.reverse()) {
       const before = workspace.baseline[name];
-      if (!equal(await record3(workspace.original, name), targets.get(name))) continue;
+      if (!equal(await record4(workspace.original, name), targets.get(name))) continue;
       if (before) await replaceEntry(base, workspace.original, name, before);
       else await rm4(resolveFile(workspace.original, name), { force: true });
     }

@@ -5,7 +5,8 @@
       "type": "stdio",
       "command": "node",
       "args": ["${PLUGIN_ROOT}/runtime/index.js"],
-      "cwd": "${PLUGIN_ROOT}"
+      "cwd": "${PLUGIN_ROOT}",
+      "env_vars": ["CODEX_APP_TOOLS_PIPE_PATH"]
     }
   }
 }

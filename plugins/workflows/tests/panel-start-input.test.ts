@@ -25,6 +25,7 @@ function fixture(initial?: WorkflowRun, intercept?: (name: string, args: Record<
     const intercepted = await intercept?.(name, args);
     if (intercepted) return intercepted;
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease-test" } };
+    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
     if (name === "workflow_list_runs") return { structuredContent: { runs: current ? [current] : [] } };
     if (name === "workflow_list_templates") return { structuredContent: { templates: [] } };
     if (name === "workflow_get_execution_settings") return { isError: true, content: [{ type: "text", text: "Execution settings are unavailable in this start-input fixture." }] };
@@ -35,7 +36,7 @@ function fixture(initial?: WorkflowRun, intercept?: (name: string, args: Record<
     return { structuredContent: { run: current } };
   };
   const panel = new WorkflowPanelController(caller, () => {}, () => () => {});
-  const mutations = () => calls.filter(call => !["workflow_panel_lease", "workflow_list_runs", "workflow_list_templates", "workflow_get_execution_settings"].includes(call.name));
+  const mutations = () => calls.filter(call => !["workflow_panel_lease", "workflow_get_projects", "workflow_list_runs", "workflow_list_templates", "workflow_get_execution_settings"].includes(call.name));
   return { panel, calls, mutations };
 }
 

@@ -1,7 +1,7 @@
 import { App, applyDocumentTheme, applyHostFonts, applyHostStyleVariables } from "@modelcontextprotocol/ext-apps";
 import { applyPanelHostStyles, mountPanel } from "./panel.js";
 
-const app = new App({ name: "Workflows", version: "0.4.0" }, {}, { autoResize: true });
+const app = new App({ name: "Workflows", version: "0.4.1" }, {}, { autoResize: true });
 const root = document.getElementById("workflow-panel-prototype");
 if (!root) throw new Error("Workflows panel root is missing");
 const panel = mountPanel(root, async (name, args) => app.callServerTool({ name, arguments: args }, { timeout: 120000 }));
@@ -12,9 +12,6 @@ function hostContext(context: Record<string, unknown>): void {
     variables: variables => applyHostStyleVariables(variables as Parameters<typeof applyHostStyleVariables>[0]),
     fonts: applyHostFonts,
   });
-  for (const field of ["projectPath", "cwd", "workspacePath"]) {
-    if (typeof context[field] === "string") { panel.setProjectPath(context[field]); break; }
-  }
 }
 
 // Register lifecycle handlers before the handshake so no host event is lost.

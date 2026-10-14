@@ -8,6 +8,8 @@ import { getCapabilities, getTemplate, listTemplates } from "./catalog.ts";
 import type { WorkflowEngine } from "./engine.ts";
 import { TemplateStore } from "./templates.ts";
 import { modelSettingsSchema, nodeModelSettingsSchema } from "./execution-settings.ts";
+import { CodexProjectsProvider } from "./projects.ts";
+import type { ProjectsProvider } from "./projects.ts";
 
 function result(data: Record<string, unknown>): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
@@ -48,11 +50,12 @@ function registerPanelToolWithIcons(server: McpServer, register: () => void) {
   finally { protocol.setRequestHandler = original; }
 }
 
-export function createServer(engine: WorkflowEngine) {
-  const serverInfo = { name: "workflows", version: "0.4.0", icons: panelIcons };
+export function createServer(engine: WorkflowEngine, options: { projects?: ProjectsProvider } = {}) {
+  const serverInfo = { name: "workflows", version: "0.4.1", icons: panelIcons };
   const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server = new McpServer(serverInfo);
   const templates = new TemplateStore(engine.store);
+  const projects = options.projects ?? new CodexProjectsProvider();
 
   registerPanelToolWithIcons(server, () => registerAppTool(server, "workflow_open_panel", {
     title: "Workflows",
@@ -129,6 +132,11 @@ export function createServer(engine: WorkflowEngine) {
     ...(input.nodeSettings !== undefined ? { nodeSettings: input.nodeSettings } : {}),
   });
   const safe = (operation: () => Promise<Record<string, unknown>> | Record<string, unknown>): Promise<CallToolResult> => Promise.resolve().then(operation).then(result).catch(error => ({ isError: true, content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }] }));
+  server.registerTool("workflow_get_projects", {
+    title: "读取 Codex 本机项目",
+    description: "Read the current Codex desktop's local projects and this request's real thread/project ownership through the host's read-only app tools. Returns explicit unavailable status if pipe, caller metadata or schemas are unsupported. Global/unassigned callers receive no automatic project selection. Does not infer a project from cwd or shared server environment, inspect GUI databases, validate path existence, or start workers.",
+    inputSchema: {}, annotations, _meta: { ui: { visibility: ["model", "app"] } },
+  }, async (_input, extra) => safe(async () => ({ ...await projects.getProjects({ meta: extra._meta, signal: extra.signal }) })));
   server.registerTool("workflow_get_execution_settings", {
     title: "读取工作流默认模型",
     description: "Read Workflows' own default model/effort and the real Codex model catalogue without starting a turn. Main desktop dialogue settings are unavailable. Unset Workflows defaults use effective Codex CLI configuration, never claim main-dialogue inheritance.",

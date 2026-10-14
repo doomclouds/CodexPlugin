@@ -8,9 +8,10 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer } from "../src/server.ts";
 import { RunStore } from "../src/store.ts";
 import type { WorkflowEngine } from "../src/engine.ts";
+import type { ProjectsProvider } from "../src/projects.ts";
 
 // This protocol test records routing only; it never launches a worker or executes maintenance.
-async function fixture() {
+async function fixture(projects?: ProjectsProvider) {
   const directory = await mkdtemp(path.join(tmpdir(), "workflows-server-contract-"));
   const calls: Array<{ action: string; input: unknown }> = [];
   const record = (action: string, input: unknown) => { calls.push({ action, input }); return { id: "wf_0123456789abcdef01234567", revision: 1 }; };
@@ -24,7 +25,7 @@ async function fixture() {
     cancelTask: async (id: string, taskId: string) => record("cancel", { id, taskId }),
     apply: async (id: string, revision: number) => record("apply", { id, revision }),
   } as unknown as WorkflowEngine;
-  const server = createServer(engine);
+  const server = createServer(engine, projects ? { projects } : {});
   const client = new Client({ name: "workflow-contract-test", version: "1" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -76,6 +77,24 @@ test("agent mutations are model-visible and chat starts do not require a UI leas
       { action: "cancel", input: { id, taskId: "task-1" } },
       { action: "apply", input: { id, revision: 1 } },
     ]);
+  } finally { await close(); }
+});
+
+test("project tool forwards fresh request metadata and cancellation to its read-only provider", async () => {
+  const observed: Array<{ meta?: unknown; signal: AbortSignal }> = [];
+  const projects: ProjectsProvider = { async getProjects(context) { observed.push(context); return { available: true, projects: [{ projectId: "local-a", label: "Project A", path: path.join(tmpdir(), "not-required-to-exist"), hostId: "local" }], currentProjectId: "local-a", contextSource: "thread" }; } };
+  const { client, calls, close } = await fixture(projects);
+  try {
+    const tool = (await client.listTools()).tools.find(tool => tool.name === "workflow_get_projects");
+    assert.equal(tool?.annotations?.readOnlyHint, true);
+    assert.deepEqual(tool?._meta?.ui, { visibility: ["model", "app"] });
+    const meta = { threadId: "fresh-current", thread_id: "fresh-current", "openai/threadId": "older" };
+    const response = await client.callTool({ name: "workflow_get_projects", arguments: {}, _meta: meta });
+    assert.equal(response.structuredContent?.available, true);
+    assert.equal(response.structuredContent?.currentProjectId, "local-a");
+    assert.deepEqual(observed[0]?.meta, meta);
+    assert.ok(observed[0]?.signal instanceof AbortSignal);
+    assert.deepEqual(calls, []);
   } finally { await close(); }
 });
 

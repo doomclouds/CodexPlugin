@@ -22,6 +22,7 @@ test("valid model catalogue stays available for repairing invalid defaults, and 
   const panel = new WorkflowPanelController(async (name, args) => {
     calls.push({ name, args });
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease" } };
+    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
     if (name === "workflow_list_runs") return { structuredContent: { runs: [original] } };
     if (name === "workflow_list_templates") return { structuredContent: { templates: [] } };
     if (name === "workflow_get_execution_settings") return { structuredContent: settings(0, false) };
@@ -52,6 +53,7 @@ test("missing catalogue reports its real error and refresh retries without inven
   const mutations: string[] = [];
   const panel = new WorkflowPanelController(async name => {
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease" } };
+    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
     if (name === "workflow_list_runs") return { structuredContent: { runs: [] } };
     if (name === "workflow_list_templates") return { structuredContent: { templates: [] } };
     if (name === "workflow_get_execution_settings") return available ? { structuredContent: settings() } : { isError: true, content: [{ type: "text", text: "model/list unavailable" }] };
@@ -86,6 +88,7 @@ test("node overrides survive preview and definition saving, and changed stopped 
   const caller: ToolCaller = async (name, args) => {
     calls.push({ name, args });
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease" } };
+    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
     if (name === "workflow_list_runs") return { structuredContent: { runs: [current] } };
     if (name === "workflow_list_templates") return { structuredContent: { templates: [] } };
     if (name === "workflow_get_execution_settings") return { structuredContent: settings() };
@@ -112,6 +115,7 @@ test("a workflow declaring no parameters starts with its existing empty defaults
   const panel = new WorkflowPanelController(async name => {
     calls.push(name);
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease" } };
+    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
     if (name === "workflow_list_runs") return { structuredContent: { runs: [original] } };
     if (name === "workflow_list_templates") return { structuredContent: { templates: [] } };
     if (name === "workflow_get_execution_settings") return { structuredContent: settings() };
@@ -145,6 +149,7 @@ test("task binding survives parameter preview and a producer-reported dispatch m
   const panel = new WorkflowPanelController(async (name, args) => {
     calls.push({ name, args });
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease" } };
+    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
     if (name === "workflow_list_runs") return { structuredContent: { runs: [current] } };
     if (name === "workflow_list_templates") return { structuredContent: { templates: [] } };
     if (name === "workflow_get_execution_settings") return { structuredContent: settings() };
