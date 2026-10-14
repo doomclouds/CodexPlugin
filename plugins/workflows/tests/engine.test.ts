@@ -8,7 +8,7 @@ import type { TestContext } from "node:test";
 import { promisify } from "node:util";
 import { WorkflowEngine } from "../src/engine.ts";
 import { RunStore } from "../src/store.ts";
-import type { WorkerAdapter, WorkerRequest, WorkerResult, WorkerEvent } from "../src/adapter.ts";
+import type { CommandRequest, WorkerAdapter, WorkerRequest, WorkerResult, WorkerEvent } from "../src/adapter.ts";
 import type { ExecutionEnvironment } from "../src/execution-settings.ts";
 import type { WorkflowRun } from "../src/types.ts";
 
@@ -523,4 +523,99 @@ test("resuming an operation with lost acknowledgment does not duplicate its exis
   const refused=await engine.wait(run.id);
   assert.equal(refused.execution,"failed");assert.match(refused.error??"",/will not be repeated/);
   assert.equal(commandCalls,1);assert.equal(await readFile(path.join(refused.workspacePath!,"effect-count.txt"),"utf8"),"1");
+});
+
+test("protected maintenance roots reach only their declared command and cannot change after workspace creation", async t => {
+  const workers: WorkerRequest[] = [], commands: CommandRequest[] = [];
+  const adapter = new TestAdapter(async request => { workers.push(request); return "Read-only fixture evidence"; });
+  (adapter as TestAdapter & WorkerAdapter).command = async request => {
+    commands.push(request);
+    await writeFile(path.join(request.cwd, ".agents", "skills", "fixture.md"), "generated in the isolated checkout\n");
+    return { exitCode: 0, stdout: "Generated fixture", stderr: "", attempts: 1 };
+  };
+  const { project, engine } = await fixture(t, adapter);
+  await mkdir(path.join(project, ".agents", "skills"), { recursive: true });
+  await writeFile(path.join(project, ".agents", "skills", "fixture.md"), "original\n");
+  await exec("git", ["add", "--force", "--", ".agents/skills/fixture.md"], { cwd: project });
+  await exec("git", ["-c", "user.name=Workflow Test", "-c", "user.email=workflow-test@example.invalid", "commit", "--quiet", "-m", "Add protected command fixture"], { cwd: project });
+  const maintenance = { steps: [{ id: "generate", command: ["node", "generate-fixture.mjs"], protectedPaths: [".agents/skills"] }] };
+  const run = await engine.preview({ projectPath: project, allowWrite: true, workspaceMode: "git-worktree", maintenance, script: script('await agent("inspect before"); await operation("generate"); return await agent("inspect after");') });
+  assert.deepEqual(run.maintenance, maintenance);
+  await engine.start({ id: run.id, revision: run.revision });
+  const complete = await engine.wait(run.id);
+  assert.equal(complete.execution, "completed", complete.error);
+  assert.equal(commands.length, 1);
+  assert.deepEqual(commands[0]?.protectedPaths, [".agents/skills"]);
+  assert.equal(commands[0]?.cwd, complete.workspacePath);
+  assert.equal(workers.length, 2);
+  assert.ok(workers.every(request => request.mode === "read" && !Object.hasOwn(request, "protectedPaths")));
+  assert.equal(await readFile(path.join(project, ".agents", "skills", "fixture.md"), "utf8"), "original\n");
+  const equivalent = await engine.update({ id: run.id, revision: complete.revision, script: run.script, args: run.args, maintenance: { steps: [{ ...maintenance.steps[0]!, protectedPaths: [".agents/skills", ".agents/skills"] }] } });
+  assert.equal(equivalent.execution, "draft");
+  assert.equal(equivalent.workspace?.root, complete.workspace?.root);
+  assert.equal(equivalent.workspacePath, complete.workspacePath);
+  assert.deepEqual(equivalent.maintenance, maintenance);
+  assert.equal(commands.length, 1);
+  assert.equal(workers.length, 2, "Updating an equivalent normalized scope must not start a new worker.");
+  await assert.rejects(engine.update({ id: run.id, revision: equivalent.revision, script: run.script, args: run.args, maintenance: { steps: [{ ...maintenance.steps[0]!, protectedPaths: [".codex"] }] } }), /scope requires a new preview/);
+  assert.deepEqual((await engine.get(run.id)).maintenance, maintenance);
+  assert.equal(commands.length, 1);
+});
+
+test("read-only agents cannot request protected command paths through script options", async t => {
+  const { project, engine, adapter } = await fixture(t);
+  const run = await engine.preview({ projectPath: project, script: script('return await agent("request broader access", {protectedPaths:[".agents/skills"]});') });
+  await engine.start({ id: run.id, revision: run.revision });
+  const failed = await engine.wait(run.id);
+  assert.equal(failed.execution, "failed");
+  assert.match(failed.error ?? "", /Unsupported agent option: protectedPaths/);
+  assert.deepEqual(adapter.calls, []);
+  assert.equal(failed.workspace, undefined);
+});
+
+test("protected operations revalidate independent Git ownership after an earlier worker changes metadata", async t => {
+  let original = "", commands = 0;
+  const adapter = new TestAdapter(async request => {
+    await rm(path.join(request.cwd, ".git"), { recursive: true });
+    await writeFile(path.join(request.cwd, ".git"), `gitdir: ${path.join(original, ".git")}\n`);
+    return "Fixture replaced its own metadata pointer";
+  });
+  (adapter as TestAdapter & WorkerAdapter).command = async () => { commands++; return { exitCode: 0, stdout: "Must never dispatch", stderr: "", attempts: 1 }; };
+  const { project, engine } = await fixture(t, adapter);
+  original = project;
+  await exec("git", ["-c", "user.name=Workflow Test", "-c", "user.email=workflow-test@example.invalid", "commit", "--quiet", "-m", "Commit Git ownership fixture"], { cwd: project });
+  const run = await engine.preview({ projectPath: project, allowWrite: true, workspaceMode: "git-worktree", maintenance: { steps: [{ id: "generate", command: ["node", "fixture.mjs"], protectedPaths: [".agents/skills"] }] }, script: script('await agent("replace fixture metadata", {mode:"write"}); return await operation("generate");') });
+  await engine.start({ id: run.id, revision: run.revision });
+  const failed = await engine.wait(run.id);
+  assert.equal(failed.execution, "failed");
+  assert.equal(commands, 0);
+  assert.equal(failed.tasks[1]?.status, "failed");
+  assert.match(failed.tasks[1]?.error ?? "", /Git metadata.*independent checkout/);
+  assert.equal(failed.tasks[1]?.attempts.at(-1)?.startedAt, undefined, "Ownership rejection must not claim the command started.");
+  assert.equal(failed.tasks[1]?.attempts.at(-1)?.outcome, undefined);
+  assert.equal(await readFile(path.join(project, "source.txt"), "utf8"), "original\n");
+});
+
+test("protected operations reject a retained command cwd redirected to the original project", async t => {
+  const adapter = new TestAdapter();
+  let commands = 0;
+  (adapter as TestAdapter & WorkerAdapter).command = async () => { commands++; return { exitCode: 0, stdout: "Isolated fixture command", stderr: "", attempts: 1 }; };
+  const { project, engine, storage } = await fixture(t, adapter);
+  await exec("git", ["-c", "user.name=Workflow Test", "-c", "user.email=workflow-test@example.invalid", "commit", "--quiet", "-m", "Commit command cwd fence fixture"], { cwd: project });
+  const run = await engine.preview({ projectPath: project, allowWrite: true, workspaceMode: "git-worktree", maintenance: { steps: [{ id: "generate", command: ["node", "fixture.mjs"], protectedPaths: [".agents/skills"], idempotent: true }] }, script: script('await operation("generate"); throw new Error("Await final decision");') });
+  await engine.start({ id: run.id, revision: run.revision });
+  const first = await engine.wait(run.id);
+  assert.equal(first.execution, "failed");
+  assert.equal(commands, 1);
+  assert.notEqual(first.workspace?.root, first.projectPath);
+  const store = new RunStore(storage);
+  await store.save({ ...first, workspacePath: first.projectPath });
+  await engine.start({ id: run.id, revision: first.revision, retryFromTaskId: "task_1" }, true);
+  const refused = await engine.wait(run.id);
+  assert.equal(refused.execution, "failed");
+  assert.equal(commands, 1, "The redirected command must never receive protected roots on the original project.");
+  assert.match(refused.tasks[0]?.error ?? "", /bound to this run's owned isolated workspace/);
+  assert.equal(refused.tasks[0]?.attempts.at(-1)?.startedAt, undefined);
+  assert.equal(await readFile(path.join(project, "source.txt"), "utf8"), "original\n");
+  assert.equal((await exec("git", ["status", "--porcelain=v1"], { cwd: project })).stdout, "");
 });

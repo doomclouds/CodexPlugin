@@ -47,7 +47,7 @@ export interface Diff {
   fingerprint: string; conflicts?: string[];
 }
 export interface MaintenancePlan {
-  steps: Array<{ id: string; command: string[]; networkAccess?: boolean; timeoutMs?: number; retries?: number; idempotent?: boolean }>;
+  steps: Array<{ id: string; command: string[]; networkAccess?: boolean; timeoutMs?: number; retries?: number; idempotent?: boolean; protectedPaths?: string[] }>;
   activation?: { serverName: string; command: string; args: string[] };
 }
 export interface MaintenanceArtifact extends FileRecord { path: string; size: number }

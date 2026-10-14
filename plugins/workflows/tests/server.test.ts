@@ -180,6 +180,45 @@ test("preview forwards the explicit execution scope and preserves a closed defau
   } finally { await close(); }
 });
 
+test("protected command paths round-trip through library definitions, preview and update without granting agents", async () => {
+  const { client, calls, close } = await fixture();
+  try {
+    const source = 'export const meta={name:"protected-command",description:"Explicit command scope"}; return await operation("generate");';
+    const maintenance = { steps: [{ id: "generate", command: ["node", "generate.mjs"], protectedPaths: [".agents/skills"] }] };
+    const definitionInput = { script: source, allowWrite: true, workspaceMode: "git-worktree", maintenance };
+    const saved = await client.callTool({ name: "workflow_save_template", arguments: definitionInput });
+    assert.equal(saved.isError, undefined);
+    const template = saved.structuredContent?.template as { id: string; revision: number; maintenance: unknown };
+    assert.deepEqual(template.maintenance, maintenance);
+    const loaded = await client.callTool({ name: "workflow_get_template", arguments: { id: template.id } });
+    assert.deepEqual(loaded.structuredContent?.maintenance, maintenance);
+    const preview = { ...definitionInput, projectPath: tmpdir(), sourceDefinition: { id: template.id, revision: template.revision } };
+    assert.equal((await client.callTool({ name: "workflow_preview", arguments: preview })).isError, undefined);
+    assert.deepEqual((calls.at(-1)?.input as { maintenance: unknown }).maintenance, maintenance);
+    const update = { id, revision: 1, script: source, args: {}, allowWrite: true, workspaceMode: "git-worktree", maintenance };
+    assert.equal((await client.callTool({ name: "workflow_update", arguments: update })).isError, undefined);
+    assert.deepEqual(calls.at(-1), { action: "update", input: update });
+  } finally { await close(); }
+});
+
+test("malformed protected path declarations fail the MCP boundary for preview, update and saving", async () => {
+  const { client, calls, close } = await fixture();
+  try {
+    const source = 'export const meta={name:"protected-invalid",description:"Reject malformed command scope"}; return true;';
+    for (const protectedPaths of [null, [], ".agents", [17], ["a".repeat(1025)], Array.from({ length: 17 }, () => ".agents")]) {
+      const scope = { script: source, allowWrite: true, workspaceMode: "git-worktree", maintenance: { steps: [{ id: "generate", command: ["node"], protectedPaths }] } };
+      for (const [name, args] of [
+        ["workflow_preview", { ...scope, projectPath: tmpdir() }],
+        ["workflow_update", { ...scope, id, revision: 1, args: {} }],
+        ["workflow_save_template", scope],
+      ] as const) assert.equal((await client.callTool({ name, arguments: args })).isError, true);
+    }
+    assert.deepEqual(calls, []);
+    const definitions = (await client.callTool({ name: "workflow_list_templates", arguments: {} })).structuredContent?.templates as Array<{ source: string }>;
+    assert.ok(definitions.every(definition => definition.source !== "saved"));
+  } finally { await close(); }
+});
+
 test("settings tools route explicit defaults and node choices without inference or execution", async () => {
   const { client, calls, close } = await fixture();
   try {

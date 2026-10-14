@@ -1,5 +1,5 @@
 // Protocol-only test fixture. This process never invokes a model or executes a worker task.
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, renameSync, symlinkSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -46,6 +46,11 @@ createInterface({ input: process.stdin }).on("line", line => {
   const { id, method, params } = message;
   if (!method) return;
   if (method === "initialize") {
+    if (scenario === "command-protected-swap") {
+      const target = path.join(process.cwd(), ".agents-original");
+      renameSync(path.join(process.cwd(), ".agents"), target);
+      symlinkSync(target, path.join(process.cwd(), ".agents"), process.platform === "win32" ? "junction" : "dir");
+    }
     if (scenario === "startup-hang") return;
     if (scenario === "malformed") { process.stdout.write("not-json\n"); return; }
     initialized = true;
@@ -148,7 +153,8 @@ createInterface({ input: process.stdin }).on("line", line => {
     commandId = id;
     const environment = params.env ?? {};
     const envKeys = ["TMPDIR", "TMP", "TEMP", "XDG_CACHE_HOME", "npm_config_cache", "NPM_CONFIG_CACHE"];
-    if (params.sandboxPolicy?.type !== "workspaceWrite" || !Array.isArray(params.command) || typeof params.sandboxPolicy.networkAccess !== "boolean" || Object.keys(environment).length !== envKeys.length || envKeys.some(key => typeof environment[key] !== "string" || !environment[key].startsWith(params.cwd + path.sep) || !environment[key].includes(".workflows-command-")) || params.sandboxPolicy.excludeTmpdirEnvVar !== true || params.sandboxPolicy.excludeSlashTmp !== true || params.sandboxPolicy.writableRoots.some(root => root !== params.cwd && root !== path.join(params.cwd, ".git"))) process.exit(6);
+    const permittedRoots = [params.cwd, path.join(params.cwd, ".git"), ...(scenario === "command-protected" ? [path.join(params.cwd, ".agents/skills")] : scenario === "command-protected-codex" ? [path.join(params.cwd, ".codex")] : [])];
+    if (params.sandboxPolicy?.type !== "workspaceWrite" || !Array.isArray(params.command) || typeof params.sandboxPolicy.networkAccess !== "boolean" || Object.keys(environment).length !== envKeys.length || envKeys.some(key => typeof environment[key] !== "string" || !environment[key].startsWith(params.cwd + path.sep) || !environment[key].includes(".workflows-command-")) || params.sandboxPolicy.excludeTmpdirEnvVar !== true || params.sandboxPolicy.excludeSlashTmp !== true || params.sandboxPolicy.writableRoots.some(root => !permittedRoots.includes(root))) process.exit(6);
     if (scenario === "command-host-request") { send({ id: "command-approval", method: "item/permissions/requestApproval", params: {} }); return; }
     if (scenario === "command-interrupt" || scenario === "command-stubborn") { notify("command/exec/outputDelta", { processId: params.processId, stream: "stdout", deltaBase64: Buffer.from("ready\n").toString("base64") }); return; }
     const attempts = readFileSync(traceFile, "utf8").split("\n").filter(line => line.includes('"method":"command/exec"')).length;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { CodexAdapter } from "../src/adapter.ts";
 import type { CommandRequest, WorkerEvent, WorkerRequest } from "../src/adapter.ts";
+import { normalizeProtectedPaths } from "../src/protected-paths.ts";
 
 const fixture = fileURLToPath(new URL("fixtures/app-server.mjs", import.meta.url));
 
@@ -539,6 +540,83 @@ test("command protocol uses exact argv, bounded sandbox and redacts streamed out
     assert.equal(call.params.env.TMPDIR, call.params.env.TEMP);
     assert.deepEqual(await readdir(context.request.cwd), ["protocol.jsonl"]);
     assert.equal(call.params.streamStdoutStderr, true);
+  } finally { await context.cleanup(); }
+});
+
+test("protected maintenance paths normalize only literal .agents and .codex directories", () => {
+  assert.deepEqual(normalizeProtectedPaths([".codex", ".agents/skill docs", ".agents", ".codex"]), [".agents", ".agents/skill docs", ".codex"]);
+  for (const value of [undefined, null, " .agents", [], Array(17).fill(".agents"), ["/tmp"], ["C:/tmp"], [".git"], [".agents-old"], [".agents/"], [".agents//skills"], [".agents/./skills"], [".agents/../other"], [".agents\\skills"], [".agents/*"], [".agents/?"], [".agents/[x]"], [".agents/{x}"], [".agents/ skill"], [".agents/skill "], [".agents/skill\nname"], [".agents/" + "x".repeat(1024)]]) {
+    assert.throws(() => normalizeProtectedPaths(value), /protectedPaths/);
+  }
+});
+
+test("command protocol grants only its declared existing protected directory", async () => {
+  for (const relative of [".agents/skills", ".codex"]) {
+    const context = await setup(relative === ".codex" ? "command-protected-codex" : "command-protected");
+    try {
+      await mkdir(path.join(context.request.cwd, ".git"));
+      await mkdir(path.join(context.request.cwd, relative), { recursive: true });
+      const result = await context.adapter.command({ id: "protected", command: ["git", "merge", "--ff-only", "fixed-target"], cwd: context.request.cwd, protectedPaths: [relative, relative] }, context.controller.signal);
+      assert.equal(result.exitCode, 0);
+      const call = (await context.transcript()).find(message => message.method === "command/exec")!;
+      const cwd = await realpath(context.request.cwd);
+      assert.deepEqual(call.params.sandboxPolicy, { type: "workspaceWrite", writableRoots: [cwd, path.join(cwd, ".git"), path.join(cwd, relative)], networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true });
+      assert.deepEqual(call.params.command, ["git", "merge", "--ff-only", "fixed-target"]);
+    } finally { await context.cleanup(); }
+  }
+});
+
+for (const invalid of ["not-git", "missing", "file"] as const) {
+  test(`protected command scope rejects ${invalid} before launching an executor`, async () => {
+    const context = await setup("command-protected");
+    try {
+      await mkdir(path.join(context.request.cwd, ".agents"));
+      if (invalid !== "not-git") await mkdir(path.join(context.request.cwd, ".git"));
+      if (invalid === "file") await writeFile(path.join(context.request.cwd, ".agents/skills"), "file");
+      else if (invalid === "not-git") await mkdir(path.join(context.request.cwd, ".agents/skills"));
+      await assert.rejects(context.adapter.command({ id: "bad-protected", command: ["git", "status"], cwd: context.request.cwd, protectedPaths: [".agents/skills"] }, context.controller.signal), /Protected maintenance director/);
+      await assert.rejects(access(path.join(context.request.cwd, "protocol.jsonl")), { code: "ENOENT" });
+    } finally { await context.cleanup(); }
+  });
+}
+
+test("protected command scope rejects linked ancestors and linked leaf directories", async () => {
+  for (const relative of [".agents", ".agents/skills"]) {
+    const context = await setup("command-protected");
+    const outside = await mkdtemp(path.join(os.tmpdir(), "workflows-protected-outside-"));
+    try {
+      await mkdir(path.join(context.request.cwd, ".git"));
+      await writeFile(path.join(outside, "guard.txt"), "unchanged");
+      if (relative !== ".agents") await mkdir(path.join(context.request.cwd, ".agents"));
+      await symlink(outside, path.join(context.request.cwd, relative), process.platform === "win32" ? "junction" : "dir");
+      await assert.rejects(context.adapter.command({ id: "linked-protected", command: ["git", "status"], cwd: context.request.cwd, protectedPaths: [".agents/skills"] }, context.controller.signal), /without symbolic links/);
+      assert.equal(await readFile(path.join(outside, "guard.txt"), "utf8"), "unchanged");
+      await assert.rejects(access(path.join(context.request.cwd, "protocol.jsonl")), { code: "ENOENT" });
+    } finally { await context.cleanup(); await rm(outside, { recursive: true, force: true }); }
+  }
+});
+
+test("protected command scope rechecks links after executor startup", async () => {
+  const context = await setup("command-protected-swap");
+  try {
+    await mkdir(path.join(context.request.cwd, ".git"));
+    await mkdir(path.join(context.request.cwd, ".agents/skills"), { recursive: true });
+    await assert.rejects(context.adapter.command({ id: "swapped-protected", command: ["git", "status"], cwd: context.request.cwd, protectedPaths: [".agents/skills"] }, context.controller.signal), /without symbolic links/);
+    const transcript = await context.transcript();
+    assert.ok(transcript.some(message => message.method === "initialize"));
+    assert.equal(transcript.some(message => message.method === "command/exec"), false);
+  } finally { await context.cleanup(); }
+});
+
+test("protected command scope rejects a linked checkout root", async () => {
+  const context = await setup("command-protected");
+  try {
+    await mkdir(path.join(context.request.cwd, ".git"));
+    await mkdir(path.join(context.request.cwd, ".agents/skills"), { recursive: true });
+    const alias = path.join(context.request.cwd, "checkout-alias");
+    await symlink(context.request.cwd, alias, process.platform === "win32" ? "junction" : "dir");
+    await assert.rejects(context.adapter.command({ id: "linked-checkout", command: ["git", "status"], cwd: alias, protectedPaths: [".agents/skills"] }, context.controller.signal), /checkout must be a real directory/);
+    await assert.rejects(access(path.join(context.request.cwd, "protocol.jsonl")), { code: "ENOENT" });
   } finally { await context.cleanup(); }
 });
 

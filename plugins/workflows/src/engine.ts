@@ -1,5 +1,6 @@
 import { randomBytes, createHash } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
+import path from "node:path";
 import { CodexAdapter } from "./adapter.ts";
 import type { WorkerAdapter } from "./adapter.ts";
 import { executeScript, validateScript, validateWorkflowArgs } from "./script.ts";
@@ -277,9 +278,9 @@ export class WorkflowEngine {
       workspaceMode: input.workspaceMode ?? run.workspaceMode ?? "snapshot",
       maintenance: input.maintenance ?? run.maintenance,
     };
+    if (scopes.maintenance) scopes.maintenance = validateMaintenance(scopes.maintenance, scopes.networkAccess);
     if (run.workspace && digest(scopes) !== digest({ allowWrite: run.allowWrite, networkAccess: run.networkAccess ?? false, allowedMcpServers: run.allowedMcpServers ?? [], allowedMcpTools: run.allowedMcpTools ?? {}, workspaceMode: run.workspaceMode ?? "snapshot", maintenance: run.maintenance })) throw new Error("Changing execution scope requires a new preview and workspace");
     if (scopes.allowedMcpServers.some(name => !/^[a-zA-Z0-9_.-]{1,128}$/.test(name) || /workflows/i.test(name))) throw new Error("Invalid or recursive MCP server grant");
-    if (scopes.maintenance) scopes.maintenance = validateMaintenance(scopes.maintenance, scopes.networkAccess);
     this.validateMcpTools(scopes.allowedMcpServers, scopes.allowedMcpTools);
     if (scopes.maintenance && (!scopes.allowWrite || scopes.workspaceMode !== "git-worktree")) throw new Error("Maintenance operations require git-worktree isolation and allowWrite");
     const previousScope = { allowWrite: run.allowWrite, networkAccess: run.networkAccess ?? false, allowedMcpServers: run.allowedMcpServers ?? [], allowedMcpTools: run.allowedMcpTools ?? {}, workspaceMode: run.workspaceMode ?? "snapshot", maintenance: run.maintenance };
@@ -539,6 +540,15 @@ export class WorkflowEngine {
                 const releaseWriter = mode === "write" ? await this.store.acquireNamed("writer", controller.signal) : undefined;
                 try {
                 if (run.limits.maxTokens > 0 && totalTokens >= run.limits.maxTokens) throw new Error("Workflow token budget exhausted before worker dispatch");
+                if (operationId) {
+                  const step = run.maintenance!.steps.find(step => step.id === operationId)!;
+                  if (step.protectedPaths !== undefined) {
+                    if (run.workspace?.kind !== "git-worktree") throw new Error("Protected maintenance paths require an independent Git workspace");
+                    const owned = path.join(await realpath(await this.store.ownedDirectory(run.id)), "workspace");
+                    if (run.workspace.root !== owned || run.workspacePath !== run.workspace.root || run.workspace.root === run.workspace.original || run.workspace.root === await realpath(run.workspace.original)) throw new Error("Protected maintenance paths must remain bound to this run's owned isolated workspace");
+                    await validateGitWorkspace(run.workspace);
+                  }
+                }
                 task.status = "running"; attempt.status = "running"; attempt.startedAt = now();
                 this.activity(run, task, attempt, { id: `${attempt.id}:dispatch`, kind: "waiting", label: mode === "write" ? "等待执行器开始任务" : "等待代理开始检查", status: "running", startedAt: attempt.startedAt });
                 this.log(run, `Worker started (${mode}).`, task.id);
@@ -546,7 +556,7 @@ export class WorkflowEngine {
                 if (operationId) {
                   const step = run.maintenance!.steps.find(step => step.id === operationId)!;
                   if (!this.adapter.command) throw new Error("This adapter cannot execute approved operations");
-                  const report = await this.adapter.command({ id: attempt.id, command: step.command, cwd: run.workspacePath!, networkAccess: step.networkAccess ?? false, timeoutMs: Math.min(step.timeoutMs ?? run.limits.timeoutMs, run.limits.timeoutMs), retries: step.retries ?? 0 }, controller.signal, event => { if (event.type === "log") this.log(run, event.message, task.id); else if (event.type === "activity") this.activity(run, task, attempt, event.activity); });
+                  const report = await this.adapter.command({ id: attempt.id, command: step.command, cwd: run.workspacePath!, networkAccess: step.networkAccess ?? false, timeoutMs: Math.min(step.timeoutMs ?? run.limits.timeoutMs, run.limits.timeoutMs), retries: step.retries ?? 0, ...(step.protectedPaths !== undefined ? { protectedPaths: step.protectedPaths } : {}) }, controller.signal, event => { if (event.type === "log") this.log(run, event.message, task.id); else if (event.type === "activity") this.activity(run, task, attempt, event.activity); });
                   task.output = report;
                   attempt.outcome = "confirmed";
                   if (report.exitCode !== 0) throw new Error(`Operation ${operationId} failed (exit ${report.exitCode}): ${report.stderr.slice(-1000)}`);

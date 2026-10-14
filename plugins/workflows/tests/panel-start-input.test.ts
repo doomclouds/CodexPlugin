@@ -195,3 +195,18 @@ test("a rejected script result opens inspection instead of silently resuming cac
   assert.deepEqual(mutations(), [{ name: "workflow_resume", args: { id: previous.id, revision: previous.revision, leaseId: "lease-test", retryFromTaskId: "task_1" } }]);
   await panel.teardown();
 });
+
+test("new protected-directory permissions create a fresh preview and stay scoped to the declared operation", async () => {
+  const previous = savedRun({ execution: "stopped", allowWrite: true, workspaceMode: "git-worktree", maintenance: { steps: [{ id: "build", command: ["node", "generate.mjs"] }] } });
+  const { panel, mutations } = fixture(previous);
+  await panel.connected();
+  const input = inputFor(previous, { workspaceMode: "git-worktree", maintenance: { steps: [{ ...previous.maintenance!.steps[0]!, protectedPaths: [".agents/skills"] }] } });
+  await panel.startWithInput(input);
+  assert.deepEqual(mutations(), [
+    { name: "workflow_preview", args: input },
+    { name: "workflow_start", args: { id: "wf-new-1", revision: 1, leaseId: "lease-test" } },
+  ]);
+  assert.deepEqual(panel.selected?.maintenance?.steps[0]?.protectedPaths, [".agents/skills"]);
+  assert.equal(Object.hasOwn(mutations()[0]!.args, "protectedPaths"), false, "Step permissions must never become whole-run permissions.");
+  await panel.teardown();
+});

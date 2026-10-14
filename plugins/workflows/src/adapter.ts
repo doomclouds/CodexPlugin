@@ -7,6 +7,7 @@ import { parseExecutionEnvironment, resolveExecutionSettings } from "./execution
 import type { EffectiveExecutionSettings, ExecutionEnvironment } from "./execution-settings.ts";
 import { createHash } from "node:crypto";
 import { commandActivityLabel, itemActivity } from "./activity.ts";
+import { normalizeProtectedPaths } from "./protected-paths.ts";
 import type { Activity } from "./types.ts";
 
 export interface WorkerRequest {
@@ -31,6 +32,7 @@ export interface CommandRequest {
   networkAccess?: boolean;
   timeoutMs?: number;
   retries?: number;
+  protectedPaths?: string[];
 }
 
 export interface CommandResult {
@@ -173,6 +175,33 @@ function safeMessage(value: unknown): string {
 
 function tokenCount(value: unknown): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+async function protectedCommandRoots(cwd: string, paths: string[] | undefined, hasOwnedGit: boolean): Promise<string[]> {
+  if (paths === undefined) return [];
+  if (!hasOwnedGit) throw new Error("Protected maintenance directories require independent Git metadata");
+  const root = await lstat(cwd);
+  const gitPath = path.join(cwd, ".git");
+  const git = await lstat(gitPath);
+  if (!root.isDirectory() || root.isSymbolicLink() || await realpath(cwd) !== cwd || !git.isDirectory() || git.isSymbolicLink() || await realpath(gitPath) !== gitPath) {
+    throw new Error("Protected maintenance directories require a real checkout with independent Git metadata");
+  }
+  const roots: string[] = [];
+  for (const relative of normalizeProtectedPaths(paths)) {
+    let current = cwd;
+    for (const segment of relative.split("/")) {
+      current = path.join(current, segment);
+      const fromRoot = path.relative(cwd, current);
+      if (!fromRoot || fromRoot === ".." || fromRoot.startsWith(".." + path.sep) || path.isAbsolute(fromRoot)) throw new Error("Protected maintenance directory escapes its checkout");
+      let info;
+      try { info = await lstat(current); }
+      catch (error) { if (object(error).code === "ENOENT") throw new Error(`Protected maintenance directory does not exist: ${relative}`); throw error; }
+      if (info.isSymbolicLink() || !info.isDirectory()) throw new Error(`Protected maintenance directory must be an existing directory without symbolic links: ${relative}`);
+      if (await realpath(current) !== current) throw new Error(`Protected maintenance directory escapes its real checkout path: ${relative}`);
+    }
+    roots.push(current);
+  }
+  return roots;
 }
 
 function transientNetworkFailure(result: CommandResult): boolean {
@@ -398,7 +427,7 @@ export class CodexAdapter implements WorkerAdapter {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.5" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.6" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config = object(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config, cwd);
@@ -408,23 +437,30 @@ export class CodexAdapter implements WorkerAdapter {
   command(request: CommandRequest, signal: AbortSignal, onEvent: (event: WorkerEvent) => void = () => {}): Promise<CommandResult> {
     if (this.closed) return Promise.reject(new Error("Worker adapter is closed."));
     if (signal.aborted) return Promise.reject(abortError());
-    const allowed = new Set(["id", "command", "cwd", "networkAccess", "timeoutMs", "retries"]);
+    const allowed = new Set(["id", "command", "cwd", "networkAccess", "timeoutMs", "retries", "protectedPaths"]);
     if (Object.keys(request).some(key => !allowed.has(key))) return Promise.reject(new Error("Command request contains unsupported fields; environment and extra paths cannot be supplied."));
     if (typeof request.id !== "string" || !request.id.trim() || typeof request.cwd !== "string" || !path.isAbsolute(request.cwd) || !Array.isArray(request.command) || !request.command.length || request.command.some(value => typeof value !== "string" || value.includes("\0")) || !request.command[0]?.trim()) return Promise.reject(new Error("Command requires an ID, an exact argv array, and an absolute working directory."));
     if (request.networkAccess !== undefined && typeof request.networkAccess !== "boolean") return Promise.reject(new Error("Command network authorization must be boolean."));
     if (request.timeoutMs !== undefined && (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 1 || request.timeoutMs > 86_400_000)) return Promise.reject(new Error("Command timeout must be a positive integer of at most 24 hours."));
     if (request.retries !== undefined && (!Number.isSafeInteger(request.retries) || request.retries < 0 || request.retries > 2)) return Promise.reject(new Error("Command retries must be an integer between zero and two."));
+    let protectedPaths: string[] | undefined;
+    try { if (request.protectedPaths !== undefined) protectedPaths = normalizeProtectedPaths(request.protectedPaths); }
+    catch (error) { return Promise.reject(error); }
     // Absolute argv may be read-only toolchain inputs. The OS sandbox, not argv
     // syntax, enforces writes to the owned workspace and its own Git metadata.
     const controller = new AbortController();
     const relay = () => controller.abort();
     signal.addEventListener("abort", relay, { once: true });
-    const operation = this.runCommand(request, controller.signal, onEvent);
+    const operation = this.runCommand({ ...request, ...(protectedPaths ? { protectedPaths } : {}) }, controller.signal, onEvent);
     this.running.set(operation, controller);
     return operation.finally(() => { signal.removeEventListener("abort", relay); this.running.delete(operation); });
   }
 
   private async runCommand(request: CommandRequest, signal: AbortSignal, onEvent: (event: WorkerEvent) => void): Promise<CommandResult> {
+    if (request.protectedPaths !== undefined) {
+      const requestedRoot = await lstat(request.cwd);
+      if (!requestedRoot.isDirectory() || requestedRoot.isSymbolicLink()) throw new Error("Protected maintenance checkout must be a real directory without symbolic links");
+    }
     const cwd = await realpath(request.cwd);
     const gitPath = path.join(cwd, ".git");
     let hasOwnedGit = false;
@@ -433,6 +469,7 @@ export class CodexAdapter implements WorkerAdapter {
       if (!git.isDirectory() || git.isSymbolicLink() || await realpath(gitPath) !== gitPath) throw new Error("Command working directory must not use linked or external Git metadata.");
       hasOwnedGit = true;
     } catch (error) { if (object(error).code !== "ENOENT") throw error; }
+    await protectedCommandRoots(cwd, request.protectedPaths, hasOwnedGit);
     if (signal.aborted) throw abortError();
     const scratch = await mkdtemp(path.join(hasOwnedGit ? gitPath : cwd, ".workflows-command-"));
     try {
@@ -505,14 +542,17 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.5" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.6" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer); startupTimer = undefined;
       if (canceled || signal.aborted) throw canceled ?? abortError();
       initialization.status = "completed"; initialization.endedAt = new Date().toISOString(); activity(initialization);
+      // Recheck after startup and before every attempt; a declared path must
+      // never turn into a link or widen to a parent while the executor starts.
+      const protectedRoots = await protectedCommandRoots(request.cwd, request.protectedPaths, hasOwnedGit);
       sent = true;
       executionTimer = setTimeout(() => cancel(timeoutError("Codex command execution timed out.")), timeoutMs);
-      const sandboxPolicy = { type: "workspaceWrite", writableRoots: [request.cwd, ...(hasOwnedGit ? [path.join(request.cwd, ".git")] : [])], networkAccess: request.networkAccess === true, excludeTmpdirEnvVar: true, excludeSlashTmp: true };
+      const sandboxPolicy = { type: "workspaceWrite", writableRoots: [request.cwd, ...(hasOwnedGit ? [path.join(request.cwd, ".git")] : []), ...protectedRoots], networkAccess: request.networkAccess === true, excludeTmpdirEnvVar: true, excludeSlashTmp: true };
       emit("Command execution started.");
       commandActivity = { id: processId, kind: "command", label: commandActivityLabel(request.command), status: "running", startedAt: new Date().toISOString() };
       activity(commandActivity);
@@ -700,7 +740,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.5" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.6" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object(object(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== undefined || request.reasoningEffort !== undefined) {

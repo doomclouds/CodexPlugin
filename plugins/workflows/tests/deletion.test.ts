@@ -1,19 +1,30 @@
 import assert from "node:assert/strict";
 import { randomBytes, createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import type { TestContext } from "node:test";
+import { promisify } from "node:util";
 import { RunStore } from "../src/store.ts";
 import { TemplateStore } from "../src/templates.ts";
 import { DeletionService } from "../src/deletion.ts";
 import type { DeletionOptions } from "../src/deletion.ts";
 import type { WorkflowRun } from "../src/types.ts";
+import { createGitWorkspace } from "../src/maintenance.ts";
+const exec = promisify(execFile);
 const source = 'export const meta={name:"reusable",description:"Deletion fixture"}; return args;';
-async function fixture(t: TestContext, options: DeletionOptions = {}) {
+async function fixture(t: TestContext, options: DeletionOptions = {}, aliasDataRoot = false) {
   const root = await mkdtemp(path.join(tmpdir(), "workflows-delete-test-"));
-  const store = new RunStore(path.join(root, "state")); const templates = new TemplateStore(store);
+  let dataParent = root;
+  if (aliasDataRoot) {
+    const realParent = path.join(root, "canonical-data");
+    dataParent = path.join(root, "data-alias");
+    await mkdir(realParent);
+    await symlink(realParent, dataParent, process.platform === "win32" ? "junction" : "dir");
+  }
+  const store = new RunStore(path.join(dataParent, "state")); const templates = new TemplateStore(store);
   await mkdir(path.join(root, "original")); await writeFile(path.join(root, "original", "delivered.txt"), "Delivered project contents\n");
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const service = new DeletionService(store, templates, { readEffectiveConfig: async () => ({}), ...options });
@@ -65,6 +76,106 @@ test("single-run deletion leaves its saved definition and independent runs intac
   const preview = await service.preview({ kind: "run", id: first.id, revision: first.revision });
   assert.equal((await service.execute({ ...preview.target, fingerprint: preview.fingerprint })).deleted, true);
   assert.equal((await templates.get(definition.id))?.revision, definition.revision); assert.equal((await store.load(second.id)).id, second.id);
+});
+
+test("canonical Git workspaces under an aliased owned data root can be completely deleted", async t => {
+  const { root, store, service, run } = await fixture(t, {}, true);
+  const original = path.join(root, "original");
+  await exec("git", ["init", "--quiet"], { cwd: original });
+  await exec("git", ["add", "--all"], { cwd: original });
+  await exec("git", ["-c", "user.name=Workflow Test", "-c", "user.email=workflow-test@example.invalid", "commit", "--quiet", "-m", "Add deletion fixture"], { cwd: original });
+  const record = await run({ allowWrite: true, workspaceMode: "git-worktree" });
+  const directory = store.directory(record.id), canonical = await realpath(directory);
+  assert.notEqual(directory, canonical, "The fixture must exercise a genuine data-root alias on every platform.");
+  record.workspace = await createGitWorkspace(original, directory);
+  record.workspacePath = record.workspace.root;
+  assert.equal(record.workspace.root, path.join(canonical, "workspace"));
+  await store.save(record);
+  const preview = await service.preview({ kind: "run", id: record.id, revision: record.revision });
+  assert.equal(preview.canDelete, true, JSON.stringify(preview.blocked));
+  const deleted = await service.execute({ ...preview.target, fingerprint: preview.fingerprint });
+  assert.equal(deleted.deleted, true, JSON.stringify(deleted));
+  assert.equal(deleted.partial, false);
+  await missing(directory); await missing(canonical); await missing(path.join(store.root, ".deletions"));
+  assert.equal(await readFile(path.join(original, "delivered.txt"), "utf8"), "Delivered project contents\n");
+});
+
+test("legacy lexical workspace names under an owned data alias remain deletable even after workspace cleanup", async t => {
+  const { store, service, run } = await fixture(t, {}, true);
+  for (const workspacePresent of [true, false]) {
+    const record = await run(), workspace = path.join(store.directory(record.id), "workspace");
+    if (workspacePresent) await mkdir(workspace);
+    record.workspace = { root: workspace, original: await realpath(record.projectPath), baseline: {}, kind: "snapshot" };
+    await store.save(record);
+    const preview = await service.preview({ kind: "run", id: record.id, revision: record.revision });
+    assert.equal(preview.canDelete, true, JSON.stringify(preview.blocked));
+    assert.equal((await service.execute({ ...preview.target, fingerprint: preview.fingerprint })).deleted, true);
+  }
+});
+
+test("canonical MCP paths still retain workspaces stored through a data-root alias", async t => {
+  let config: Record<string, unknown> = {};
+  const { store, service, run } = await fixture(t, { readEffectiveConfig: async () => config }, true);
+  const record = await run();
+  const canonical = await realpath(store.directory(record.id));
+  await mkdir(path.join(canonical, "workspace"));
+  await writeFile(path.join(canonical, "workspace", "server.mjs"), "Owned MCP runtime fixture");
+  record.workspace = { root: path.join(canonical, "workspace"), original: record.projectPath, baseline: {}, kind: "git-worktree", git: { base: "fixture", branch: "fixture" } };
+  await store.save(record);
+  config = { mcp_servers: { production: { command: "node", args: [path.join(canonical, "workspace", "server.mjs")] } } };
+  const preview = await service.preview({ kind: "run", id: record.id, revision: record.revision });
+  assert.ok(preview.blocked.some(block => block.code === "config_reference" && block.reference?.serverName === "production"));
+  assert.equal((await service.execute({ ...preview.target, fingerprint: preview.fingerprint })).deleted, false);
+  assert.equal(await readFile(path.join(canonical, "workspace", "server.mjs"), "utf8"), "Owned MCP runtime fixture");
+});
+
+test("pending deletion preserves canonical MCP reference protection after its aliased run directory is gone", async t => {
+  let config: Record<string, unknown> = {}, fail = true;
+  const { store, service, run } = await fixture(t, {
+    readEffectiveConfig: async () => config,
+    removeOwnedPath: async filename => {
+      await rm(filename, { recursive: true, force: true });
+      if (fail) { fail = false; throw new Error("Injected failure after owned directory removal"); }
+    },
+  }, true);
+  const record = await run(), canonical = await realpath(store.directory(record.id));
+  const preview = await service.preview({ kind: "run", id: record.id, revision: record.revision });
+  const partial = await service.execute({ ...preview.target, fingerprint: preview.fingerprint });
+  assert.equal(partial.deleted, false); assert.equal(partial.partial, true);
+  await missing(canonical);
+  config = { mcp_servers: { retained: { command: "node", args: [path.join(canonical, "workspace", "server.mjs")] } } };
+  const retained = await service.preview(preview.target);
+  assert.ok(retained.blocked.some(block => block.code === "config_reference" && block.reference?.serverName === "retained"));
+  assert.equal((await service.execute({ ...retained.target, fingerprint: retained.fingerprint })).deleted, false);
+  assert.equal((await stat(path.join(store.root, ".deletions"))).isDirectory(), true);
+  config = {};
+  const cleared = await service.preview(preview.target);
+  assert.equal((await service.execute({ ...cleared.target, fingerprint: cleared.fingerprint })).deleted, true);
+  await missing(path.join(store.root, ".deletions"));
+});
+
+test("workspace aliases supplied by records and workspace symlinks cannot establish ownership", async t => {
+  const { root, store, service, run } = await fixture(t, {}, true);
+  const record = await run();
+  const directory = store.directory(record.id), canonical = await realpath(directory), ownedWorkspace = path.join(canonical, "workspace");
+  await mkdir(ownedWorkspace);
+  const externalAlias = path.join(root, "record-supplied-alias");
+  await symlink(ownedWorkspace, externalAlias, process.platform === "win32" ? "junction" : "dir");
+  for (const unowned of [path.join(root, "original"), externalAlias]) {
+    record.workspace = { root: unowned, original: record.projectPath, baseline: {}, kind: "git-worktree", git: { base: "fixture", branch: "fixture" } };
+    await store.save(record);
+    const preview = await service.preview({ kind: "run", id: record.id, revision: record.revision });
+    assert.ok(preview.blocked.some(block => block.code === "workspace_ownership"));
+    assert.equal((await service.execute({ ...preview.target, fingerprint: preview.fingerprint })).deleted, false);
+  }
+  await rm(ownedWorkspace, { recursive: true });
+  await symlink(path.join(root, "original"), ownedWorkspace, process.platform === "win32" ? "junction" : "dir");
+  record.workspace = { root: ownedWorkspace, original: record.projectPath, baseline: {}, kind: "git-worktree", git: { base: "fixture", branch: "fixture" } };
+  await store.save(record);
+  const preview = await service.preview({ kind: "run", id: record.id, revision: record.revision });
+  assert.ok(preview.blocked.some(block => block.code === "workspace_ownership"));
+  assert.equal((await service.execute({ ...preview.target, fingerprint: preview.fingerprint })).deleted, false);
+  assert.equal(await readFile(path.join(root, "original", "delivered.txt"), "utf8"), "Delivered project contents\n");
 });
 
 test("active preparation, worker execution, application and held run locks prevent deletion", async t => {

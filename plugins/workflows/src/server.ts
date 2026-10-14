@@ -55,7 +55,7 @@ function registerPanelToolWithIcons(server: McpServer, register: () => void) {
 }
 
 export function createServer(engine: WorkflowEngine, options: { projects?: ProjectsProvider; readDeletionConfig?: (projectPaths: string[]) => Promise<Record<string, unknown>> } = {}) {
-  const serverInfo = { name: "workflows", version: "0.5.5", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.5.6", icons: panelIcons };
   const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server = new McpServer(serverInfo);
   const templates = new TemplateStore(engine.store);
@@ -140,6 +140,7 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
       timeoutMs: z.number().int().min(100).max(86400000).optional(),
       retries: z.number().int().min(0).max(2).optional(),
       idempotent: z.boolean().optional().describe("Explicitly declare safe replay; defaults false. Required for retries or replay after an unknown command outcome."),
+      protectedPaths: z.array(z.string().min(1).max(1024)).min(1).max(16).optional().describe("Explicit user-authorized .agents/.codex directories or their subdirectories, relative to this isolated Git checkout. Applies only to this declared command, never to agent workers."),
     }).refine(step => !(step.retries && step.retries > 0) || step.idempotent === true, "Command retries require an explicitly idempotent step")).min(1).max(64),
     activation: z.object({ serverName: z.string().min(1).max(128), command: z.string().min(1), args: z.array(z.string()) }).optional(),
   }).optional();

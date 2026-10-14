@@ -121,7 +121,7 @@ const maintenance = {
   steps: [
     { id: "fetch", command: ["git", "fetch", "--prune"], networkAccess: true, timeoutMs: 120000, retries: 1, idempotent: true },
     { id: "install", command: ["npm", "ci", "--ignore-scripts"], networkAccess: true, timeoutMs: 300000, retries: 0 },
-    { id: "build", command: ["npm", "run", "build"], timeoutMs: 300000, retries: 0 },
+    { id: "build", command: ["npm", "run", "build"], timeoutMs: 300000, retries: 0, protectedPaths: [".agents/skills"] },
   ],
   activation: {
     serverName: "target-server",
@@ -132,6 +132,8 @@ const maintenance = {
 ```
 
 此配置是接口用法示例；代理应按用户项目的真实命令生成计划，不能将示例当作未经检查的操作。`command` 是 argv 数组，不由 shell 解释；绝对工具／脚本路径可以读取，不能据此扩大写权限。每次命令的临时目录和 npm/XDG 缓存默认位于隔离工作区并在退出后清理；argv、HOME、PATH 与全局配置保持原值，显式缓存参数仍由真实沙箱检查。步骤的 `networkAccess: true` 还要求整个运行 `networkAccess: true`。`timeoutMs` 与 `retries` 为每步设置，retries 为 0—2。`idempotent` 默认 false；显式 true 是调用者检查真实操作后的声明，引擎不会根据命令名称猜测幂等性。自动重试要求 idempotent=true；运行中断、退出或丢失响应后，已经开始且未确认结果的非幂等步骤拒绝在恢复中自动重发。先检查既有副作用，再决定继续或另建计划。脚本按步骤 ID 调用，例如 `await operation("build")`，按实际错误决定停止或有限重试。
+
+`protectedPaths?: string[]` 是单步骤预声明的最小目录授权，只在该 `operation` 执行时生效。示例中的 `build` 只有在任务明确要求更新既有 `.agents/skills` 时才保留此字段；普通构建应省略。路径相对于本次隔离工作区，必须是 `.agents` 或 `.codex` 内已经存在的真实目录，优先最小子目录；不允许绝对路径、`..` 或任意符号链接及跳转链。权限不会传给其他步骤或 `agent` worker；预览、保存定义、读取及复用时保留在对应 `maintenance.steps` 项内。调整路径授权须创建新预览，保留工作区的旧运行不能增加权限。
 
 激活 `command` 是可执行文件，`args` 为数组；`${WORKSPACE}` 替换为本次保留的工作区。配置中的其他目录必须来自本次授权输入，不能引用发布者私有位置。只有完成审查并按授权应用后才处理激活配置。激活结果 `pending_restart` 表示等待宿主重载；`failed` 表示失败；`verified` 表示已通过实际验证。不能把配置更新当作当前聊天已经加载目标版本。
 

@@ -212,9 +212,15 @@ export class DeletionService {
     if (input.kind === "run" && !selection.has(input.id)) selection.set(input.id, { id: input.id, revision: input.revision });
     if (input.kind === "definition") for (const id of input.runIds ?? []) if (!selection.has(id)) selection.set(id, { id, revision: 1 });
     for (const run of intent?.runs ?? []) if (!selection.has(run.id)) selection.set(run.id, run);
+    const canonicalDirectories = new Map<string, string>();
     for (const descriptor of selection.values()) {
       const run = selected.find(item => item.id === descriptor.id);
       const directory = this.store.directory(descriptor.id);
+      let canonicalDirectory: string | undefined;
+      try {
+        canonicalDirectory = await realpath(await this.store.ownedDirectory(descriptor.id));
+        canonicalDirectories.set(descriptor.id, canonicalDirectory);
+      } catch (error) { if (!absent(error)) blocked.push({ code: "unsafe_path", runId: descriptor.id, path: directory, message: text(error) }); }
       const pending = await this.store.pendingDeletion(descriptor.id);
       if (pending && pending.deletionId !== this.intentId(input)) blocked.push({ code: "pending_scope", runId: descriptor.id, message: "此运行已有未完成删除事务，请使用原删除范围继续清理。" });
       if (run) {
@@ -223,7 +229,18 @@ export class DeletionService {
         if (recorded && recorded.revision !== run.revision) blocked.push({ code: "revision", runId: run.id, message: "已冻结的运行记录被外部修改，先核对删除事务。" });
         result.runs.push({ id: run.id, revision: run.revision, name: run.meta.name, projectPath: run.projectPath });
         if (["preparing", "running", "stopping"].includes(run.execution) || run.application === "applying") blocked.push({ code: "active", runId: run.id, message: "工作流仍在准备、执行或应用；请先停止并等待后台进程退出，再重新预览删除。" });
-        if (run.workspace && path.resolve(run.workspace.root) !== path.join(directory, "workspace")) blocked.push({ code: "workspace_ownership", runId: run.id, path: run.workspace.root, message: "工作区位置不属于该运行，不能自动删除。请先核对工作区所有权。" });
+        let workspaceOwned = true;
+        if (run.workspace) {
+          // Derive aliases only from the verified owned run directory. Never
+          // resolve a record-supplied workspace path to infer ownership.
+          const expected = [path.join(directory, "workspace"), ...(canonicalDirectory ? [path.join(canonicalDirectory, "workspace")] : [])];
+          workspaceOwned = canonicalDirectory !== undefined && expected.includes(path.resolve(run.workspace.root));
+          if (workspaceOwned) {
+            try { await this.store.ownedDirectory(path.join(run.id, "workspace")); }
+            catch (error) { if (!absent(error)) workspaceOwned = false; }
+          }
+        }
+        if (run.workspace && !workspaceOwned) blocked.push({ code: "workspace_ownership", runId: run.id, path: run.workspace.root, message: "工作区位置不属于该运行，不能自动删除。请先核对工作区所有权。" });
         else if (run.workspace && run.workspace.kind !== "git-worktree") {
           try {
             const temporary = await inspectProjectTemporaryFiles(run.workspace);
@@ -263,8 +280,13 @@ export class DeletionService {
     const selectedIds = new Set(selection.keys());
     const directories = [...selectedIds].map(id => ({ id, directory: this.store.directory(id) }));
     // Accept both configured and canonical paths without following paths supplied by a record.
-    const canonicalRoot = await realpath(this.store.root);
-    const directoryVariants = directories.flatMap(entry => [{ ...entry }, ...(canonicalRoot !== this.store.root ? [{ id: entry.id, directory: path.join(canonicalRoot, entry.id) }] : [])]);
+    const canonicalRoot = await realpath(await this.store.ownedDirectory());
+    const directoryVariants = directories.flatMap(entry => {
+      // A partial deletion may already have removed this run directory. Its
+      // pending intent must still retain effective references to the owned name.
+      const canonical = canonicalDirectories.get(entry.id) ?? path.join(canonicalRoot, entry.id);
+      return [{ ...entry }, ...(canonical !== entry.directory ? [{ id: entry.id, directory: canonical }] : [])];
+    });
     let activationEvidence = selected.some(run => Boolean(run.activation || run.maintenance?.activation));
     for (const run of all) {
       let journal: unknown;

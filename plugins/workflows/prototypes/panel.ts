@@ -60,8 +60,12 @@ export interface WorkflowTask {
   configurationTarget?: string;
 }
 
+export interface MaintenanceStep {
+  id: string; command: string[]; networkAccess?: boolean; timeoutMs?: number; retries?: number; idempotent?: boolean;
+  protectedPaths?: string[];
+}
 export interface MaintenancePlan {
-  steps: Array<{ id: string; command: string[]; networkAccess?: boolean; timeoutMs?: number; retries?: number; idempotent?: boolean }>;
+  steps: MaintenanceStep[];
   activation?: { serverName: string; command: string; args: string[] };
 }
 
@@ -740,10 +744,14 @@ export function summarizeMaintenanceReview(value: unknown): {
   };
 }
 
+export function maintenanceProtectedPathsSummary(plan?: MaintenancePlan): string {
+  return (plan?.steps ?? []).filter(step => step.protectedPaths?.length).map(step => `${step.id}：${step.protectedPaths!.join("、")}`).join("；");
+}
 function maintenanceReview(run: WorkflowRun): string {
   if (run.maintenanceReview === undefined) return "";
   const review = summarizeMaintenanceReview(run.maintenanceReview);
-  return `<h3 class="wf-section-title">维护审查</h3><div class="wf-facts"><span>分支 ${escapeHtml(review.branch || "未提供")}</span><span>基线 ${escapeHtml(review.base.slice(0, 12) || "未提供")} → ${escapeHtml(review.target.slice(0, 12) || "未提供")}</span><span>构建产物 ${review.artifactCount} 项</span><span>准备检查：${review.preparedClean === undefined ? "未报告" : review.preparedClean ? "已通过" : "未通过"}</span></div><details data-detail="maintenance-fingerprint"><summary>审查标识</summary><div class="wf-muted">产物指纹：${escapeHtml(review.artifactFingerprint || "未提供")}<br>整体审查：${escapeHtml(review.fingerprint || "未提供")}</div></details>${review.artifactCount ? `<details data-detail="maintenance-artifacts"><summary>构建产物示例（前 ${review.artifacts.length} 项）</summary><pre>${escapeHtml(jsonInput(review.artifacts))}</pre><p class="wf-muted">显示 ${review.artifacts.length}/${review.artifactCount} 项；完整清单保存在运行记录中。</p></details>` : ""}`;
+  const protectedPaths = maintenanceProtectedPathsSummary(run.maintenance);
+  return `<h3 class="wf-section-title">维护审查</h3><div class="wf-facts"><span>分支 ${escapeHtml(review.branch || "未提供")}</span><span>基线 ${escapeHtml(review.base.slice(0, 12) || "未提供")} → ${escapeHtml(review.target.slice(0, 12) || "未提供")}</span><span>构建产物 ${review.artifactCount} 项</span><span>准备检查：${review.preparedClean === undefined ? "未报告" : review.preparedClean ? "已通过" : "未通过"}</span></div>${protectedPaths ? `<div class="wf-notice">命令目录授权：${escapeHtml(protectedPaths)}。仅对应命令生效，代理任务权限不变。</div>` : ""}<details data-detail="maintenance-fingerprint"><summary>审查标识</summary><div class="wf-muted">产物指纹：${escapeHtml(review.artifactFingerprint || "未提供")}<br>整体审查：${escapeHtml(review.fingerprint || "未提供")}</div></details>${review.artifactCount ? `<details data-detail="maintenance-artifacts"><summary>构建产物示例（前 ${review.artifacts.length} 项）</summary><pre>${escapeHtml(jsonInput(review.artifacts))}</pre><p class="wf-muted">显示 ${review.artifacts.length}/${review.artifactCount} 项；完整清单保存在运行记录中。</p></details>` : ""}`;
 }
 
 function activationSummary(run: WorkflowRun): string {
@@ -1033,7 +1041,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     parameterFields.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-parameter]").forEach(value => { value.disabled = !controller.canAct || live || !!run?.deletionPending; });
     element("#wf-parameter-status").textContent = live ? "运行期间参数固定。" : "保存后用于下次启动；已执行的记录不会被改写。";
     element<HTMLButtonElement>("#wf-save-parameters").disabled = !controller.canAct || live || !!run?.deletionPending;
-    element("#wf-execution-scope").textContent = input ? `本工作流范围：${input.allowWrite ? "允许在隔离工作区修改文件" : "只读"} · ${input.networkAccess ? "允许联网" : "网络关闭"}${input.allowedMcpServers?.length ? ` · MCP：${input.allowedMcpServers.join("、")}` : ""}。调整执行范围可在对话中告诉 AI。` : "选择工作流后显示已声明的执行范围。";
+    element("#wf-execution-scope").textContent = input ? `本工作流范围：${input.allowWrite ? "允许在隔离工作区修改文件" : "只读"} · ${input.networkAccess ? "允许联网" : "网络关闭"}${input.allowedMcpServers?.length ? ` · MCP：${input.allowedMcpServers.join("、")}` : ""}${maintenanceProtectedPathsSummary(input.maintenance) ? ` · 命令目录授权：${maintenanceProtectedPathsSummary(input.maintenance)}（仅对应命令）` : ""}。调整执行范围可在对话中告诉 AI。` : "选择工作流后显示已声明的执行范围。";
     const settings = state.settings, models = settings?.models ?? [];
     const signature = JSON.stringify([state.settingsProjectPath, settings?.settings.revision, models]);
     if (signature !== settingsSignature) { settingsSignature = signature; defaultModel.innerHTML = modelSelectOptions(models, settings?.settings.model ?? "", "继承 Codex 配置"); defaultEffort.innerHTML = effortSelectOptions(models, defaultModel.value || settings?.codexDefaults.model, settings?.settings.reasoningEffort ?? "", "继承 Codex 配置"); }

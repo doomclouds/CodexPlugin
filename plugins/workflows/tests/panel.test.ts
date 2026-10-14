@@ -1,7 +1,7 @@
 import { projectFixtureResponse } from "./panel-project-fixture.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowPanelController, applyPanelHostStyles, canApply, escapeHtml, jsonInput, parseToolGrants, partialApplicationMessage, summarizeMaintenanceReview, toolPayload } from "../prototypes/panel.ts";
+import { WorkflowPanelController, applyPanelHostStyles, canApply, escapeHtml, jsonInput, maintenanceProtectedPathsSummary, parseToolGrants, partialApplicationMessage, summarizeMaintenanceReview, toolPayload } from "../prototypes/panel.ts";
 import type { WorkflowRun, ToolCaller } from "../prototypes/panel.ts";
 
 function draft(): WorkflowRun {
@@ -351,7 +351,7 @@ test("preview and edit preserve the declared network, MCP, workspace and mainten
   const input = {
     projectPath: "/project", script: "return await operation('build')", args: {}, allowWrite: true,
     networkAccess: true, allowedMcpServers: ["rea"], allowedMcpTools: { rea: ["binary_session"] }, workspaceMode: "git-worktree" as const,
-    maintenance: { steps: [{ id: "build", command: ["npm", "run", "build"], networkAccess: false }], activation: { serverName: "rea", command: "node", args: ["${WORKSPACE}/runtime/index.js"] } },
+    maintenance: { steps: [{ id: "build", command: ["npm", "run", "build"], networkAccess: false, protectedPaths: [".agents/skills"] }], activation: { serverName: "rea", command: "node", args: ["${WORKSPACE}/runtime/index.js"] } },
   };
   await panel.save(input);
   assert.deepEqual(calls.find(call => call.name === "workflow_preview")?.args, input);
@@ -361,6 +361,17 @@ test("preview and edit preserve the declared network, MCP, workspace and mainten
     networkAccess: true, allowedMcpServers: ["rea"], allowedMcpTools: { rea: ["binary_session"] }, workspaceMode: "git-worktree", maintenance: input.maintenance,
   });
   await panel.teardown();
+});
+
+test("maintenance authorization summaries retain the command associated with each protected directory", () => {
+  const plan = { steps: [
+    { id: "build", command: ["npm", "run", "build"] },
+    { id: "generate-skills", command: ["node", "generate-skills.mjs"], protectedPaths: [".agents/skills"] },
+    { id: "generate-rules", command: ["node", "generate-rules.mjs"], protectedPaths: [".codex/rules"] },
+  ] };
+  assert.equal(maintenanceProtectedPathsSummary(plan), "generate-skills：.agents/skills；generate-rules：.codex/rules");
+  assert.equal(maintenanceProtectedPathsSummary(), "");
+  assert.equal(maintenanceProtectedPathsSummary({ steps: [plan.steps[0]!] }), "");
 });
 
 test("completed maintenance reviews can be applied from the difference tab without fabricated file diffs", () => {

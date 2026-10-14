@@ -55,6 +55,15 @@ test("maintenance plans are explicit argument vectors with bounded retries and a
   assert.throws(() => validateMaintenance({ steps: [{ id: "same", command: ["node"] }, { id: "same", command: ["node"] }] }, false), /unique/);
 });
 
+test("protected maintenance paths are explicit bounded relative directories and normalize without changing old plans", () => {
+  const normalized = validateMaintenance({ steps: [{ id: "generate", command: ["node", "generate.mjs"], protectedPaths: [".codex/cache", ".agents/skills", ".agents/skills"] }] }, false);
+  assert.deepEqual(normalized.steps[0]?.protectedPaths, [".agents/skills", ".codex/cache"]);
+  assert.equal(Object.hasOwn(validateMaintenance(plan, false).steps[0]!, "protectedPaths"), false);
+  for (const value of [null, [], ".agents", ["/absolute"], [".git"], ["../.agents"], [".agents/../outside"], [".agents\\skills"], [".agents/./skills"], [".agents/"], [" .agents/skills"], [".agents/*"], [".agents/foo\0bar"], [".agents/" + "a".repeat(1024)], Array.from({ length: 17 }, (_, index) => `.agents/path-${index}`)]) {
+    assert.throws(() => validateMaintenance({ steps: [{ id: "invalid", command: ["node"], protectedPaths: value }] } as unknown as MaintenancePlan, false), /protected|relative|path|director|array|length|control|segment|limit|entry/i);
+  }
+});
+
 test("independent Git checkout retains history, original remotes and upstream without shared metadata", async t => {
   const { project, remote, data, base } = await fixture(t);
   await git(project, "remote", "add", "backup", remote);

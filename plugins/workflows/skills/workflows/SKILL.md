@@ -37,6 +37,8 @@ description: 根据用户任务生成、保存并执行 Workflows 动态工作�
 
 `agent` 用于通用分析、编程及已授权 MCP 任务，不要求为每种需求修改插件或添加维护命令。`operation` 是可选的确定性维护能力，shell/build 维护需要 `allowWrite: true` 与 `workspaceMode: "git-worktree"`。通用只读联网任务不需要维护步骤。维护命令必须在 `maintenance.steps` 中预声明 `id` 和 `command` argv 数组。脚本只调用 `operation(stepId)`，不能提供新命令或拼接 shell。每步可声明网络访问、超时和有限重试。`idempotent` 默认 `false`，只有核对实际命令后才能显式声明重复执行不会新增副作用。`retries > 0` 需要 `idempotent: true`。已开始却未确认结果的非幂等 operation，恢复时拒绝自动重发；先核验实际效果，不能把“没有收到结果”当作“没有发生副作用”。以实际退出、输出、日志与审查结果判断完成，不把启动进程当作成功。
 
+维护命令确需写入 `.agents`、`.codex` 的内容时，在对应步骤预声明最小必要的 `protectedPaths`，例如 `[".agents/skills"]`。路径须相对于隔离工作区，指向 `.agents`、`.codex` 内已经存在的真实目录；优先声明最小子目录，授权保护目录本身须与本次用户授权范围一致。不得使用绝对路径、`..`、符号链接或跳转链。字段只增加该 `operation` 执行期间的目录权限，其他命令及 `agent` worker 权限保持原样。省略字段不增加此类授权。新增或调整授权须重新预览，不能在保留工作区的旧运行上追加权限；不要用宽泛目录替代失败后的实际范围核对。
+
 需要应用后激活 MCP 时，在 `maintenance.activation` 声明 `serverName`、可执行文件 `command` 和 `args`。插件路径参数使用 `${WORKSPACE}`，由运行时替换为本次保留工作区；不能固化开发者机器目录。只运行已声明的激活配置。配置更新或进程启动不等于当前宿主已经重载；`pending_restart` 仍需宿主重新加载及实际版本核对，只有 `verified` 才可称激活已验证。
 
 ## 保存、复用与恢复

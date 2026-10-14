@@ -5,6 +5,7 @@ import path from "node:path";
 import { ProtocolSession } from "./adapter.ts";
 import { cloneInitializedSubmodules, flattenGitArtifacts, gitCommand, inspectGitManifest, listGitlinks, type GitManifest } from "./submodules.ts";
 import type { ActivationResult, Diff, MaintenanceArtifact, MaintenancePlan, MaintenanceReview, Workspace } from "./types.ts";
+import { normalizeProtectedPaths } from "./protected-paths.ts";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const fingerprint = (value: unknown) => hash(JSON.stringify(value));
@@ -25,7 +26,7 @@ export function validateMaintenance(plan: MaintenancePlan, networkGrant: boolean
   const ids = new Set<string>();
   const result: MaintenancePlan = { steps: input.steps.map(value => {
     const step = object(value);
-    for (const key of Object.keys(step)) if (!["id", "command", "networkAccess", "timeoutMs", "retries", "idempotent"].includes(key)) throw new Error(`Unsupported maintenance step property: ${key}`);
+    for (const key of Object.keys(step)) if (!["id", "command", "networkAccess", "timeoutMs", "retries", "idempotent", "protectedPaths"].includes(key)) throw new Error(`Unsupported maintenance step property: ${key}`);
     const id = string(step.id, "step.id", 64);
     if (!/^[a-z][a-z0-9_-]*$/.test(id) || ids.has(id)) throw new Error("Maintenance step IDs must be unique lowercase identifiers");
     ids.add(id);
@@ -37,7 +38,7 @@ export function validateMaintenance(plan: MaintenancePlan, networkGrant: boolean
     if (step.retries !== undefined && (!Number.isSafeInteger(step.retries) || Number(step.retries) < 0 || Number(step.retries) > 2)) throw new Error("Maintenance retries must be between 0 and 2");
     if (step.idempotent !== undefined && typeof step.idempotent !== "boolean") throw new Error("idempotent must be a boolean");
     if (Number(step.retries ?? 0) > 0 && step.idempotent !== true) throw new Error("Automatic retries require an explicitly idempotent operation");
-    return { id, command, ...(step.networkAccess !== undefined ? { networkAccess: step.networkAccess as boolean } : {}), ...(step.timeoutMs !== undefined ? { timeoutMs: step.timeoutMs as number } : {}), ...(step.retries !== undefined ? { retries: step.retries as number } : {}), ...(step.idempotent !== undefined ? { idempotent: step.idempotent as boolean } : {}) };
+    return { id, command, ...(step.networkAccess !== undefined ? { networkAccess: step.networkAccess as boolean } : {}), ...(step.timeoutMs !== undefined ? { timeoutMs: step.timeoutMs as number } : {}), ...(step.retries !== undefined ? { retries: step.retries as number } : {}), ...(step.idempotent !== undefined ? { idempotent: step.idempotent as boolean } : {}), ...(step.protectedPaths !== undefined ? { protectedPaths: normalizeProtectedPaths(step.protectedPaths) } : {}) };
   }) };
   if (input.activation !== undefined) {
     const activation = object(input.activation);
