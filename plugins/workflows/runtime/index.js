@@ -175,9 +175,9 @@ function floatSafeRemainder(val, step) {
     return 0;
   return ratio - roundedRatio;
 }
-function defineLazy(object6, key, getter) {
+function defineLazy(object7, key, getter) {
   let value = void 0;
-  Object.defineProperty(object6, key, {
+  Object.defineProperty(object7, key, {
     get() {
       if (value === EVALUATING) {
         return void 0;
@@ -189,7 +189,7 @@ function defineLazy(object6, key, getter) {
       return value;
     },
     set(v2) {
-      Object.defineProperty(object6, key, {
+      Object.defineProperty(object7, key, {
         value: v2
         // configurable: true,
       });
@@ -653,16 +653,16 @@ function cleanEnum(obj) {
 }
 function base64ToUint8Array(base643) {
   const binaryString = atob(base643);
-  const bytes = new Uint8Array(binaryString.length);
+  const bytes2 = new Uint8Array(binaryString.length);
   for (let i2 = 0; i2 < binaryString.length; i2++) {
-    bytes[i2] = binaryString.charCodeAt(i2);
+    bytes2[i2] = binaryString.charCodeAt(i2);
   }
-  return bytes;
+  return bytes2;
 }
-function uint8ArrayToBase64(bytes) {
+function uint8ArrayToBase64(bytes2) {
   let binaryString = "";
-  for (let i2 = 0; i2 < bytes.length; i2++) {
-    binaryString += String.fromCharCode(bytes[i2]);
+  for (let i2 = 0; i2 < bytes2.length; i2++) {
+    binaryString += String.fromCharCode(bytes2[i2]);
   }
   return btoa(binaryString);
 }
@@ -671,22 +671,22 @@ function base64urlToUint8Array(base64url3) {
   const padding = "=".repeat((4 - base643.length % 4) % 4);
   return base64ToUint8Array(base643 + padding);
 }
-function uint8ArrayToBase64url(bytes) {
-  return uint8ArrayToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+function uint8ArrayToBase64url(bytes2) {
+  return uint8ArrayToBase64(bytes2).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 function hexToUint8Array(hex3) {
   const cleanHex = hex3.replace(/^0x/, "");
   if (cleanHex.length % 2 !== 0) {
     throw new Error("Invalid hex string length");
   }
-  const bytes = new Uint8Array(cleanHex.length / 2);
+  const bytes2 = new Uint8Array(cleanHex.length / 2);
   for (let i2 = 0; i2 < cleanHex.length; i2 += 2) {
-    bytes[i2 / 2] = Number.parseInt(cleanHex.slice(i2, i2 + 2), 16);
+    bytes2[i2 / 2] = Number.parseInt(cleanHex.slice(i2, i2 + 2), 16);
   }
-  return bytes;
+  return bytes2;
 }
-function uint8ArrayToHex(bytes) {
-  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+function uint8ArrayToHex(bytes2) {
+  return Array.from(bytes2).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 function members(proto, table) {
   for (const key in table) {
@@ -2194,11 +2194,11 @@ function isValidCIDRv6(value) {
   const parts = value.split("/");
   if (parts.length !== 2)
     return false;
-  const [address, prefix] = parts;
-  if (!prefix)
+  const [address, prefix2] = parts;
+  if (!prefix2)
     return false;
-  const prefixNum = Number(prefix);
-  if (`${prefixNum}` !== prefix)
+  const prefixNum = Number(prefix2);
+  if (`${prefixNum}` !== prefix2)
     return false;
   if (prefixNum < 0 || prefixNum > 128)
     return false;
@@ -13425,8 +13425,8 @@ function generateStringFormatCheck(doc, ctx, def, accessor, needsValue = true) {
       doc.write(`if (!${accessor}.includes(${esc(def.includes)})) return INVALID;`);
       break;
     case "starts_with": {
-      const prefix = def.prefix;
-      doc.write(`if (${accessor}.slice(0, ${prefix.length}) !== ${esc(prefix)}) return INVALID;`);
+      const prefix2 = def.prefix;
+      doc.write(`if (${accessor}.slice(0, ${prefix2.length}) !== ${esc(prefix2)}) return INVALID;`);
       break;
     }
     case "ends_with": {
@@ -14170,8 +14170,8 @@ function generateDiscriminatedUnionCheck(doc, ctx, def, accessor) {
       claimed.add(value);
     }
     const conditions = Array.from(values, (value) => literalEquality(ctx, discVar, value));
-    const prefix = firstBranch ? "if" : "else if";
-    doc.write(`${prefix} (${conditions.join(" || ")}) {`);
+    const prefix2 = firstBranch ? "if" : "else if";
+    doc.write(`${prefix2} (${conditions.join(" || ")}) {`);
     doc.indented((d2) => {
       const branchOutput = generateCheck(d2, ctx, option, accessor);
       d2.write(`${outputVar} = ${branchOutput};`);
@@ -15172,12 +15172,12 @@ function _includes(includes, params) {
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _startsWith(prefix, params) {
+function _startsWith(prefix2, params) {
   return new $ZodCheckStartsWith({
     check: "string_format",
     format: "starts_with",
     ...normalizeParams(params),
-    prefix
+    prefix: prefix2
   });
 }
 // @__NO_SIDE_EFFECTS__
@@ -15851,8 +15851,8 @@ function foldObjects(members2) {
   }
   const properties = {};
   const required2 = /* @__PURE__ */ new Set();
-  for (const object6 of objects) {
-    for (const key in object6.properties) {
+  for (const object7 of objects) {
+    for (const key in object7.properties) {
       if (Object.prototype.hasOwnProperty.call(properties, key))
         continue;
       const parts = [];
@@ -15866,18 +15866,18 @@ function foldObjects(members2) {
       const merged = parts.length === 1 ? parts[0] : foldObjects(parts) ?? { allOf: parts };
       assignProp(properties, key, merged);
     }
-    for (const key of object6.required ?? [])
+    for (const key of object7.required ?? [])
       required2.add(key);
   }
   const folded = { type: "object", properties };
   if (required2.size)
     folded.required = [...required2];
-  if (objects.every((object6) => object6.additionalProperties === false)) {
+  if (objects.every((object7) => object7.additionalProperties === false)) {
     folded.additionalProperties = false;
   } else {
     const constraints = [];
-    for (const object6 of objects) {
-      const constraint = undeclaredConstraint(object6);
+    for (const object7 of objects) {
+      const constraint = undeclaredConstraint(object7);
       if (constraint && !constraints.some((seen) => JSON.stringify(seen) === JSON.stringify(constraint)))
         constraints.push(constraint);
     }
@@ -20648,26 +20648,26 @@ var require_scope = __commonJS({
       toName(nameOrPrefix) {
         return nameOrPrefix instanceof code_1.Name ? nameOrPrefix : this.name(nameOrPrefix);
       }
-      name(prefix) {
-        return new code_1.Name(this._newName(prefix));
+      name(prefix2) {
+        return new code_1.Name(this._newName(prefix2));
       }
-      _newName(prefix) {
-        const ng = this._names[prefix] || this._nameGroup(prefix);
-        return `${prefix}${ng.index++}`;
+      _newName(prefix2) {
+        const ng = this._names[prefix2] || this._nameGroup(prefix2);
+        return `${prefix2}${ng.index++}`;
       }
-      _nameGroup(prefix) {
+      _nameGroup(prefix2) {
         var _a3, _b;
-        if (((_b = (_a3 = this._parent) === null || _a3 === void 0 ? void 0 : _a3._prefixes) === null || _b === void 0 ? void 0 : _b.has(prefix)) || this._prefixes && !this._prefixes.has(prefix)) {
-          throw new Error(`CodeGen: prefix "${prefix}" is not allowed in this scope`);
+        if (((_b = (_a3 = this._parent) === null || _a3 === void 0 ? void 0 : _a3._prefixes) === null || _b === void 0 ? void 0 : _b.has(prefix2)) || this._prefixes && !this._prefixes.has(prefix2)) {
+          throw new Error(`CodeGen: prefix "${prefix2}" is not allowed in this scope`);
         }
-        return this._names[prefix] = { prefix, index: 0 };
+        return this._names[prefix2] = { prefix: prefix2, index: 0 };
       }
     };
     exports.Scope = Scope3;
     var ValueScopeName = class extends code_1.Name {
-      constructor(prefix, nameStr) {
+      constructor(prefix2, nameStr) {
         super(nameStr);
-        this.prefix = prefix;
+        this.prefix = prefix2;
       }
       setValue(value, { property, itemIndex }) {
         this.value = value;
@@ -20686,33 +20686,33 @@ var require_scope = __commonJS({
       get() {
         return this._scope;
       }
-      name(prefix) {
-        return new ValueScopeName(prefix, this._newName(prefix));
+      name(prefix2) {
+        return new ValueScopeName(prefix2, this._newName(prefix2));
       }
       value(nameOrPrefix, value) {
         var _a3;
         if (value.ref === void 0)
           throw new Error("CodeGen: ref must be passed in value");
         const name = this.toName(nameOrPrefix);
-        const { prefix } = name;
+        const { prefix: prefix2 } = name;
         const valueKey = (_a3 = value.key) !== null && _a3 !== void 0 ? _a3 : value.ref;
-        let vs = this._values[prefix];
+        let vs = this._values[prefix2];
         if (vs) {
           const _name = vs.get(valueKey);
           if (_name)
             return _name;
         } else {
-          vs = this._values[prefix] = /* @__PURE__ */ new Map();
+          vs = this._values[prefix2] = /* @__PURE__ */ new Map();
         }
         vs.set(valueKey, name);
-        const s = this._scope[prefix] || (this._scope[prefix] = []);
+        const s = this._scope[prefix2] || (this._scope[prefix2] = []);
         const itemIndex = s.length;
         s[itemIndex] = value.ref;
-        name.setValue(value, { property: prefix, itemIndex });
+        name.setValue(value, { property: prefix2, itemIndex });
         return name;
       }
-      getValue(prefix, keyOrRef) {
-        const vs = this._values[prefix];
+      getValue(prefix2, keyOrRef) {
+        const vs = this._values[prefix2];
         if (!vs)
           return;
         return vs.get(keyOrRef);
@@ -20733,11 +20733,11 @@ var require_scope = __commonJS({
       }
       _reduceValues(values, valueCode, usedValues = {}, getCode) {
         let code = code_1.nil;
-        for (const prefix in values) {
-          const vs = values[prefix];
+        for (const prefix2 in values) {
+          const vs = values[prefix2];
           if (!vs)
             continue;
-          const nameSet = usedValues[prefix] = usedValues[prefix] || /* @__PURE__ */ new Map();
+          const nameSet = usedValues[prefix2] = usedValues[prefix2] || /* @__PURE__ */ new Map();
           vs.forEach((name) => {
             if (nameSet.has(name))
               return;
@@ -21170,12 +21170,12 @@ var require_codegen = __commonJS({
         return this._root.render(this.opts);
       }
       // returns unique name in the internal scope
-      name(prefix) {
-        return this._scope.name(prefix);
+      name(prefix2) {
+        return this._scope.name(prefix2);
       }
       // reserves unique name in the external scope
-      scopeName(prefix) {
-        return this._extScope.name(prefix);
+      scopeName(prefix2) {
+        return this._extScope.name(prefix2);
       }
       // reserves unique name in the external scope and assigns value to it
       scopeValue(prefixOrName, value) {
@@ -21184,8 +21184,8 @@ var require_codegen = __commonJS({
         vs.add(name);
         return name;
       }
-      getScopeValue(prefix, keyOrRef) {
-        return this._extScope.getValue(prefix, keyOrRef);
+      getScopeValue(prefix2, keyOrRef) {
+        return this._extScope.getValue(prefix2, keyOrRef);
       }
       // return code that assigns values in the external scope to the names that are used internally
       // (same names that were returned by gen.scopeName or gen.scopeValue)
@@ -30876,10 +30876,10 @@ var util;
       return obj[e];
     });
   };
-  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object6) => {
+  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object7) => {
     const keys = [];
-    for (const key in object6) {
-      if (Object.prototype.hasOwnProperty.call(object6, key)) {
+    for (const key in object7) {
+      if (Object.prototype.hasOwnProperty.call(object7, key)) {
         keys.push(key);
       }
     }
@@ -35712,11 +35712,11 @@ function parseMapDef(def, refs) {
 
 // ../../node_modules/zod-to-json-schema/dist/esm/parsers/nativeEnum.js
 function parseNativeEnumDef(def) {
-  const object6 = def.values;
+  const object7 = def.values;
   const actualKeys = Object.keys(def.values).filter((key) => {
-    return typeof object6[object6[key]] !== "number";
+    return typeof object7[object7[key]] !== "number";
   });
-  const actualValues = actualKeys.map((key) => object6[key]);
+  const actualValues = actualKeys.map((key) => object7[key]);
   const parsedTypes = Array.from(new Set(actualValues.map((values) => typeof values)));
   return {
     type: parsedTypes.length === 1 ? parsedTypes[0] === "string" ? "string" : "number" : ["string", "number"],
@@ -45008,9 +45008,9 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.5.7",
+    version: "0.5.8",
     stage: "runtime-v2",
-    available: ["bounded-diff-preview", "declared-protected-command-paths", "explicit-task-retry", "snapshot-checkpoint", "git-context-cache", "preparation-progress", "node-activity", "node-process", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
+    available: ["bounded-run-transport", "artifact-pagination", "paged-run-summaries", "bounded-diff-preview", "declared-protected-command-paths", "explicit-task-retry", "snapshot-checkpoint", "git-context-cache", "preparation-progress", "node-activity", "node-process", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: true, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree"], submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
     ui: { available: true, stage: "live", hostIntegration: "requires-version-specific-verification", exampleDataOnly: false, entrypoints: ["thread"], projectChatRequired: true, projectSelection: "fixed-current-chat-project", unassignedContext: "project-guidance-with-actions-disabled", programmaticProjectPath: "explicit-user-authorized-target" },
     recovery: { automatic: false, mode: "launch-order-replay", stoppedAgentsRestart: true },
@@ -45844,12 +45844,12 @@ var CodexAdapter = class {
     const models = [];
     let cursor;
     const cursors = /* @__PURE__ */ new Set();
-    let bytes = 0;
+    let bytes2 = 0;
     do {
       const page = object4(await session.request("model/list", { limit: 100, includeHidden: true, ...cursor ? { cursor } : {} }));
       if (!Array.isArray(page.data)) throw new Error("Codex returned an invalid model catalogue.");
-      bytes += Buffer.byteLength(JSON.stringify(page));
-      if (bytes > maxOutputBytes) throw new Error("Codex model catalogue exceeds the worker output limit.");
+      bytes2 += Buffer.byteLength(JSON.stringify(page));
+      if (bytes2 > maxOutputBytes) throw new Error("Codex model catalogue exceeds the worker output limit.");
       for (const model of page.data) models.push(model);
       cursor = typeof page.nextCursor === "string" ? page.nextCursor : void 0;
       if (cursor && cursors.has(cursor)) throw new Error("Codex model catalogue pagination did not advance.");
@@ -45868,7 +45868,7 @@ var CodexAdapter = class {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.7" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.8" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config2 = object4(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config2, cwd);
@@ -46026,7 +46026,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.7" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.8" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -46257,7 +46257,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.7" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.8" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object4(object4(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== void 0 || request.reasoningEffort !== void 0) {
@@ -46490,9 +46490,9 @@ async function gitCommandPreview(cwd, args, options = {}) {
         }
         digest3.update(chunk);
         if (retainedBytes < limit2) {
-          const prefix = chunk.subarray(0, Math.min(chunk.length, limit2 - retainedBytes));
-          chunks.push(Buffer.from(prefix));
-          retainedBytes += prefix.length;
+          const prefix2 = chunk.subarray(0, Math.min(chunk.length, limit2 - retainedBytes));
+          chunks.push(Buffer.from(prefix2));
+          retainedBytes += prefix2.length;
         }
       });
       child.stderr.on("data", () => {
@@ -46728,9 +46728,9 @@ async function readOnlyGitContextDigest(project) {
 }
 function flattenGitArtifacts(manifest) {
   const result2 = [];
-  const walk = (item, prefix) => {
-    result2.push(...item.ignored.map((file2) => ({ ...file2, path: prefix + file2.path })));
-    for (const child of item.submodules) if (child.manifest) walk(child.manifest, prefix + child.path + "/");
+  const walk = (item, prefix2) => {
+    result2.push(...item.ignored.map((file2) => ({ ...file2, path: prefix2 + file2.path })));
+    for (const child of item.submodules) if (child.manifest) walk(child.manifest, prefix2 + child.path + "/");
   };
   walk(manifest, "");
   return result2.sort((a, b) => a.path.localeCompare(b.path));
@@ -46929,7 +46929,7 @@ async function records(workspace, args) {
   const names = [...new Set((await git(workspace.root, args)).split("\0").filter(Boolean))].sort();
   if (names.length > maxFiles) throw new Error("Maintenance checkout exceeds 100000 files");
   const result2 = [];
-  let bytes = 0;
+  let bytes2 = 0;
   for (const name of names) {
     const file2 = relativeFile(workspace.root, name);
     let stat4;
@@ -46952,8 +46952,8 @@ async function records(workspace, args) {
       await safeArtifactParents(workspace.root, name);
       result2.push({ path: name, kind: "link", mode: stat4.mode & 511, size: stat4.size, hash: hash2(target) });
     } else if (stat4.isFile()) {
-      bytes += stat4.size;
-      if (stat4.size > 512 * 1024 * 1024 || bytes > maxArtifactBytes) throw new Error("Maintenance artifacts exceed the bounded 2 GiB limit");
+      bytes2 += stat4.size;
+      if (stat4.size > 512 * 1024 * 1024 || bytes2 > maxArtifactBytes) throw new Error("Maintenance artifacts exceed the bounded 2 GiB limit");
       const digest3 = createHash3("sha256");
       const descriptor = await open3(file2, constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0));
       try {
@@ -47004,8 +47004,8 @@ async function reviewMaintenance(workspace, plan) {
   const submodules = submoduleStates(await inspectGitManifest(workspace.root, { enforceOwnedMetadata: true }));
   return { base: workspace.git.base, target, branch: workspace.git.branch, ...workspace.git.upstream ? { upstream: workspace.git.upstream } : {}, diff, artifacts, artifactFingerprint, preparedClean, fingerprint: fingerprint({ state, plan }), ...submodules.length ? { submodules } : {} };
 }
-function submoduleStates(manifest, prefix = "") {
-  return manifest.submodules.flatMap((child) => [{ path: prefix + child.path, commit: child.commit, initialized: child.initialized, ...child.manifest ? { head: child.manifest.head } : {} }, ...child.manifest ? submoduleStates(child.manifest, prefix + child.path + "/") : []]);
+function submoduleStates(manifest, prefix2 = "") {
+  return manifest.submodules.flatMap((child) => [{ path: prefix2 + child.path, commit: child.commit, initialized: child.initialized, ...child.manifest ? { head: child.manifest.head } : {} }, ...child.manifest ? submoduleStates(child.manifest, prefix2 + child.path + "/") : []]);
 }
 async function savePrivateJson(filename, value) {
   const temporary = `${filename}.${randomBytes3(6).toString("hex")}.tmp`;
@@ -47027,10 +47027,10 @@ async function validateSourceSubmodules(workspace) {
   const actual = submoduleStates(await inspectGitManifest(workspace.original, { requireClean: true }));
   if (fingerprint(expected) !== fingerprint(actual)) throw new Error("Original Git submodule state changed; create a new preview");
 }
-function manifestRepositories(manifest, prefix = "") {
+function manifestRepositories(manifest, prefix2 = "") {
   const result2 = /* @__PURE__ */ new Map();
   for (const child of manifest.submodules) if (child.manifest) {
-    const name = prefix + child.path;
+    const name = prefix2 + child.path;
     result2.set(name, child.manifest);
     for (const [key, value] of manifestRepositories(child.manifest, name + "/")) result2.set(key, value);
   }
@@ -47139,10 +47139,10 @@ async function saveActivationJournal(filename, journal) {
     await rm3(temporary, { force: true });
   }
 }
-async function retainConfigBackup(filename, bytes) {
+async function retainConfigBackup(filename, bytes2) {
   try {
     const existing = await lstat4(filename);
-    if (!existing.isFile() || existing.isSymbolicLink() || !bytes.equals(await readFile4(filename))) throw new Error("An orphaned activation backup does not match the current config; inspect it before retrying");
+    if (!existing.isFile() || existing.isSymbolicLink() || !bytes2.equals(await readFile4(filename))) throw new Error("An orphaned activation backup does not match the current config; inspect it before retrying");
     await chmod(filename, 384);
     return;
   } catch (error62) {
@@ -47150,7 +47150,7 @@ async function retainConfigBackup(filename, bytes) {
   }
   const temporary = `${filename}.${randomBytes3(8).toString("hex")}.tmp`;
   try {
-    await writeFile3(temporary, bytes, { mode: 384, flag: "wx" });
+    await writeFile3(temporary, bytes2, { mode: 384, flag: "wx" });
     await rename3(temporary, filename);
     await chmod(filename, 384);
   } finally {
@@ -47420,8 +47420,8 @@ function sameIdentity(values, label) {
 }
 function metadataId(meta3, names, nested) {
   const values = names.map((name) => sourceId(meta3[name], name));
-  const object6 = record3(meta3[nested]);
-  if (object6.id !== void 0) values.push(sourceId(object6.id, `${nested}.id`));
+  const object7 = record3(meta3[nested]);
+  if (object7.id !== void 0) values.push(sourceId(object7.id, `${nested}.id`));
   return sameIdentity(values, nested);
 }
 function callerContext(metaValue) {
@@ -47492,11 +47492,11 @@ var pipeResponse = external_exports.union([
 var toolResponse = external_exports.object({ success: external_exports.boolean(), contentItems: external_exports.array(external_exports.object({ type: external_exports.literal("inputText"), text: external_exports.string() })) }).passthrough();
 function frame(value) {
   const json2 = JSON.stringify(value);
-  const bytes = Buffer.byteLength(json2, "utf8");
-  if (bytes > maximumFrameBytes) throw new Error("Codex project request exceeds the 8 MiB pipe limit.");
-  const result2 = Buffer.allocUnsafe(4 + bytes);
-  result2.writeUInt32LE(bytes, 0);
-  result2.write(json2, 4, bytes, "utf8");
+  const bytes2 = Buffer.byteLength(json2, "utf8");
+  if (bytes2 > maximumFrameBytes) throw new Error("Codex project request exceeds the 8 MiB pipe limit.");
+  const result2 = Buffer.allocUnsafe(4 + bytes2);
+  result2.writeUInt32LE(bytes2, 0);
+  result2.write(json2, 4, bytes2, "utf8");
   return result2;
 }
 function toolData(value) {
@@ -47649,7 +47649,7 @@ import { createHash as createHash4, randomBytes as randomBytes5 } from "node:cry
 import { lstat as lstat6, readFile as readFile6, readdir as readdir5, readlink as readlink3, realpath as realpath5, rename as rename5, rm as rm5, writeFile as writeFile5 } from "node:fs/promises";
 import path9 from "node:path";
 var absent = (error62) => error62.code === "ENOENT";
-var sha = (bytes) => createHash4("sha256").update(bytes).digest("hex");
+var sha = (bytes2) => createHash4("sha256").update(bytes2).digest("hex");
 var registryPath = (transaction) => path9.join(transaction, "project-temporaries.json");
 async function safeParents(root, name) {
   let parent = root;
@@ -47846,7 +47846,7 @@ async function privateJson(filename) {
 async function inventory(filename) {
   const entries = [];
   let files2 = 0;
-  let bytes = 0;
+  let bytes2 = 0;
   async function visit2(current2, relative2, depth) {
     if (depth > 128 || entries.length >= 25e4) throw new Error("\u5220\u9664\u8303\u56F4\u8FC7\u5927\uFF0C\u8BF7\u5148\u68C0\u67E5\u8FD0\u884C\u76EE\u5F55");
     const info = await lstat7(current2);
@@ -47855,7 +47855,7 @@ async function inventory(filename) {
       for (const child of (await readdir6(current2)).sort()) await visit2(path10.join(current2, child), path10.join(relative2, child), depth + 1);
     } else {
       files2++;
-      bytes += info.size;
+      bytes2 += info.size;
     }
   }
   try {
@@ -47863,7 +47863,7 @@ async function inventory(filename) {
   } catch (error62) {
     if (!absent2(error62)) throw error62;
   }
-  return { files: files2, bytes, signature: hash3(entries) };
+  return { files: files2, bytes: bytes2, signature: hash3(entries) };
 }
 var DeletionService = class {
   options;
@@ -48012,7 +48012,7 @@ var DeletionService = class {
           try {
             const temporary = await inspectProjectTemporaryFiles(run.workspace);
             for (const item of temporary.owned) {
-              if (!objects.some((object6) => object6.path === item.path)) objects.push({ path: item.path, kind: "project-temp", files: 1, bytes: item.bytes });
+              if (!objects.some((object7) => object7.path === item.path)) objects.push({ path: item.path, kind: "project-temp", files: 1, bytes: item.bytes });
               signatures.push([item.path, (await inventory(item.path)).signature]);
             }
             for (const item of temporary.blocked) blocked.push({ code: "project_temp", runId: run.id, path: item.path, message: item.message });
@@ -48116,9 +48116,9 @@ var DeletionService = class {
       if (!unchanged) result2.blocked.push({ code: "preview_changed", message: "\u5220\u9664\u8303\u56F4\u3001\u8FD0\u884C\u72B6\u6001\u6216\u5F15\u7528\u5DF2\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u9884\u89C8\u5E76\u786E\u8BA4\u5220\u9664\u3002" });
       if (result2.blocked.length) return result2;
       result2.alreadyGone = true;
-      for (const object6 of preview.objects) {
+      for (const object7 of preview.objects) {
         try {
-          await lstat7(object6.path);
+          await lstat7(object7.path);
           result2.alreadyGone = false;
           break;
         } catch (error62) {
@@ -48368,9 +48368,243 @@ function nodeProcess(run, input2) {
   };
 }
 
+// src/run-view.ts
+var KiB = 1024;
+var maximumBytes = 3 * 1024 * KiB;
+var maximumDiffBytes = 256 * KiB;
+var maximumLogBytes = 128 * KiB;
+var maximumNewControlBytes = 2 * 1024 * KiB;
+var controlKeys = ["id", "revision", "meta", "script", "args", "projectPath", "allowWrite", "networkAccess", "allowedMcpServers", "allowedMcpTools", "workspaceMode", "workspace", "workspacePath", "maintenance", "nodeSettings", "limits", "executionSettings", "sourceDefinition", "execution", "review", "application", "deletionPending", "deletionTarget", "scriptDigest", "contextDigest", "workspaceCheckpoint"];
+var TransportProjectionError = class extends Error {
+  code;
+  constructor(code, message2) {
+    super(`${code}: ${message2}`);
+    this.name = "TransportProjectionError";
+    this.code = code;
+  }
+};
+function object6(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+}
+function bytes(value) {
+  return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
+function prefix(value, limit2) {
+  const encoded = Buffer.from(value, "utf8");
+  if (encoded.length <= limit2) return value;
+  let end = Math.max(0, limit2);
+  while (end > 0 && (encoded[end] & 192) === 128) end--;
+  return encoded.subarray(0, end).toString("utf8");
+}
+function serializedRun(run) {
+  try {
+    return JSON.stringify(run);
+  } catch {
+    throw new TransportProjectionError("RUN_NOT_SERIALIZABLE", "The workflow record is not JSON serializable; the stored record was not changed.");
+  }
+}
+function pageNumber(value, fallback, maximum, name) {
+  const result2 = value ?? fallback;
+  if (!Number.isSafeInteger(result2) || result2 < (name === "artifactLimit" ? 1 : 0) || result2 > maximum) throw new TransportProjectionError("INVALID_ARTIFACT_PAGE", `${name} is outside its supported integer range.`);
+  return result2;
+}
+function controlPlane(source) {
+  return Object.fromEntries(controlKeys.filter((key) => Object.hasOwn(source, key)).map((key) => [key, source[key]]));
+}
+function assertControlPlaneTransportable(value) {
+  let size;
+  try {
+    size = bytes(controlPlane(value));
+  } catch {
+    throw new TransportProjectionError("CONTROL_PLANE_NOT_SERIALIZABLE", "Workflow script, input or execution scope is not JSON serializable.");
+  }
+  if (size > maximumNewControlBytes) throw new TransportProjectionError("CONTROL_PLANE_TOO_LARGE", "Workflow script, input or execution scope exceeds the 2 MiB plan transport budget. Move large content to project files or artifacts and pass their references; authorization fields will not be silently truncated.");
+}
+function projectRunForTransport(run, options = {}) {
+  const artifactOffset = pageNumber(options.artifactOffset, 0, Number.MAX_SAFE_INTEGER, "artifactOffset");
+  const artifactLimit = pageNumber(options.artifactLimit, 20, 200, "artifactLimit");
+  const serialized = serializedRun(run);
+  const originalBytes = Buffer.byteLength(serialized, "utf8");
+  if (bytes(controlPlane(run)) > maximumBytes) throw new TransportProjectionError("CONTROL_PLANE_TOO_LARGE", "Workflow script, input or execution scope exceeds 3 MiB. These fields were not truncated; read or revise the complete stored plan before retrying.");
+  const view = JSON.parse(serialized);
+  const fields = /* @__PURE__ */ new Set();
+  const mark = (field) => {
+    fields.add(field);
+  };
+  const text2 = (record5, key, limit2, field) => {
+    if (typeof record5[key] === "string" && Buffer.byteLength(record5[key], "utf8") > limit2) {
+      record5[key] = prefix(record5[key], limit2);
+      mark(field);
+    }
+  };
+  const diff = object6(view.diff);
+  const limitDiff = (limit2) => {
+    if (!diff || typeof diff.text !== "string" || Buffer.byteLength(diff.text, "utf8") <= limit2) return;
+    diff.text = prefix(diff.text, limit2);
+    diff.previewTruncated = true;
+    mark("diff.text");
+  };
+  limitDiff(maximumDiffBytes);
+  const review = object6(view.maintenanceReview);
+  if (review) {
+    const artifacts = Array.isArray(review.artifacts) ? review.artifacts : [];
+    review.artifactCount = artifacts.length;
+    review.artifactOffset = artifactOffset;
+    review.artifacts = artifacts.slice(artifactOffset, artifactOffset + artifactLimit);
+    if (artifactOffset + artifactLimit < artifacts.length) review.nextArtifactOffset = artifactOffset + artifactLimit;
+    else delete review.nextArtifactOffset;
+    if (artifactOffset !== 0 || artifacts.length > artifactLimit) mark("maintenanceReview.artifacts");
+    const duplicate = object6(review.diff);
+    if (duplicate && Object.hasOwn(duplicate, "text")) {
+      delete duplicate.text;
+      mark("maintenanceReview.diff.text");
+    }
+  }
+  const tasks = Array.isArray(view.tasks) ? view.tasks.map(object6).filter((value) => !!value) : [];
+  const attempts = tasks.flatMap((task) => Array.isArray(task.attempts) ? task.attempts.map(object6).filter((value) => !!value) : []);
+  const outputCount = Math.max(1, (Object.hasOwn(view, "result") ? 1 : 0) + tasks.filter((task) => Object.hasOwn(task, "output")).length + attempts.filter((attempt) => Object.hasOwn(attempt, "output")).length);
+  const allOutputFields = [];
+  const activities = [];
+  const previews = /* @__PURE__ */ new WeakSet();
+  const boundOutput = (record5, key, limit2, field) => {
+    if (!Object.hasOwn(record5, key)) return;
+    const value = record5[key], existing = object6(value);
+    if (bytes(value) <= limit2) return;
+    const original = existing && previews.has(existing) ? existing.originalBytes : bytes(value);
+    const json2 = existing && previews.has(existing) ? existing.jsonPreview : JSON.stringify(value);
+    const preview = { transportPreview: true, previewTruncated: true, originalBytes: original, jsonPreview: "" };
+    const overhead = bytes(preview);
+    preview.jsonPreview = prefix(json2, Math.max(0, Math.floor((limit2 - overhead) / 6)));
+    record5[key] = preview;
+    previews.add(preview);
+    mark(field);
+  };
+  const recent = (items, limit2) => {
+    const result2 = [];
+    let size = 2;
+    for (let index = items.length - 1; index >= 0; index--) {
+      const next = bytes(items[index]) + (result2.length ? 1 : 0);
+      if (size + next > limit2) break;
+      result2.push(items[index]);
+      size += next;
+    }
+    return result2.reverse();
+  };
+  const limitLogs = (limit2) => {
+    if (!Array.isArray(view.logs)) return;
+    const logs = view.logs;
+    for (const entry of logs) {
+      const log = object6(entry);
+      if (log) text2(log, "message", 16 * KiB, "logs");
+    }
+    const selected = recent(logs, limit2);
+    if (selected.length !== logs.length) {
+      view.logs = selected;
+      mark("logs");
+    }
+  };
+  limitLogs(maximumLogBytes);
+  text2(view, "error", 16 * KiB, "error");
+  if (Object.hasOwn(view, "result")) allOutputFields.push({ record: view, key: "result", field: "result" });
+  tasks.forEach((task, index) => {
+    const base = `tasks[${index}]`;
+    text2(task, "prompt", Math.min(8 * KiB, Math.max(64, Math.floor(256 * KiB / Math.max(1, tasks.length)))), `${base}.prompt`);
+    text2(task, "error", 4 * KiB, `${base}.error`);
+    if (Object.hasOwn(task, "output")) allOutputFields.push({ record: task, key: "output", field: `${base}.output` });
+    if (Array.isArray(task.attempts)) task.attempts.forEach((value, attemptIndex) => {
+      const attempt = object6(value);
+      if (!attempt) return;
+      const field = `${base}.attempts[${attemptIndex}]`;
+      text2(attempt, "error", 4 * KiB, `${field}.error`);
+      if (Object.hasOwn(attempt, "output")) allOutputFields.push({ record: attempt, key: "output", field: `${field}.output` });
+      if (Array.isArray(attempt.activities)) activities.push({ record: attempt, field: `${field}.activities` });
+    });
+  });
+  for (const entry of allOutputFields) boundOutput(entry.record, entry.key, Math.min(32 * KiB, Math.max(128, Math.floor(512 * KiB / outputCount))), entry.field);
+  for (const entry of activities) {
+    const current2 = entry.record.activities;
+    const selected = recent(current2, Math.max(2, Math.floor(256 * KiB / Math.max(1, activities.length))));
+    if (selected.length !== current2.length) {
+      entry.record.activities = selected;
+      mark(entry.field);
+    }
+  }
+  const metadata = () => {
+    if (!fields.size) return;
+    view.transportProjection = { projected: true, fields: [...fields], originalBytes, projectedBytes: 0, fullRecordRetained: true };
+    const meta3 = view.transportProjection;
+    for (let pass = 0; pass < 3; pass++) {
+      const size = bytes(view);
+      if (meta3.projectedBytes === size) break;
+      meta3.projectedBytes = size;
+    }
+  };
+  metadata();
+  if (bytes(view) > maximumBytes) {
+    limitDiff(64 * KiB);
+    limitLogs(32 * KiB);
+    tasks.forEach((task, index) => text2(task, "prompt", Math.max(64, Math.floor(64 * KiB / Math.max(1, tasks.length))), `tasks[${index}].prompt`));
+    for (const entry of allOutputFields) boundOutput(entry.record, entry.key, Math.max(128, Math.floor(128 * KiB / outputCount)), entry.field);
+    for (const entry of activities) if (entry.record.activities.length) {
+      entry.record.activities = [];
+      mark(entry.field);
+    }
+    metadata();
+  }
+  if (bytes(view) > maximumBytes) throw new TransportProjectionError("RUN_PROJECTION_TOO_LARGE", "Complete task identities, options or review manifests exceed the 3 MiB transport budget. The complete record and its authorization fields were not changed.");
+  return view;
+}
+
 // src/server.ts
 function result(data2) {
   return { content: [{ type: "text", text: JSON.stringify(data2) }], structuredContent: data2 };
+}
+function listSummary(run) {
+  return {
+    id: run.id,
+    revision: run.revision,
+    projectPath: run.projectPath,
+    meta: { name: run.meta.name.slice(0, 128), description: run.meta.description.slice(0, 512) },
+    execution: run.execution,
+    review: run.review,
+    application: run.application,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+    ...run.startedAt ? { startedAt: run.startedAt } : {},
+    ...run.endedAt ? { endedAt: run.endedAt } : {},
+    ...run.progressSequence !== void 0 ? { progressSequence: run.progressSequence } : {},
+    ...run.error ? { error: run.error.slice(0, 180) } : {},
+    ...run.deletionPending !== void 0 ? { deletionPending: run.deletionPending } : {},
+    ...run.deletionTarget ? { deletionTarget: run.deletionTarget } : {},
+    ...run.sourceDefinition ? { sourceDefinition: run.sourceDefinition } : {}
+  };
+}
+function listPage(runs, offset2, limit2) {
+  const page = [];
+  const budget = 3 * 1024 * 1024;
+  let bytes2 = Buffer.byteLength(JSON.stringify({ runs: [], listSummary: true, totalRuns: runs.length, nextOffset: Number.MAX_SAFE_INTEGER }));
+  for (const run of runs.slice(offset2, offset2 + limit2)) {
+    const summary = listSummary(run);
+    const size = Buffer.byteLength(JSON.stringify(summary)) + (page.length ? 1 : 0);
+    if (bytes2 + size > budget) {
+      if (!page.length) throw new Error("Workflow list identity exceeds its transport budget; the original record was preserved.");
+      break;
+    }
+    bytes2 += size;
+    page.push(summary);
+  }
+  const nextOffset = offset2 + page.length;
+  return { runs: page, listSummary: true, totalRuns: runs.length, ...nextOffset < runs.length ? { nextOffset } : {} };
+}
+function acceptedRun(run) {
+  try {
+    return { run: projectRunForTransport(run) };
+  } catch (error62) {
+    return { run: listSummary(run), listSummary: true, operationAccepted: true, projectionError: {
+      code: error62 instanceof TransportProjectionError ? error62.code : "RUN_PROJECTION_FAILED",
+      message: (error62 instanceof Error ? error62.message : "Unable to project this completed operation response.").slice(0, 512)
+    } };
+  }
 }
 var annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 var panelResourceUri = "ui://workflows/panel.html";
@@ -48404,7 +48638,7 @@ function registerPanelToolWithIcons(server2, register) {
   }
 }
 function createServer(engine2, options = {}) {
-  const serverInfo = { name: "workflows", version: "0.5.7", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.5.8", icons: panelIcons };
   const panelHtml = readFileSync3(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);
@@ -48519,22 +48753,31 @@ function createServer(engine2, options = {}) {
     description: "Save a reusable workflow definition in the user's library. Includes script and default input, without a project, run results, or workspace. Load the saved revision to update an existing definition.",
     inputSchema: { script: external_exports.string().min(1), args: external_exports.unknown().optional(), allowWrite: external_exports.boolean().optional(), revision: revision.optional(), limits, ...scope },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }
-  }, async (input2) => safe(async () => ({ template: await templates.save({ ...scopedInput(input2), script: input2.script, ...input2.args !== void 0 ? { args: input2.args } : {}, ...input2.allowWrite !== void 0 ? { allowWrite: input2.allowWrite } : {}, ...input2.revision !== void 0 ? { revision: input2.revision } : {}, ...input2.limits ? { limits: Object.fromEntries(Object.entries(input2.limits).filter(([, value]) => value !== void 0)) } : {} }) })));
+  }, async (input2) => safe(async () => {
+    assertControlPlaneTransportable(input2);
+    return { template: await templates.save({ ...scopedInput(input2), script: input2.script, ...input2.args !== void 0 ? { args: input2.args } : {}, ...input2.allowWrite !== void 0 ? { allowWrite: input2.allowWrite } : {}, ...input2.revision !== void 0 ? { revision: input2.revision } : {}, ...input2.limits ? { limits: Object.fromEntries(Object.entries(input2.limits).filter(([, value]) => value !== void 0)) } : {} }) };
+  }));
   server2.registerTool("workflow_preview", {
     description: "Validate and save a dynamic JavaScript workflow plan. Does not execute. projectPath must be explicit; networkAccess defaults false and is independent of allowWrite: read-only workers may use authorized network access without file writes. workspaceMode defaults snapshot. Declare any optional maintenance argv steps and activation before starting; maintenance operations require an isolated git-worktree and allowWrite; steps default non-idempotent, and unknown started-command outcomes cannot be replayed unless explicitly declared idempotent; allowedMcpServers is an explicit configured-server allowlist, default none, and cannot include Workflows. allowedMcpTools maps server names to granted configured tool names; grants do not bypass tool approvals.",
     inputSchema: { projectPath: external_exports.string().min(1), script: external_exports.string().min(1), args: external_exports.unknown().optional(), allowWrite: external_exports.boolean().optional(), sourceDefinition, limits, ...scope },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }
   }, async (input2) => safe(async () => {
+    assertControlPlaneTransportable(input2);
     const source = await verifiedDefinition(input2.sourceDefinition, input2.script);
-    return { run: await engine2.preview({ ...scopedInput({ ...input2, networkAccess: input2.networkAccess ?? false, allowedMcpServers: input2.allowedMcpServers ?? [], allowedMcpTools: input2.allowedMcpTools ?? {}, workspaceMode: input2.workspaceMode ?? "snapshot" }), projectPath: input2.projectPath, script: input2.script, ...source ? { sourceDefinition: source } : {}, ...input2.args !== void 0 ? { args: input2.args } : {}, ...input2.allowWrite !== void 0 ? { allowWrite: input2.allowWrite } : {}, ...input2.limits ? { limits: Object.fromEntries(Object.entries(input2.limits).filter(([, value]) => value !== void 0)) } : {} }) };
+    return acceptedRun(await engine2.preview({ ...scopedInput({ ...input2, networkAccess: input2.networkAccess ?? false, allowedMcpServers: input2.allowedMcpServers ?? [], allowedMcpTools: input2.allowedMcpTools ?? {}, workspaceMode: input2.workspaceMode ?? "snapshot" }), projectPath: input2.projectPath, script: input2.script, ...source ? { sourceDefinition: source } : {}, ...input2.args !== void 0 ? { args: input2.args } : {}, ...input2.allowWrite !== void 0 ? { allowWrite: input2.allowWrite } : {}, ...input2.limits ? { limits: Object.fromEntries(Object.entries(input2.limits).filter(([, value]) => value !== void 0)) } : {} }));
   }));
   server2.registerTool("workflow_update", {
     description: "Save an updated script and input for a stopped or draft workflow. Requires a fresh preview revision and another user start.",
     inputSchema: { id, revision, script: external_exports.string().min(1), args: external_exports.unknown(), allowWrite: external_exports.boolean().optional(), ...scope },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }
-  }, async (input2) => safe(async () => ({ run: await engine2.update({ ...scopedInput(input2), id: input2.id, revision: input2.revision, script: input2.script, args: input2.args, ...input2.allowWrite !== void 0 ? { allowWrite: input2.allowWrite } : {} }) })));
-  server2.registerTool("workflow_list_runs", { description: "List saved workflow runs without starting or resuming them.", inputSchema: { projectPath: external_exports.string().optional() }, annotations }, async (input2) => safe(async () => ({ runs: await engine2.list(input2.projectPath) })));
-  server2.registerTool("workflow_get_run", { description: "Read a workflow plan, real tasks, reports, final diff, and logs.", inputSchema: { id }, annotations }, async (input2) => safe(async () => ({ run: await engine2.get(input2.id) })));
+  }, async (input2) => safe(async () => {
+    const existing = await engine2.get(input2.id);
+    const supplied = Object.fromEntries(Object.entries(input2).filter(([, value]) => value !== void 0));
+    assertControlPlaneTransportable({ ...existing, ...supplied });
+    return acceptedRun(await engine2.update({ ...scopedInput(input2), id: input2.id, revision: input2.revision, script: input2.script, args: input2.args, ...input2.allowWrite !== void 0 ? { allowWrite: input2.allowWrite } : {} }));
+  }));
+  server2.registerTool("workflow_list_runs", { description: "List bounded, paged run summaries without starting or resuming them. Summaries omit execution inputs and details; use workflow_get_run before inspecting or controlling a selected run.", inputSchema: { projectPath: external_exports.string().optional(), offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(200).optional() }, annotations }, async (input2) => safe(async () => listPage(await engine2.list(input2.projectPath), input2.offset ?? 0, input2.limit ?? 100)));
+  server2.registerTool("workflow_get_run", { description: "Read a workflow's complete control scope with bounded transport views of tasks, logs and diff. Artifact pages use artifactOffset and artifactLimit; omitted artifacts and display previews never replace the stored review used for application.", inputSchema: { id, artifactOffset: external_exports.number().int().nonnegative().optional(), artifactLimit: external_exports.number().int().min(1).max(200).optional() }, annotations }, async (input2) => safe(async () => ({ run: projectRunForTransport(await engine2.get(input2.id), { ...input2.artifactOffset !== void 0 ? { artifactOffset: input2.artifactOffset } : {}, ...input2.artifactLimit !== void 0 ? { artifactLimit: input2.artifactLimit } : {} }) })));
   server2.registerTool("workflow_get_node_process", {
     title: "\u67E5\u770B\u8282\u70B9\u8FC7\u7A0B",
     description: "Read concise node or phase activities and errors. Brief view excludes task prompts and raw diagnostics; developer detail explicitly adds bounded node logs. Does not execute a workflow.",
@@ -48560,7 +48803,7 @@ function createServer(engine2, options = {}) {
     if (value.deletedRunIds.length) engine2.forgetDeletedRuns(value.deletedRunIds);
     return { deletion: value };
   }));
-  server2.registerTool("workflow_stop", { description: "Stop dispatch, interrupt all active workers, wait for their exit, and save progress.", inputSchema: { id }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async (input2) => safe(async () => ({ run: await engine2.stop(input2.id) })));
+  server2.registerTool("workflow_stop", { description: "Stop dispatch, interrupt all active workers, wait for their exit, and save progress.", inputSchema: { id }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async (input2) => safe(async () => acceptedRun(await engine2.stop(input2.id))));
   const appOnly = { ui: { visibility: ["app"] } };
   server2.registerTool("workflow_panel_lease", { description: "Maintain the task panel lifecycle lease; losing the lease stops its active workflows.", inputSchema: { leaseId: external_exports.string().optional(), release: external_exports.boolean().optional() }, _meta: appOnly, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async (input2) => safe(() => engine2.lease({ ...input2.leaseId ? { leaseId: input2.leaseId } : {}, ...input2.release !== void 0 ? { release: input2.release } : {} })));
   for (const action of ["start", "resume"]) server2.registerTool(`workflow_${action}`, {
@@ -48568,9 +48811,9 @@ function createServer(engine2, options = {}) {
     inputSchema: { id, revision, leaseId: external_exports.string().min(1).optional(), ...action === "resume" ? { retryFromTaskId: external_exports.string().regex(/^task_[1-9][0-9]*$/).optional() } : {} },
     _meta: { ui: { visibility: ["model", "app"] } },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }
-  }, async (input2) => safe(async () => ({ run: await engine2.start({ id: input2.id, revision: input2.revision, ...input2.leaseId ? { leaseId: input2.leaseId } : {}, ..."retryFromTaskId" in input2 && typeof input2.retryFromTaskId === "string" ? { retryFromTaskId: input2.retryFromTaskId } : {} }, action === "resume") })));
-  server2.registerTool("workflow_cancel_task", { description: "Cancel one active task on the user request. The script can handle its failure; other tasks keep running.", inputSchema: { id, taskId: external_exports.string().min(1) }, _meta: { ui: { visibility: ["model", "app"] } }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async (input2) => safe(async () => ({ run: await engine2.cancelTask(input2.id, input2.taskId) })));
-  server2.registerTool("workflow_apply", { description: "Apply the final reviewed changes when the user has authorized application. Requires the current revision and completed review; detects baseline conflicts and retains project edits. Maintenance activation uses only its predeclared command.", inputSchema: { id, revision }, _meta: { ui: { visibility: ["model", "app"] } }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } }, async (input2) => safe(async () => ({ run: await engine2.apply(input2.id, input2.revision) })));
+  }, async (input2) => safe(async () => acceptedRun(await engine2.start({ id: input2.id, revision: input2.revision, ...input2.leaseId ? { leaseId: input2.leaseId } : {}, ..."retryFromTaskId" in input2 && typeof input2.retryFromTaskId === "string" ? { retryFromTaskId: input2.retryFromTaskId } : {} }, action === "resume"))));
+  server2.registerTool("workflow_cancel_task", { description: "Cancel one active task on the user request. The script can handle its failure; other tasks keep running.", inputSchema: { id, taskId: external_exports.string().min(1) }, _meta: { ui: { visibility: ["model", "app"] } }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async (input2) => safe(async () => acceptedRun(await engine2.cancelTask(input2.id, input2.taskId))));
+  server2.registerTool("workflow_apply", { description: "Apply the final reviewed changes when the user has authorized application. Requires the current revision and completed review; detects baseline conflicts and retains project edits. Maintenance activation uses only its predeclared command.", inputSchema: { id, revision }, _meta: { ui: { visibility: ["model", "app"] } }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } }, async (input2) => safe(async () => acceptedRun(await engine2.apply(input2.id, input2.revision))));
   return server2;
 }
 
@@ -48637,7 +48880,7 @@ async function snapshotFingerprint(workspace, signal) {
   const root = await realpath7(workspace.root);
   await assertOwnedGit(root);
   const digest3 = createHash6("sha256");
-  let files2 = 0, directories = 0, bytes = 0;
+  let files2 = 0, directories = 0, bytes2 = 0;
   const append = (value) => {
     digest3.update(JSON.stringify(value));
     digest3.update("\n");
@@ -48670,8 +48913,8 @@ async function snapshotFingerprint(workspace, signal) {
       const after = await lstat8(filename);
       if (!after.isDirectory() || after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || await realpath7(filename) !== filename || JSON.stringify(names) !== JSON.stringify((await readdir7(filename)).sort())) throw new Error("Snapshot directory changed during checkpoint hashing");
     } else if (before.isFile()) {
-      bytes += before.size;
-      if (++files2 > maxFiles2 || before.size > maxFileBytes || bytes > maxBytes) throw new Error("Snapshot checkpoint exceeds its bounded 100000-file, 512 MiB per file or 2 GiB total limit");
+      bytes2 += before.size;
+      if (++files2 > maxFiles2 || before.size > maxFileBytes || bytes2 > maxBytes) throw new Error("Snapshot checkpoint exceeds its bounded 100000-file, 512 MiB per file or 2 GiB total limit");
       const descriptor = await open4(filename, constants3.O_RDONLY | (constants3.O_NOFOLLOW ?? 0));
       try {
         const opened = await descriptor.stat();

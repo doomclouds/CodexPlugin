@@ -75,6 +75,7 @@ export interface WorkflowDiff {
 }
 
 export interface WorkflowRun {
+  listSummary?: false;
   failureContext?: WorkflowFailureContext;
   stopReason?: WorkflowStopReason;
   deletionPending?: boolean;
@@ -114,6 +115,9 @@ export interface WorkflowRun {
   workspacePath?: string;
 }
 
+export type WorkflowRunSummary = Pick<WorkflowRun, "id" | "revision" | "progressSequence" | "projectPath" | "meta" | "execution" | "review" | "application" | "createdAt" | "updatedAt" | "startedAt" | "endedAt" | "sourceDefinition" | "deletionPending" | "deletionTarget" | "failureContext" | "stopReason" | "error"> & { listSummary: true };
+export type WorkflowListItem = WorkflowRun | WorkflowRunSummary;
+
 export interface ToolResponse {
   structuredContent?: unknown;
   content?: Array<{ type: string; text?: string | undefined }> | undefined;
@@ -148,7 +152,11 @@ export interface WorkflowInput { sourceDefinition?: { id: string; revision?: num
 export interface PanelState {
   connection: "offline" | "connecting" | "connected" | "degraded" | "closed";
   reconnecting: boolean;
-  runs: WorkflowRun[];
+  runs: WorkflowListItem[];
+  detailsBusy?: boolean;
+  runTotal?: number;
+  runNextOffset?: number | undefined;
+  historyBusy?: boolean;
   templates: TemplateSummary[];
   templatesLoaded: boolean;
   selectedTemplate: string | undefined;
@@ -270,6 +278,13 @@ function parseRun(value: unknown): WorkflowRun {
   return candidate as WorkflowRun;
 }
 
+export function parseRunSummary(value: unknown): WorkflowRunSummary {
+  if (!value || typeof value !== "object") throw new Error("工作流工具未返回运行摘要");
+  const candidate = value as Partial<WorkflowRunSummary>;
+  if (typeof candidate.id !== "string" || typeof candidate.revision !== "number" || typeof candidate.projectPath !== "string" || typeof candidate.meta?.name !== "string" || typeof candidate.execution !== "string") throw new Error("运行摘要缺少必要字段");
+  return { ...candidate, listSummary: true } as WorkflowRunSummary;
+}
+
 export function canApply(run: WorkflowRun, tab: PanelTab): boolean {
   return !run.deletionPending && tab === "diff" && run.execution === "completed" && (!!run.diff?.files.length || run.maintenanceReview !== undefined || run.activation !== undefined) && ["none", "partial", "conflict", "failed"].includes(run.application);
 }
@@ -304,6 +319,12 @@ export class WorkflowPanelController {
   private templateRequest = 0;
   private settingsRequest = 0;
   private projectsRequest = 0;
+  private detailRequest = 0;
+  private firstPageIds = new Set<string>();
+  private listedProject: string | undefined;
+  private acceptedProjection = new Map<string, string>();
+  private unresolvedDetails = new Set<string>();
+  private latestSummaries = new Map<string, WorkflowRunSummary>();
 
   constructor(callTool: ToolCaller, changed: () => void = () => {}, every = (callback: () => void, milliseconds: number): (() => void) => {
     const timer = setInterval(callback, milliseconds);
@@ -315,10 +336,12 @@ export class WorkflowPanelController {
     this.every = every;
   }
 
-  get selected(): WorkflowRun | undefined { return this.state.runs.find(run => run.id === this.state.selectedRun); }
+  get selected(): WorkflowRun | undefined { return this.state.runs.find((run): run is WorkflowRun => run.id === this.state.selectedRun && run.listSummary !== true); }
+  get selectedSummary(): WorkflowRunSummary | undefined { return this.state.runs.find((run): run is WorkflowRunSummary => run.id === this.state.selectedRun && run.listSummary === true); }
+  get stopTarget(): WorkflowListItem | undefined { return this.unresolvedDetails.has(this.state.selectedRun ?? "") ? this.latestSummaries.get(this.state.selectedRun ?? "") ?? this.selectedSummary ?? this.selected : this.selected ?? this.selectedSummary; }
   get currentProject(): CodexProject | undefined { return this.state.projectsLoaded && this.state.projectContextSource === "thread" ? this.state.projects.find(project => project.projectId === this.state.currentProjectId) : undefined; }
   get projectBound(): boolean { const project = this.currentProject; return !!project && this.state.selectedProjectId === project.projectId && this.state.projectPath === project.path; }
-  get canAct(): boolean { return this.projectBound && (!this.selected || this.selected.projectPath === this.state.projectPath) && this.state.connection === "connected" && !this.state.reconnecting && !this.initializing && !this.state.busy && !this.closing; }
+  get canAct(): boolean { return this.projectBound && !this.selectedSummary && !this.unresolvedDetails.has(this.state.selectedRun ?? "") && !this.state.detailsBusy && (!this.selected || this.selected.projectPath === this.state.projectPath) && this.state.connection === "connected" && !this.state.reconnecting && !this.initializing && !this.state.busy && !this.closing; }
 
   setProjectPath(projectPath: string): void {
     // A tool argument is a hint, never evidence of the current chat's project.
@@ -343,7 +366,7 @@ export class WorkflowPanelController {
       this.state.projectPath = project?.path ?? "";
       if (!project) { this.state.runs = []; this.state.selectedRun = undefined; this.state.projectsError = data.available ? "工作流仅在项目聊天中使用，请从项目内打开。" : `暂时无法确认所属项目：${data.reason || "宿主项目接口不可用"}。请从项目聊天打开并刷新。`; return; }
       this.state.runs = this.state.runs.filter(run => run.projectPath === project.path);
-      if (!this.selected) this.state.selectedRun = undefined;
+      if (!this.state.runs.some(run => run.id === this.state.selectedRun)) this.state.selectedRun = undefined;
     } catch (error) { if (!this.closing && request === this.projectsRequest) { this.state.currentProjectId = undefined; this.state.selectedProjectId = undefined; this.state.projectContextSource = "global-or-unassigned"; this.state.projectPath = ""; this.state.projectsError = `暂时无法确认所属项目：${errorMessage(error)}。请从项目聊天打开并刷新。`; } }
     finally { if (request === this.projectsRequest) this.state.projectsBusy = false; this.changed(); }
   }
@@ -413,7 +436,16 @@ export class WorkflowPanelController {
     const index = this.state.runs.findIndex(existing => existing.id === run.id);
     if (index < 0) this.state.runs.unshift(run);
     else if (this.state.runs[index]!.revision < run.revision || this.state.runs[index]!.revision === run.revision && (this.state.runs[index]!.progressSequence ?? 0) <= (run.progressSequence ?? 0)) this.state.runs[index] = run;
+    const latest = this.latestSummaries.get(run.id);
+    if (!latest || run.revision > latest.revision || run.revision === latest.revision && (run.progressSequence ?? 0) >= (latest.progressSequence ?? 0)) this.unresolvedDetails.delete(run.id);
     this.changed();
+  }
+
+  private rememberSummary(run: WorkflowRunSummary): void {
+    const previous = this.latestSummaries.get(run.id);
+    if (!previous || run.revision > previous.revision || run.revision === previous.revision && (run.progressSequence ?? 0) >= (previous.progressSequence ?? 0)) this.latestSummaries.set(run.id, run);
+    const detail = this.state.runs.find(item => item.id === run.id && item.listSummary !== true);
+    if (detail && (run.revision > detail.revision || run.revision === detail.revision && (run.progressSequence ?? 0) > (detail.progressSequence ?? 0))) this.unresolvedDetails.add(run.id);
   }
 
   receive(response: ToolResponse): void {
@@ -484,6 +516,7 @@ export class WorkflowPanelController {
   async refresh(force = false): Promise<boolean> {
     if (!this.projectBound) return true;
     const projectPath = this.state.selectedProjectId ? this.state.projectPath : "";
+    if (this.listedProject !== projectPath) { this.listedProject = projectPath; this.firstPageIds.clear(); this.state.runNextOffset = undefined; this.state.runTotal = 0; }
     if (this.closing || !force && (this.pollingProject === projectPath || this.state.connection !== "connected" || this.state.reconnecting)) return false;
     const request = ++this.pollRequest;
     this.pollingProject = projectPath;
@@ -493,19 +526,47 @@ export class WorkflowPanelController {
       if (this.closing || request !== this.pollRequest) return false;
       if (projectPath !== (this.state.selectedProjectId ? this.state.projectPath : "")) return false;
       if (!Array.isArray(data.runs)) throw new Error("宿主未返回运行列表");
-      const runs = data.runs.map(parseRun).filter(run => run.projectPath === projectPath);
+      const runs: WorkflowListItem[] = data.runs.map(value => data.listSummary === true ? parseRunSummary(value) : parseRun(value)).filter(run => run.projectPath === projectPath);
+      for (const run of runs) if (run.listSummary) this.rememberSummary(run);
+      const selectedListing = runs.find(run => run.id === this.state.selectedRun);
       // Keep the newer response when polling overlaps an explicit action.
       const createdDuringPoll = this.state.runs.filter(run => !knownRuns.has(run.id) && !runs.some(item => item.id === run.id));
       this.state.runs = [...createdDuringPoll, ...runs.map(run => {
         const existing = this.state.runs.find(item => item.id === run.id);
+        if (run.listSummary && existing?.listSummary !== true && existing) return existing;
         return existing && (existing.revision > run.revision || existing.revision === run.revision && (existing.progressSequence ?? 0) > (run.progressSequence ?? 0)) ? existing : run;
-      })];
+      }), ...this.state.runs.filter(run => data.listSummary === true && knownRuns.has(run.id) && !runs.some(item => item.id === run.id) && (!this.firstPageIds.has(run.id) || run.id === this.state.selectedRun))];
+      this.firstPageIds = new Set(runs.map(run => run.id));
+      this.state.runTotal = typeof data.totalRuns === "number" ? data.totalRuns : this.state.runs.length;
+      const pageNext = typeof data.nextOffset === "number" ? data.nextOffset : undefined;
+      this.state.runNextOffset = pageNext === undefined || this.state.runs.length >= this.state.runTotal ? undefined : Math.max(this.state.runNextOffset ?? 0, pageNext);
       if (!this.definitionSelected && !this.state.runs.some(run => run.id === this.state.selectedRun)) this.state.selectedRun = this.state.runs[0]?.id;
       if (this.state.error.startsWith("宿主连接中断：")) this.state.error = "";
       this.changed();
+      const detail = this.selected;
+      if (this.selectedSummary || selectedListing && detail && (selectedListing.revision > detail.revision || (selectedListing.progressSequence ?? 0) > (detail.progressSequence ?? 0))) await this.loadDetails(this.state.selectedRun!, selectedListing);
       return true;
     } catch (error) { if (request === this.pollRequest) this.disconnected(error); return false; }
     finally { if (request === this.pollRequest) this.pollingProject = undefined; }
+  }
+
+  async loadMoreRuns(): Promise<void> {
+    if (!this.projectBound || this.state.historyBusy || this.state.runNextOffset === undefined) return;
+    const projectPath = this.state.projectPath, offset = this.state.runNextOffset;
+    this.state.historyBusy = true; this.changed();
+    try {
+      const data = await this.request("workflow_list_runs", { projectPath, offset, limit: 100 });
+      if (this.closing || this.state.projectPath !== projectPath) return;
+      if (!Array.isArray(data.runs)) throw new Error("宿主未返回运行摘要页");
+      for (const value of data.runs) {
+        const run = data.listSummary === true ? parseRunSummary(value) : parseRun(value);
+        if (run.listSummary && run.projectPath === projectPath) this.rememberSummary(run);
+        if (run.projectPath === projectPath && !this.state.runs.some(item => item.id === run.id)) this.state.runs.push(run);
+      }
+      this.state.runTotal = typeof data.totalRuns === "number" ? data.totalRuns : this.state.runs.length;
+      this.state.runNextOffset = typeof data.nextOffset === "number" && data.nextOffset > offset ? data.nextOffset : undefined;
+    } catch (error) { this.state.error = `读取更多运行失败：${errorMessage(error)}`; }
+    finally { this.state.historyBusy = false; this.changed(); }
   }
 
   async refreshTemplates(): Promise<void> {
@@ -615,10 +676,49 @@ export class WorkflowPanelController {
     const cached = this.selected;
     if (cached) this.useRunProject(cached);
     this.changed();
+    await this.loadDetails(id);
+  }
+
+  private async loadDetails(id: string, minimum?: Pick<WorkflowListItem, "revision" | "progressSequence">): Promise<void> {
+    const request = ++this.detailRequest;
+    const expected = minimum ?? this.state.runs.find(run => run.id === id);
+    this.unresolvedDetails.add(id);
+    this.state.detailsBusy = true; this.changed();
     try {
       const run = parseRun((await this.request("workflow_get_run", { id })).run);
-      if (!this.closing && this.state.selectedRun === id) { this.useRunProject(run); this.replace(run); }
-    } catch (error) { if (!this.closing && this.state.selectedRun === id) { this.state.error = errorMessage(error); this.changed(); } }
+      const latest = this.latestSummaries.get(id);
+      if ([expected, latest].some(required => required && (run.revision < required.revision || run.revision === required.revision && (run.progressSequence ?? 0) < (required.progressSequence ?? 0)))) throw new Error("详情版本落后于已确认摘要，请刷新后重试。");
+      if (!this.closing && request === this.detailRequest && this.state.selectedRun === id) { this.useRunProject(run); this.replace(run); this.unresolvedDetails.delete(id); const accepted = this.acceptedProjection.get(id); this.acceptedProjection.delete(id); if (accepted && this.state.error.startsWith(accepted)) this.state.error = ""; }
+    } catch (error) { if (!this.closing && request === this.detailRequest && this.state.selectedRun === id) this.state.error = `${this.acceptedProjection.get(id) ? this.acceptedProjection.get(id) + " " : ""}读取运行详情失败：${errorMessage(error)}。完整详情确认前不会重复启动、编辑或应用。`; }
+    finally { if (request === this.detailRequest) { this.state.detailsBusy = false; this.changed(); } }
+  }
+
+  private async mutationRun(data: Record<string, unknown>, select = false): Promise<WorkflowRun | undefined> {
+    if (data.operationAccepted !== true || data.listSummary !== true) return parseRun(data.run);
+    const summary = parseRunSummary(data.run);
+    if (!this.projectBound || summary.projectPath !== this.state.projectPath) { this.state.error = "操作已接受，请从目标项目聊天核对结果；当前面板不改变项目归属。"; this.changed(); return undefined; }
+    const projection = data.projectionError as { message?: unknown } | undefined;
+    const notice = `操作已接受，当前结果仅为摘要。${typeof projection?.message === "string" ? failureErrorSummary(projection.message) : "完整详情暂时无法读取。"}`;
+    this.acceptedProjection.set(summary.id, notice);
+    this.rememberSummary(summary);
+    this.unresolvedDetails.add(summary.id);
+    const index = this.state.runs.findIndex(run => run.id === summary.id);
+    if (index < 0) this.state.runs.unshift(summary);
+    else if (this.state.runs[index]!.revision <= summary.revision) this.state.runs[index] = summary;
+    if (select) { this.definitionSelected = false; this.state.selectedRun = summary.id; }
+    this.state.error = notice; this.changed();
+    if (this.state.selectedRun === summary.id) await this.loadDetails(summary.id);
+    return this.selected?.id === summary.id ? this.selected : undefined;
+  }
+
+  async readArtifactPage(offset: number): Promise<ReturnType<typeof summarizeMaintenanceReview>> {
+    const run = this.selected;
+    if (!run || !this.projectBound || !Number.isSafeInteger(offset) || offset < 0) throw new Error("请先读取当前项目的完整运行详情。");
+    const expected = summarizeMaintenanceReview(run.maintenanceReview);
+    const paged = parseRun((await this.request("workflow_get_run", { id: run.id, artifactOffset: offset, artifactLimit: 100 })).run);
+    const page = summarizeMaintenanceReview(paged.maintenanceReview, 200);
+    if (this.selected?.id !== run.id || this.selected.revision !== run.revision || paged.id !== run.id || paged.revision !== run.revision || page.artifactOffset !== offset || page.artifactCount !== expected.artifactCount || page.fingerprint !== expected.fingerprint || page.artifactFingerprint !== expected.artifactFingerprint) throw new Error("产物清单已变化，请刷新运行后重新查看。");
+    return page;
   }
 
   async save(input: WorkflowInput, edit?: { id: string; revision: number }): Promise<WorkflowRun | undefined> {
@@ -630,7 +730,8 @@ export class WorkflowPanelController {
     this.changed();
     try {
       const args: Record<string, unknown> = edit ? { id: edit.id, revision: edit.revision, script: input.script, args: input.args, allowWrite: input.allowWrite, ...(input.networkAccess !== undefined ? { networkAccess: input.networkAccess } : {}), ...(input.allowedMcpServers ? { allowedMcpServers: input.allowedMcpServers } : {}), ...(input.allowedMcpTools ? { allowedMcpTools: input.allowedMcpTools } : {}), ...(input.workspaceMode ? { workspaceMode: input.workspaceMode } : {}), ...(input.maintenance ? { maintenance: input.maintenance } : {}), ...(input.nodeSettings ? { nodeSettings: input.nodeSettings } : {}) } : { ...input };
-      const run = parseRun((await this.request(edit ? "workflow_update" : "workflow_preview", args)).run);
+      const run = await this.mutationRun(await this.request(edit ? "workflow_update" : "workflow_preview", args), true);
+      if (!run) return undefined;
       this.useRunProject(run);
       this.definitionSelected = false;
       this.state.selectedRun = run.id;
@@ -661,14 +762,15 @@ export class WorkflowPanelController {
   }
 
   async perform(action: UserAction, _userGesture = false, taskId?: string): Promise<void> {
-    const run = this.selected;
-    if (!run || !this.canAct || run.deletionPending) return;
+    const detail = this.selected, run = action === "stop" ? this.stopTarget : detail;
+    const allowed = action === "stop" ? this.projectBound && this.state.connection === "connected" && !this.state.reconnecting && !this.state.busy && !this.closing : this.canAct;
+    if (!run || !allowed || run.deletionPending) return;
     if (action === "start" && run.execution !== "draft") return;
     if (action === "resume" && !["stopped", "failed"].includes(run.execution)) return;
     if (action === "stop" && !["preparing", "running"].includes(run.execution)) return;
-    if (action === "apply" && !canApply(run, this.state.tab)) return;
-    if (action === "cancel" && (run.execution !== "running" || !taskId || !run.tasks.some(task => task.id === taskId && ["queued", "running"].includes(task.status)))) return;
-    if (action === "resume" && taskId && !run.tasks.some(task => task.id === taskId)) return;
+    if (action === "apply" && (!detail || !canApply(detail, this.state.tab))) return;
+    if (action === "cancel" && (!detail || run.execution !== "running" || !taskId || !detail.tasks.some(task => task.id === taskId && ["queued", "running"].includes(task.status)))) return;
+    if (action === "resume" && taskId && !detail?.tasks.some(task => task.id === taskId)) return;
     const args: Record<string, unknown> = { id: run.id };
     if (["start", "resume", "apply"].includes(action)) args.revision = run.revision;
     if (["start", "resume"].includes(action)) {
@@ -682,8 +784,8 @@ export class WorkflowPanelController {
     this.state.error = "";
     this.changed();
     try {
-      const updated = parseRun((await this.request(action === "cancel" ? "workflow_cancel_task" : `workflow_${action}`, args)).run);
-      this.replace(updated);
+      const updated = await this.mutationRun(await this.request(action === "cancel" ? "workflow_cancel_task" : `workflow_${action}`, args));
+      if (updated) this.replace(updated);
     } catch (error) { this.state.error = actionError("操作失败", error, action); }
     finally { this.state.busy = false; this.changed(); }
   }
@@ -731,9 +833,10 @@ export function bindObservedNodeChoice(key: string, choice: ExecutionChoice, tas
 function formatted(value: unknown): string { return typeof value === "string" ? value : JSON.stringify(value, null, 2) ?? ""; }
 function displayTime(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleTimeString("zh-CN", { hour12: false }); }
 
-export function summarizeMaintenanceReview(value: unknown): {
+export function summarizeMaintenanceReview(value: unknown, maximumArtifacts = 30): {
   base: string; target: string; branch: string; preparedClean: boolean | undefined;
   artifactCount: number; artifactFingerprint: string; fingerprint: string;
+  artifactOffset: number; nextArtifactOffset?: number;
   artifacts: Array<{ path: string; size?: number; kind?: string }>;
 } {
   const review = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -741,8 +844,11 @@ export function summarizeMaintenanceReview(value: unknown): {
   const text = (key: string): string => typeof review[key] === "string" ? review[key] : "";
   return {
     base: text("base"), target: text("target"), branch: text("branch"), preparedClean: typeof review.preparedClean === "boolean" ? review.preparedClean : undefined,
-    artifactCount: artifacts.length, artifactFingerprint: text("artifactFingerprint"), fingerprint: text("fingerprint"),
-    artifacts: artifacts.slice(0, 30).map((value: unknown) => {
+    artifactCount: Number.isSafeInteger(review.artifactCount) && Number(review.artifactCount) >= 0 ? Number(review.artifactCount) : artifacts.length,
+    artifactOffset: Number.isSafeInteger(review.artifactOffset) && Number(review.artifactOffset) >= 0 ? Number(review.artifactOffset) : 0,
+    ...(Number.isSafeInteger(review.nextArtifactOffset) && Number(review.nextArtifactOffset) >= 0 ? { nextArtifactOffset: Number(review.nextArtifactOffset) } : {}),
+    artifactFingerprint: text("artifactFingerprint"), fingerprint: text("fingerprint"),
+    artifacts: artifacts.slice(0, Math.max(0, Math.min(200, maximumArtifacts))).map((value: unknown) => {
       const artifact = value && typeof value === "object" ? value as Record<string, unknown> : {};
       return { path: typeof artifact.path === "string" ? artifact.path : "未知路径", ...(typeof artifact.size === "number" ? { size: artifact.size } : {}), ...(typeof artifact.kind === "string" ? { kind: artifact.kind } : {}) };
     }),
@@ -752,11 +858,16 @@ export function summarizeMaintenanceReview(value: unknown): {
 export function maintenanceProtectedPathsSummary(plan?: MaintenancePlan): string {
   return (plan?.steps ?? []).filter(step => step.protectedPaths?.length).map(step => `${step.id}：${step.protectedPaths!.join("、")}`).join("；");
 }
-function maintenanceReview(run: WorkflowRun): string {
+export function renderMaintenanceArtifacts(value: unknown, maximumArtifacts = 30): string {
+  const page = summarizeMaintenanceReview(value, maximumArtifacts);
+  if (!page.artifactCount) return "";
+  return `<details data-detail="maintenance-artifacts"><summary>构建产物（当前 ${page.artifacts.length} 项 / 共 ${page.artifactCount} 项）</summary><pre>${escapeHtml(jsonInput(page.artifacts))}</pre><p class="wf-muted">当前显示第 ${page.artifacts.length ? page.artifactOffset + 1 : 0}—${page.artifactOffset + page.artifacts.length} 项，共 ${page.artifactCount} 项。完整清单按页读取，保存的审查指纹保持不变。</p>${page.artifactOffset > 0 ? '<button type="button" data-artifact-offset="0">返回产物首页</button>' : ""}${page.nextArtifactOffset !== undefined ? `<button type="button" data-artifact-offset="${page.nextArtifactOffset}">下一页产物</button>` : ""}<span class="wf-muted" id="wf-artifact-page-status" role="status"></span></details>`;
+}
+function maintenanceReview(run: WorkflowRun, artifactPage?: unknown): string {
   if (run.maintenanceReview === undefined) return "";
   const review = summarizeMaintenanceReview(run.maintenanceReview);
   const protectedPaths = maintenanceProtectedPathsSummary(run.maintenance);
-  return `<h3 class="wf-section-title">维护审查</h3><div class="wf-facts"><span>分支 ${escapeHtml(review.branch || "未提供")}</span><span>基线 ${escapeHtml(review.base.slice(0, 12) || "未提供")} → ${escapeHtml(review.target.slice(0, 12) || "未提供")}</span><span>构建产物 ${review.artifactCount} 项</span><span>准备检查：${review.preparedClean === undefined ? "未报告" : review.preparedClean ? "已通过" : "未通过"}</span></div>${protectedPaths ? `<div class="wf-notice">命令目录授权：${escapeHtml(protectedPaths)}。仅对应命令生效，代理任务权限不变。</div>` : ""}<details data-detail="maintenance-fingerprint"><summary>审查标识</summary><div class="wf-muted">产物指纹：${escapeHtml(review.artifactFingerprint || "未提供")}<br>整体审查：${escapeHtml(review.fingerprint || "未提供")}</div></details>${review.artifactCount ? `<details data-detail="maintenance-artifacts"><summary>构建产物示例（前 ${review.artifacts.length} 项）</summary><pre>${escapeHtml(jsonInput(review.artifacts))}</pre><p class="wf-muted">显示 ${review.artifacts.length}/${review.artifactCount} 项；完整清单保存在运行记录中。</p></details>` : ""}`;
+  return `<h3 class="wf-section-title">维护审查</h3><div class="wf-facts"><span>分支 ${escapeHtml(review.branch || "未提供")}</span><span>基线 ${escapeHtml(review.base.slice(0, 12) || "未提供")} → ${escapeHtml(review.target.slice(0, 12) || "未提供")}</span><span>构建产物 ${review.artifactCount} 项</span><span>准备检查：${review.preparedClean === undefined ? "未报告" : review.preparedClean ? "已通过" : "未通过"}</span></div>${protectedPaths ? `<div class="wf-notice">命令目录授权：${escapeHtml(protectedPaths)}。仅对应命令生效，代理任务权限不变。</div>` : ""}<details data-detail="maintenance-fingerprint"><summary>审查标识</summary><div class="wf-muted">产物指纹：${escapeHtml(review.artifactFingerprint || "未提供")}<br>整体审查：${escapeHtml(review.fingerprint || "未提供")}</div></details>${renderMaintenanceArtifacts(artifactPage ?? run.maintenanceReview, artifactPage ? 200 : 30)}`;
 }
 
 function activationSummary(run: WorkflowRun): string {
@@ -769,7 +880,7 @@ function activationSummary(run: WorkflowRun): string {
   return `<h3 class="wf-section-title">服务激活</h3><div class="wf-notice">${escapeHtml(activation?.serverName ?? plan?.serverName)}：${escapeHtml(status)}</div>${activation?.error ? `<div class="wf-alert" role="alert">${escapeHtml(activation.error)}</div>` : ""}${command ? `<details data-detail="activation-target"><summary>查看目标启动命令</summary><pre>${escapeHtml(jsonInput({ command, args: args ?? [] }))}</pre></details>` : ""}`;
 }
 
-export function renderWorkflowDiff(run: WorkflowRun): string {
+export function renderWorkflowDiff(run: WorkflowRun, artifactPage?: unknown): string {
   if (failureContext(run)?.kind === "review") return `<h3 class="wf-section-title">改动审查失败</h3><div class="wf-alert" role="alert">${escapeHtml(failureErrorSummary(run.error ?? "无法完成改动审查"))}</div><p class="wf-muted">${run.tasks.every(task => task.status === "completed") ? "已完成任务结果保留。点击“重试审查”将回放有效缓存并重新汇总差异，无需从任务节点重跑。" : "部分任务未完成。点击“继续”按普通恢复处理，可能重新执行失败或中断的任务；有效结果按恢复检查保留。"}</p>`;
   if (run.execution !== "completed") return '<div class="wf-empty">整个工作流执行完成后统一汇总差异。停止或失败时保留工作区，可恢复后继续。</div>';
   const conflicts = run.diff?.conflicts?.length ? `<div class="wf-alert" role="alert">存在应用冲突：${run.diff.conflicts.map(escapeHtml).join("、")}</div>` : "";
@@ -778,7 +889,7 @@ export function renderWorkflowDiff(run: WorkflowRun): string {
   const integrity = run.diff?.contentSha256 ? `<details data-detail="diff-integrity"><summary>完整差异校验信息</summary><div class="wf-muted">完整差异总量：${escapeHtml(bytes)}<br>完整差异 SHA-256：<code>${escapeHtml(run.diff.contentSha256)}</code></div></details>` : "";
   const changes = run.diff?.files.length ? `<h3 class="wf-section-title">变更文件（完整清单 · ${run.diff.files.length} 项）</h3>${run.diff.files.map(file => `<div class="wf-file-header"><span>${escapeHtml(file.path)}</span><span> · ${escapeHtml(file.status)}</span></div>`).join("")}${preview}${run.diff.previewTruncated ? `<p class="wf-muted">完整差异总量：${escapeHtml(bytes)}</p>` : ""}${integrity}<pre aria-label="${run.diff.previewTruncated ? "差异部分预览" : "统一差异"}">${escapeHtml(run.diff.text)}</pre>` : '<div class="wf-empty">本次执行没有文件改动。</div>';
 
-  return `${run.application === "partial" ? `<div class="wf-alert" role="alert">${escapeHtml(partialApplicationMessage(run))}</div>` : ""}${conflicts}${changes}${maintenanceReview(run)}${activationSummary(run)}<div class="wf-notice">${escapeHtml(applicationLabels[run.application] ?? run.application)}。${run.activation?.status === "pending_restart" ? "配置已更新；宿主仍需重新加载并核对实际版本，脚本完成不代表新版服务已生效。" : "应用前会检查当前项目；冲突时保留工作区供你处理。"}</div>`;
+  return `${run.application === "partial" ? `<div class="wf-alert" role="alert">${escapeHtml(partialApplicationMessage(run))}</div>` : ""}${conflicts}${changes}${maintenanceReview(run, artifactPage)}${activationSummary(run)}<div class="wf-notice">${escapeHtml(applicationLabels[run.application] ?? run.application)}。${run.activation?.status === "pending_restart" ? "配置已更新；宿主仍需重新加载并核对实际版本，脚本完成不代表新版服务已生效。" : "应用前会检查当前项目；冲突时保留工作区供你处理。"}</div>`;
 }
 
 export interface NodeProcess {
@@ -843,6 +954,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   let processTarget: { id: string; taskId?: string; phase?: string; scope?: "workflow" | "unphased" } | undefined;
   let processLoading = false, processRequest = 0, processSignature = "", developerRequested = false;
   let reviewSignature = "";
+  let artifactPage: unknown, artifactOwner = "", artifactRequest = 0, artifactLoading = false;
   let deletionPreview: DeletionPreview | undefined, deletionLoading = false, deletionRequest = 0;
   let lastGraph = "", lastGraphOwner = "";
   const returns = new Map<HTMLDialogElement, { id?: string; task?: string; phase?: string; scope?: string; node?: string }>();
@@ -910,6 +1022,27 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       if (request === processRequest && processDialog.open) element(developer ? "#wf-process-developer" : "#wf-process-body").textContent = `读取过程失败：${errorMessage(error)}`;
     } finally { if (!developer) processLoading = false; }
   };
+  const loadArtifactPage = async (offset: number): Promise<void> => {
+    const run = controller.selected;
+    if (!run || artifactLoading || !Number.isSafeInteger(offset) || offset < 0) return;
+    const owner = JSON.stringify([run.id, run.revision]);
+    const request = ++artifactRequest;
+    artifactLoading = true;
+    const status = root.querySelector<HTMLElement>("#wf-artifact-page-status");
+    if (status) status.textContent = "正在读取产物页…";
+    try {
+      const page = await controller.readArtifactPage(offset);
+      if (request !== artifactRequest || !reviewDialog.open || JSON.stringify([controller.selected?.id, controller.selected?.revision]) !== owner) return;
+      artifactPage = page; artifactOwner = owner;
+      const details = root.querySelector<HTMLDetailsElement>('details[data-detail="maintenance-artifacts"]');
+      const opened = details?.open ?? true, scroll = reviewDialog.scrollTop;
+      if (details) details.outerHTML = renderMaintenanceArtifacts(page, 200);
+      const next = root.querySelector<HTMLDetailsElement>('details[data-detail="maintenance-artifacts"]');
+      if (next) next.open = opened;
+      reviewDialog.scrollTop = scroll;
+    } catch (error) { const current = root.querySelector<HTMLElement>("#wf-artifact-page-status"); if (request === artifactRequest && current) current.textContent = `读取失败：${errorMessage(error)}`; }
+    finally { if (request === artifactRequest) artifactLoading = false; }
+  };
   const openFailureProcess = (trigger?: HTMLElement): void => {
     const run = controller.selected;
     if (!run) return;
@@ -969,9 +1102,11 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     finally { if (request === deletionRequest) { deletionLoading = false; element<HTMLButtonElement>("#wf-confirm-delete").disabled = !controller.canAct || !deletionPreview?.canDelete; } }
   };
   const render = (): void => {
-    const state = controller.state, run = controller.selected, definition = currentDefinition();
+    const state = controller.state, run = controller.selected, summary = controller.selectedSummary, definition = currentDefinition();
     const input = run ?? definition;
-    const nextOwner = run ? `run:${run.id}` : definition ? `definition:${definition.id}:${definition.revision ?? 0}` : "";
+    const nextOwner = run ? `run:${run.id}` : summary ? `summary:${summary.id}` : definition ? `definition:${definition.id}:${definition.revision ?? 0}` : "";
+    const currentArtifactOwner = JSON.stringify([run?.id, run?.revision]);
+    if (artifactOwner !== currentArtifactOwner) { artifactPage = undefined; artifactOwner = currentArtifactOwner; artifactRequest++; artifactLoading = false; }
     if (nextOwner !== owner) {
       owner = nextOwner; argsValue = structuredClone(input?.args ?? {}); nodeSettings = structuredClone(input?.nodeSettings ?? {});
       parametersSignature = ""; nodeDirty = false; nodeKey = "";
@@ -999,7 +1134,8 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const connectionText = state.reconnecting ? "正在连接并同步…" : ({ offline: "离线预览", connecting: "正在连接…", connected: "已连接宿主", degraded: "连接异常", closed: "面板已关闭" })[state.connection];
     if (element("#wf-connection").textContent !== connectionText) element("#wf-connection").textContent = connectionText;
     const selector = element<HTMLSelectElement>("#wf-template-select");
-    const options = '<option value="">选择工作流</option>' + (run ? `<option value="__run__" selected>${escapeHtml(run.meta.name)} · 当前运行</option>` : "") + state.templates.map(item => `<option value="${escapeHtml(item.id)}" ${!run && item.id === state.selectedTemplate ? "selected" : ""}>${escapeHtml(item.name)}${item.source === "builtin" ? " · 内置" : ""}</option>`).join("");
+    const displayedRun = run ?? summary;
+    const options = '<option value="">选择工作流</option>' + (displayedRun ? `<option value="__run__" selected>${escapeHtml(displayedRun.meta.name)} · 当前运行</option>` : "") + state.templates.map(item => `<option value="${escapeHtml(item.id)}" ${!run && item.id === state.selectedTemplate ? "selected" : ""}>${escapeHtml(item.name)}${item.source === "builtin" ? " · 内置" : ""}</option>`).join("");
     if (selector.innerHTML !== options) selector.innerHTML = options;
     selector.disabled = !controller.canAct || live || !state.templates.length && !run;
     const notification = element("#wf-notification");
@@ -1022,22 +1158,24 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const stateElement = element("#wf-execution-status");
     const resultFailure = run && resultCheckFailure(run);
     const reviewFailed = run && failureContext(run)?.kind === "review";
-    const executionText = run && stale ? "状态待确认" : !controller.projectBound ? "项目待确认" : run?.deletionPending ? "清理未完成" : reviewFailed ? "改动审查失败" : resultFailure ? "结果检查失败" : run ? executionLabels[run.execution] ?? run.execution : input ? "待开始" : "待选择";
+    const executionText = run && stale ? "状态待确认" : !controller.projectBound ? "项目待确认" : summary ? state.detailsBusy ? "正在读取详情" : `${executionLabels[summary.execution] ?? summary.execution} · 仅摘要` : run?.deletionPending ? "清理未完成" : reviewFailed ? "改动审查失败" : resultFailure ? "结果检查失败" : run ? executionLabels[run.execution] ?? run.execution : input ? "待开始" : "待选择";
     if (stateElement.textContent !== executionText) stateElement.textContent = executionText;
     stateElement.dataset.tone = stale || run?.deletionPending ? "amber" : tone(run?.execution ?? "draft");
     const action = (name: string, label: string, enabled: boolean, primary = false): string => `<button type="button" data-action="${name}" ${primary ? 'class="wf-primary"' : ""} ${enabled ? "" : "disabled"}><span class="wf-icon" data-icon="${name === "stop" ? "player-stop" : "player-play"}" aria-hidden="true"></span>${label}</button>`;
     const canStart = controller.canAct && !run?.deletionPending && !!input && (!!run || !!activeProject() && !state.projectsError) && !live && run?.application !== "applying";
+    const liveRecord = controller.stopTarget ?? run ?? summary;
+    const canStop = controller.projectBound && state.connection === "connected" && !state.reconnecting && !state.busy && !!liveRecord && ["preparing", "running"].includes(liveRecord.execution);
     const primaryAction = primaryWorkflowAction(run);
-    const actionMarkup = action(primaryAction.action, primaryAction.label, canStart, true) + action("stop", run?.execution === "stopping" ? "正在停止…" : "停止", controller.canAct && !!run && ["preparing", "running"].includes(run.execution));
+    const actionMarkup = action(primaryAction.action, primaryAction.label, canStart, true) + action("stop", liveRecord?.execution === "stopping" ? "正在停止…" : "停止", canStop);
     if (element("#wf-actions").innerHTML !== actionMarkup) element("#wf-actions").innerHTML = actionMarkup;
     const currentTask = run?.tasks.find(task => task.status === "running" || task.status === "stopping");
     const stage = run?.preparation?.stages.find(value => value.status === "running");
-    element("#wf-current-action").textContent = (run && stale ? state.reconnecting ? "正在恢复连接，核对实际进度" : "连接已中断，显示上次读取的进度" : !controller.projectBound ? state.projectsBusy ? "正在确认当前聊天所属项目" : "请从项目聊天打开 Workflows" : run?.deletionPending ? "清理未完成，可从更多操作中重试删除" : reviewFailed ? run!.tasks.every(task => task.status === "completed") ? "改动审查失败，已完成任务保留，可重试审查" : "改动审查失败，部分任务未完成，可继续恢复" : resultFailure ? `${resultFailure.phase ? resultFailure.phase + "：" : ""}结果检查未通过，查看原因后选择重试节点` : run?.execution === "preparing" ? stage?.label ?? "正在准备工作流" : run?.execution === "stopped" ? stopSummary(run.stopReason) : currentTask?.currentActivity?.label ?? currentTask?.label ?? (run?.execution === "failed" ? run.tasks.length ? "工作流执行失败，点击失败节点查看原因" : "启动准备失败，点击准备步骤查看原因" : run?.execution === "completed" ? "工作流执行完成" : input?.meta?.description || definition?.description || input?.meta?.name || "选择工作流，查看执行过程")).slice(0, 160);
+    element("#wf-current-action").textContent = (run && stale ? state.reconnecting ? "正在恢复连接，核对实际进度" : "连接已中断，显示上次读取的进度" : !controller.projectBound ? state.projectsBusy ? "正在确认当前聊天所属项目" : "请从项目聊天打开 Workflows" : summary ? state.detailsBusy ? "正在读取工作流详情" : "运行详情尚未就绪，请刷新后查看" : run?.deletionPending ? "清理未完成，可从更多操作中重试删除" : reviewFailed ? run!.tasks.every(task => task.status === "completed") ? "改动审查失败，已完成任务保留，可重试审查" : "改动审查失败，部分任务未完成，可继续恢复" : resultFailure ? `${resultFailure.phase ? resultFailure.phase + "：" : ""}结果检查未通过，查看原因后选择重试节点` : run?.execution === "preparing" ? stage?.label ?? "正在准备工作流" : run?.execution === "stopped" ? stopSummary(run.stopReason) : currentTask?.currentActivity?.label ?? currentTask?.label ?? (run?.execution === "failed" ? run.tasks.length ? "工作流执行失败，点击失败节点查看原因" : "启动准备失败，点击准备步骤查看原因" : run?.execution === "completed" ? "工作流执行完成" : input?.meta?.description || definition?.description || input?.meta?.name || "选择工作流，查看执行过程")).slice(0, 160);
     const latestAt = [currentTask?.currentActivity?.endedAt, currentTask?.currentActivity?.startedAt, run?.logs.at(-1)?.at, run?.updatedAt].filter((value): value is string => !!value && Number.isFinite(Date.parse(value))).sort((left, right) => Date.parse(right) - Date.parse(left))[0];
     const observedNow = stale && run && Number.isFinite(Date.parse(run.updatedAt)) ? Date.parse(run.updatedAt) : Date.now();
     const elapsed = elapsedLabel(run?.startedAt ?? run?.preparation?.startedAt, run?.endedAt, observedNow);
     const recent = latestAt && Number.isFinite(Date.parse(latestAt)) ? Math.max(0, Math.floor((Date.now() - Date.parse(latestAt)) / 1000)) : undefined;
-    element("#wf-activity-time").textContent = run ? `${elapsed ? `已运行 ${elapsed} · ` : ""}${live && recent !== undefined ? `最近活动 ${recent < 60 ? `${recent} 秒` : `${Math.floor(recent / 60)} 分钟`}前` : `${run.tasks.filter(task => task.status === "completed").length}/${run.tasks.length} 个任务完成`}` : "任务由 AI 生成，启动后显示实际进度";
+    element("#wf-activity-time").textContent = run ? `${elapsed ? `已运行 ${elapsed} · ` : ""}${live && recent !== undefined ? `最近活动 ${recent < 60 ? `${recent} 秒` : `${Math.floor(recent / 60)} 分钟`}前` : `${run.tasks.filter(task => task.status === "completed").length}/${run.tasks.length} 个任务完成`}` : summary ? `当前状态：${executionLabels[summary.execution] ?? summary.execution}；完整详情尚未就绪` : "任务由 AI 生成，启动后显示实际进度";
     const preparationHtml = run?.preparation?.stages.map(value => `<li data-tone="${value.status === "completed" ? "green" : value.status === "failed" ? "red" : value.status === "running" ? "blue" : "amber"}"><span class="wf-icon${value.status === "running" ? " is-spinning" : ""}" data-icon="${value.status === "running" ? "loader-2" : value.status === "completed" ? "circle-check" : value.status === "failed" ? "alert-circle" : "circle"}" aria-hidden="true"></span><button type="button" id="wf-preparation-${escapeHtml(value.id)}" data-process-scope="workflow" aria-label="${escapeHtml(`查看 ${value.label} 的启动过程`)}">${escapeHtml(value.label)}${value.status === "running" ? ` · ${elapsedLabel(value.startedAt)}` : ""}</button></li>`).join("") ?? "";
     if (element("#wf-preparation").innerHTML !== preparationHtml) {
       const preparationFocus = document.activeElement instanceof HTMLElement && document.activeElement.id.startsWith("wf-preparation-") ? document.activeElement.id : undefined;
@@ -1069,7 +1207,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     element<HTMLButtonElement>("#wf-save-node-settings").disabled = nodeModel.disabled;
     element("#wf-node-settings-status").textContent = nodeNotice || state.settingsError || (live ? "执行期间配置固定。" : "保存后用于下次启动。");
     element<HTMLButtonElement>("#wf-refresh-node-settings").hidden = !!models.length && !state.settingsError;
-    const graphInput = run ? { ...run, stale, nodeSettings, executionSettings: defaultChoice() } : input?.meta ? { meta: input.meta, execution: "draft" as const, tasks: [], logs: [], nodeSettings, executionSettings: defaultChoice() } : undefined;
+    const graphInput = summary ? undefined : run ? { ...run, stale, nodeSettings, executionSettings: defaultChoice() } : input?.meta ? { meta: input.meta, execution: "draft" as const, tasks: [], logs: [], nodeSettings, executionSettings: defaultChoice() } : undefined;
     const graph = renderWorkflowGraph(graphInput, state.task, observedNow);
     if (graph !== lastGraph || owner !== lastGraphOwner) {
       const focused = document.activeElement instanceof HTMLElement && root.contains(document.activeElement) ? document.activeElement : undefined;
@@ -1090,14 +1228,17 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       const historyFocus = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.historyRun ?? document.activeElement.dataset.historyDelete : undefined;
       const historyDeleteFocus = document.activeElement instanceof HTMLElement && !!document.activeElement.dataset.historyDelete;
       element("#wf-history-context").textContent = activeProject() ? `${activeProject()!.label} 的运行记录` : "所有可见运行记录";
+      const historyScroll = historyDialog.scrollTop;
       element("#wf-history-list").innerHTML = state.runs.length ? state.runs.map(item => `<div class="wf-history-row"><button type="button" data-history-run="${escapeHtml(item.id)}"><strong>${escapeHtml(item.meta.name)}</strong><small>${escapeHtml(executionLabels[item.execution] ?? item.execution)} · ${escapeHtml(new Date(item.createdAt).toLocaleString("zh-CN"))}</small></button><button type="button" data-history-delete="${escapeHtml(item.id)}" class="wf-icon-button wf-danger" aria-label="${escapeHtml(`删除 ${item.meta.name} 的此条运行记录`)}"><span class="wf-icon" data-icon="trash" aria-hidden="true"></span></button></div>`).join("") : '<p class="wf-empty">暂无运行记录</p>';
+      element("#wf-history-list").insertAdjacentHTML("beforeend", `<p class="wf-muted">已载入 ${state.runs.length} / 共 ${state.runTotal ?? state.runs.length} 条运行</p>${state.runNextOffset !== undefined ? `<button type="button" data-load-runs ${state.historyBusy ? "disabled" : ""}>${state.historyBusy ? "正在加载…" : "加载更多运行"}</button>` : ""}`);
+      historyDialog.scrollTop = historyScroll;
       if (historyFocus) Array.from(element("#wf-history-list").querySelectorAll<HTMLElement>("[data-history-run],[data-history-delete]")).find(value => historyDeleteFocus ? value.dataset.historyDelete === historyFocus : value.dataset.historyRun === historyFocus)?.focus({ preventScroll: true });
     }
     if (reviewDialog.open) {
       const nextReview = JSON.stringify([run?.id, run?.revision, run?.progressSequence, run?.execution, run?.review, run?.application, run?.diff?.fingerprint, run?.diff?.previewTruncated, run?.diff?.totalBytes, run?.diff?.contentSha256]);
       if (nextReview !== reviewSignature) {
         reviewSignature = nextReview;
-        element("#wf-review-body").innerHTML = run ? `${run.result !== undefined ? `<div class="wf-process-result">${escapeHtml(formatted(run.result))}</div>` : ""}${renderWorkflowDiff(run)}` : '<p class="wf-muted">暂无运行记录</p>';
+        element("#wf-review-body").innerHTML = run ? `${run.result !== undefined ? `<div class="wf-process-result">${escapeHtml(formatted(run.result))}</div>` : ""}${renderWorkflowDiff(run, artifactPage)}` : '<p class="wf-muted">暂无运行记录</p>';
       }
       const apply = element<HTMLButtonElement>("#wf-apply-changes");
       apply.disabled = !controller.canAct || !run || !canApply(run, "diff");
@@ -1224,6 +1365,9 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   });
   root.addEventListener("click", event => {
     const target = event.target instanceof Element ? event.target : undefined;
+    const artifactButton = target?.closest<HTMLButtonElement>("[data-artifact-offset]");
+    if (artifactButton && !artifactButton.disabled) { void loadArtifactPage(Number(artifactButton.dataset.artifactOffset)); return; }
+    if (target?.closest("[data-load-runs]")) { void controller.loadMoreRuns(); return; }
     const close = target?.closest<HTMLElement>("[data-close-dialog]");
     if (close) { close.closest<HTMLDialogElement>("dialog")?.close(); return; }
     const settingsButton = target?.closest<HTMLButtonElement>("[data-node-settings]");

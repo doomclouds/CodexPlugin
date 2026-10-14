@@ -14,9 +14,54 @@ import { DeletionService } from "./deletion.ts";
 import type { DeleteInput } from "./deletion.ts";
 import { readDeletionConfig } from "./deletion-config.ts";
 import { nodeProcess } from "./node-process.ts";
+import { assertControlPlaneTransportable, projectRunForTransport, TransportProjectionError } from "./run-view.ts";
+import type { WorkflowRun } from "./types.ts";
 
 function result(data: Record<string, unknown>): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
+}
+
+function listSummary(run: WorkflowRun): Record<string, unknown> {
+  return {
+    id: run.id, revision: run.revision, projectPath: run.projectPath,
+    meta: { name: run.meta.name.slice(0, 128), description: run.meta.description.slice(0, 512) },
+    execution: run.execution, review: run.review, application: run.application,
+    createdAt: run.createdAt, updatedAt: run.updatedAt,
+    ...(run.startedAt ? { startedAt: run.startedAt } : {}), ...(run.endedAt ? { endedAt: run.endedAt } : {}),
+    ...(run.progressSequence !== undefined ? { progressSequence: run.progressSequence } : {}),
+    ...(run.error ? { error: run.error.slice(0, 180) } : {}),
+    ...(run.deletionPending !== undefined ? { deletionPending: run.deletionPending } : {}),
+    ...(run.deletionTarget ? { deletionTarget: run.deletionTarget } : {}),
+    ...(run.sourceDefinition ? { sourceDefinition: run.sourceDefinition } : {}),
+  };
+}
+
+function listPage(runs: WorkflowRun[], offset: number, limit: number): Record<string, unknown> {
+  const page: Array<Record<string, unknown>> = [];
+  const budget = 3 * 1024 * 1024;
+  let bytes = Buffer.byteLength(JSON.stringify({ runs: [], listSummary: true, totalRuns: runs.length, nextOffset: Number.MAX_SAFE_INTEGER }));
+  for (const run of runs.slice(offset, offset + limit)) {
+    const summary = listSummary(run);
+    const size = Buffer.byteLength(JSON.stringify(summary)) + (page.length ? 1 : 0);
+    if (bytes + size > budget) {
+      if (!page.length) throw new Error("Workflow list identity exceeds its transport budget; the original record was preserved.");
+      break;
+    }
+    bytes += size; page.push(summary);
+  }
+  const nextOffset = offset + page.length;
+  return { runs: page, listSummary: true, totalRuns: runs.length, ...(nextOffset < runs.length ? { nextOffset } : {}) };
+}
+
+function acceptedRun(run: WorkflowRun): Record<string, unknown> {
+  try { return { run: projectRunForTransport(run) }; }
+  catch (error) {
+    // A completed action must not look rejected merely because its view is too large.
+    return { run: listSummary(run), listSummary: true, operationAccepted: true, projectionError: {
+      code: error instanceof TransportProjectionError ? error.code : "RUN_PROJECTION_FAILED",
+      message: (error instanceof Error ? error.message : "Unable to project this completed operation response.").slice(0, 512),
+    } };
+  }
 }
 
 const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
@@ -55,7 +100,7 @@ function registerPanelToolWithIcons(server: McpServer, register: () => void) {
 }
 
 export function createServer(engine: WorkflowEngine, options: { projects?: ProjectsProvider; readDeletionConfig?: (projectPaths: string[]) => Promise<Record<string, unknown>> } = {}) {
-  const serverInfo = { name: "workflows", version: "0.5.7", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.5.8", icons: panelIcons };
   const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server = new McpServer(serverInfo);
   const templates = new TemplateStore(engine.store);
@@ -174,19 +219,31 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
     description: "Save a reusable workflow definition in the user's library. Includes script and default input, without a project, run results, or workspace. Load the saved revision to update an existing definition.",
     inputSchema: { script: z.string().min(1), args: z.unknown().optional(), allowWrite: z.boolean().optional(), revision: revision.optional(), limits, ...scope },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  }, async input => safe(async () => ({ template: await templates.save({ ...scopedInput(input), script: input.script, ...(input.args !== undefined ? { args: input.args } : {}), ...(input.allowWrite !== undefined ? { allowWrite: input.allowWrite } : {}), ...(input.revision !== undefined ? { revision: input.revision } : {}), ...(input.limits ? { limits: Object.fromEntries(Object.entries(input.limits).filter(([, value]) => value !== undefined)) } : {}) }) })));
+  }, async input => safe(async () => {
+    assertControlPlaneTransportable(input);
+    return { template: await templates.save({ ...scopedInput(input), script: input.script, ...(input.args !== undefined ? { args: input.args } : {}), ...(input.allowWrite !== undefined ? { allowWrite: input.allowWrite } : {}), ...(input.revision !== undefined ? { revision: input.revision } : {}), ...(input.limits ? { limits: Object.fromEntries(Object.entries(input.limits).filter(([, value]) => value !== undefined)) } : {}) }) };
+  }));
   server.registerTool("workflow_preview", {
     description: "Validate and save a dynamic JavaScript workflow plan. Does not execute. projectPath must be explicit; networkAccess defaults false and is independent of allowWrite: read-only workers may use authorized network access without file writes. workspaceMode defaults snapshot. Declare any optional maintenance argv steps and activation before starting; maintenance operations require an isolated git-worktree and allowWrite; steps default non-idempotent, and unknown started-command outcomes cannot be replayed unless explicitly declared idempotent; allowedMcpServers is an explicit configured-server allowlist, default none, and cannot include Workflows. allowedMcpTools maps server names to granted configured tool names; grants do not bypass tool approvals.",
     inputSchema: { projectPath: z.string().min(1), script: z.string().min(1), args: z.unknown().optional(), allowWrite: z.boolean().optional(), sourceDefinition, limits, ...scope },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  }, async input => safe(async () => { const source = await verifiedDefinition(input.sourceDefinition, input.script); return { run: await engine.preview({ ...scopedInput({ ...input, networkAccess: input.networkAccess ?? false, allowedMcpServers: input.allowedMcpServers ?? [], allowedMcpTools: input.allowedMcpTools ?? {}, workspaceMode: input.workspaceMode ?? "snapshot" }), projectPath: input.projectPath, script: input.script, ...(source ? { sourceDefinition: source } : {}), ...(input.args !== undefined ? { args: input.args } : {}), ...(input.allowWrite !== undefined ? { allowWrite: input.allowWrite } : {}), ...(input.limits ? { limits: Object.fromEntries(Object.entries(input.limits).filter(([, value]) => value !== undefined)) } : {}) }) }; }));
+  }, async input => safe(async () => {
+    assertControlPlaneTransportable(input);
+    const source = await verifiedDefinition(input.sourceDefinition, input.script);
+    return acceptedRun(await engine.preview({ ...scopedInput({ ...input, networkAccess: input.networkAccess ?? false, allowedMcpServers: input.allowedMcpServers ?? [], allowedMcpTools: input.allowedMcpTools ?? {}, workspaceMode: input.workspaceMode ?? "snapshot" }), projectPath: input.projectPath, script: input.script, ...(source ? { sourceDefinition: source } : {}), ...(input.args !== undefined ? { args: input.args } : {}), ...(input.allowWrite !== undefined ? { allowWrite: input.allowWrite } : {}), ...(input.limits ? { limits: Object.fromEntries(Object.entries(input.limits).filter(([, value]) => value !== undefined)) } : {}) }));
+  }));
   server.registerTool("workflow_update", {
     description: "Save an updated script and input for a stopped or draft workflow. Requires a fresh preview revision and another user start.",
     inputSchema: { id, revision, script: z.string().min(1), args: z.unknown(), allowWrite: z.boolean().optional(), ...scope },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  }, async input => safe(async () => ({ run: await engine.update({ ...scopedInput(input), id: input.id, revision: input.revision, script: input.script, args: input.args, ...(input.allowWrite !== undefined ? { allowWrite: input.allowWrite } : {}) }) })));
-  server.registerTool("workflow_list_runs", { description: "List saved workflow runs without starting or resuming them.", inputSchema: { projectPath: z.string().optional() }, annotations }, async input => safe(async () => ({ runs: await engine.list(input.projectPath) })));
-  server.registerTool("workflow_get_run", { description: "Read a workflow plan, real tasks, reports, final diff, and logs.", inputSchema: { id }, annotations }, async input => safe(async () => ({ run: await engine.get(input.id) })));
+  }, async input => safe(async () => {
+    const existing = await engine.get(input.id);
+    const supplied = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
+    assertControlPlaneTransportable({ ...existing, ...supplied });
+    return acceptedRun(await engine.update({ ...scopedInput(input), id: input.id, revision: input.revision, script: input.script, args: input.args, ...(input.allowWrite !== undefined ? { allowWrite: input.allowWrite } : {}) }));
+  }));
+  server.registerTool("workflow_list_runs", { description: "List bounded, paged run summaries without starting or resuming them. Summaries omit execution inputs and details; use workflow_get_run before inspecting or controlling a selected run.", inputSchema: { projectPath: z.string().optional(), offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(200).optional() }, annotations }, async input => safe(async () => listPage(await engine.list(input.projectPath), input.offset ?? 0, input.limit ?? 100)));
+  server.registerTool("workflow_get_run", { description: "Read a workflow's complete control scope with bounded transport views of tasks, logs and diff. Artifact pages use artifactOffset and artifactLimit; omitted artifacts and display previews never replace the stored review used for application.", inputSchema: { id, artifactOffset: z.number().int().nonnegative().optional(), artifactLimit: z.number().int().min(1).max(200).optional() }, annotations }, async input => safe(async () => ({ run: projectRunForTransport(await engine.get(input.id), { ...(input.artifactOffset !== undefined ? { artifactOffset: input.artifactOffset } : {}), ...(input.artifactLimit !== undefined ? { artifactLimit: input.artifactLimit } : {}) }) })));
   server.registerTool("workflow_get_node_process", {
     title: "查看节点过程",
     description: "Read concise node or phase activities and errors. Brief view excludes task prompts and raw diagnostics; developer detail explicitly adds bounded node logs. Does not execute a workflow.",
@@ -202,7 +259,7 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
     description: "Delete the exact confirmed owned-data scope using its fresh preview fingerprint. Requires user authorization, stopped workers and released references. Preserves delivered project changes. Cleanup failure reports remaining objects; it never hides leftover data as success.",
     inputSchema: { ...deletionFields, fingerprint: z.string().regex(/^[a-f0-9]{64}$/) }, annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }, _meta: { ui: { visibility: ["model", "app"] } },
   }, async input => safe(async () => { const value = await deletion.execute({ ...parsedDeletion(input), fingerprint: input.fingerprint }); if (value.deletedRunIds.length) engine.forgetDeletedRuns(value.deletedRunIds); return { deletion: value }; }));
-  server.registerTool("workflow_stop", { description: "Stop dispatch, interrupt all active workers, wait for their exit, and save progress.", inputSchema: { id }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async input => safe(async () => ({ run: await engine.stop(input.id) })));
+  server.registerTool("workflow_stop", { description: "Stop dispatch, interrupt all active workers, wait for their exit, and save progress.", inputSchema: { id }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async input => safe(async () => acceptedRun(await engine.stop(input.id))));
   const appOnly = { ui: { visibility: ["app"] } };
   server.registerTool("workflow_panel_lease", { description: "Maintain the task panel lifecycle lease; losing the lease stops its active workflows.", inputSchema: { leaseId: z.string().optional(), release: z.boolean().optional() }, _meta: appOnly, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async input => safe(() => engine.lease({ ...(input.leaseId ? { leaseId: input.leaseId } : {}), ...(input.release !== undefined ? { release: input.release } : {}) })));
   for (const action of ["start", "resume"] as const) server.registerTool(`workflow_${action}`, {
@@ -210,9 +267,9 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
     inputSchema: { id, revision, leaseId: z.string().min(1).optional(), ...(action === "resume" ? { retryFromTaskId: z.string().regex(/^task_[1-9][0-9]*$/).optional() } : {}) },
     _meta: { ui: { visibility: ["model", "app"] } },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-  }, async input => safe(async () => ({ run: await engine.start({ id: input.id, revision: input.revision, ...(input.leaseId ? { leaseId: input.leaseId } : {}), ...("retryFromTaskId" in input && typeof input.retryFromTaskId === "string" ? { retryFromTaskId: input.retryFromTaskId } : {}) }, action === "resume") })));
-  server.registerTool("workflow_cancel_task", { description: "Cancel one active task on the user request. The script can handle its failure; other tasks keep running.", inputSchema: { id, taskId: z.string().min(1) }, _meta: { ui: { visibility: ["model", "app"] } }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async input => safe(async () => ({ run: await engine.cancelTask(input.id, input.taskId) })));
-  server.registerTool("workflow_apply", { description: "Apply the final reviewed changes when the user has authorized application. Requires the current revision and completed review; detects baseline conflicts and retains project edits. Maintenance activation uses only its predeclared command.", inputSchema: { id, revision }, _meta: { ui: { visibility: ["model", "app"] } }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } }, async input => safe(async () => ({ run: await engine.apply(input.id, input.revision) })));
+  }, async input => safe(async () => acceptedRun(await engine.start({ id: input.id, revision: input.revision, ...(input.leaseId ? { leaseId: input.leaseId } : {}), ...("retryFromTaskId" in input && typeof input.retryFromTaskId === "string" ? { retryFromTaskId: input.retryFromTaskId } : {}) }, action === "resume"))));
+  server.registerTool("workflow_cancel_task", { description: "Cancel one active task on the user request. The script can handle its failure; other tasks keep running.", inputSchema: { id, taskId: z.string().min(1) }, _meta: { ui: { visibility: ["model", "app"] } }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async input => safe(async () => acceptedRun(await engine.cancelTask(input.id, input.taskId))));
+  server.registerTool("workflow_apply", { description: "Apply the final reviewed changes when the user has authorized application. Requires the current revision and completed review; detects baseline conflicts and retains project edits. Maintenance activation uses only its predeclared command.", inputSchema: { id, revision }, _meta: { ui: { visibility: ["model", "app"] } }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } }, async input => safe(async () => acceptedRun(await engine.apply(input.id, input.revision))));
 
   return server;
 }

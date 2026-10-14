@@ -17,7 +17,8 @@
 | `workflow_preview` | `projectPath`、`script`；可选输入、执行范围、`sourceDefinition: { id, revision }`；服务端校验来源版本与实际脚本，返回未执行的 `run` |
 | `workflow_update` | `id`、当前 `revision`、`script`、`args`；可选执行范围；已有工作区时不能改变范围 |
 | `workflow_start`、`workflow_resume` | `id`、当前 `revision`；已授权聊天调用不传 `leaseId`，面板调用传活跃租约 |
-| `workflow_get_run`、`workflow_list_runs` | 读取实际计划、状态、任务、日志、报告、差异和维护审查；列表可按 `projectPath` 筛选 |
+| `workflow_list_runs` | 可选 `projectPath`、`offset`、`limit`（默认 100、最多 200）；返回 `listSummary: true`、`totalRuns`、`nextOffset` 和轻量运行摘要，不包含完整控制范围 |
+| `workflow_get_run` | `id`；返回保留完整脚本、输入和授权范围的有界详情；可选 `artifactOffset`、`artifactLimit`（默认 20、最多 200）读取维护产物页 |
 | `workflow_get_node_process` | `id`；以 `taskId`、`phase` 或 `scope: "workflow" | "unphased"` 选择过程，默认 `detail: "brief"`；开发详情显式传 `"developer"` |
 | `workflow_preview_deletion` | `kind: "run" | "definition"`、`id`、当前 `revision`；定义可传额外 `runIds`；返回 `preview`，含实际范围、`fingerprint`、`canDelete`、大小和 `blocked` |
 | `workflow_delete` | 预览的同一目标字段及最新 `fingerprint`；返回 `deletion.deleted`、`partial`、已删对象和 `remaining`，仅在全部清理完成时报告成功 |
@@ -27,6 +28,10 @@
 | `workflow_open_panel` | 从项目聊天打开实际任务面板，不开始执行；只注册 thread 入口，无项目归属时显示提示并禁用操作 |
 
 `workflow_panel_lease` 仅供面板维护生命周期。聊天启动不需要面板租约，不借用其他面板租约。
+
+历史列表可能因传输预算返回少于请求 `limit` 的记录，使用实际 `nextOffset` 翻页，不自行加上请求大小。选中摘要后须用 `workflow_get_run` 读取完整控制范围，不能以缺失字段构造空脚本或空授权。`maintenanceReview.artifacts` 是当前页，`artifactCount` 是真实总数，`artifactOffset` 是页起点，`nextArtifactOffset` 是后页起点；可按后页起点继续调用 `workflow_get_run({ id, artifactOffset, artifactLimit: 100 })`。分页片段用于展示，不覆盖主运行的脚本、输入、权限或审查指纹。
+
+`operationAccepted: true`、`listSummary: true` 与 `projectionError: { code, message }` 表示变更动作已接受，返回的 `run` 仅为真实身份与状态摘要。随后读取详情；详情失败不能解释为动作未发生，也不能自动重发启动、恢复或应用。未确认详情时仍可按明确要求用运行 ID 停止。
 
 面板固定使用当前项目聊天，不提供主窗口侧栏的全局入口或项目目录切换。没有 `currentProjectId` 或归属尚未确认时，不读取全局运行历史、模型目录或启动任务。Agent 仍可按用户明确授权的 `projectPath` 调用 `workflow_preview` 等工具；程序化目标不会改变面板归属。已有运行固定绑定创建时的 `projectPath`，不能移到其他项目。
 
@@ -143,7 +148,7 @@ const maintenance = {
 
 `failureContext.kind: "review"` 是任务完成后的审查失败；面板单独显示“改动审查”失败卡，已成功任务保留完成。全部任务为 `completed` 时，按已有授权重试使用 `workflow_resume({ id, revision })`，不追加 `retryFromTaskId`，以普通有效缓存回放重新生成审查。仍有失败或中断任务时，面板保留普通“继续”，恢复可能重新执行这些任务，不能承诺只重建审查。脚本业务结果失败和明确要求重新执行 worker 的情形仍使用节点重试，不混为同一动作。
 
-`diff` 保留完整的 `files` 及应用校验 `fingerprint`。大差异的 `text` 最多保留 4 MiB 预览；可选 `previewTruncated: true` 明确表示文本不完整，`totalBytes` 是完整差异的字节数，`contentSha256` 是完整差异的 SHA-256。面板显示部分预览提示、完整字节数、摘要及完整文件清单。不能把预览摘要当作完整内容或声称已展示全部变更；应用核对完整差异，处理完整清单，而不是只处理预览文本。
+`diff` 保留完整的 `files` 及应用校验 `fingerprint`。存储中的 `text` 最多保留 4 MiB 预览，工具读取默认再限制到 256 KiB；默认日志最多传输 128 KiB，维护审查不重复顶层差异文本。`previewTruncated: true` 明确表示文本不完整，`totalBytes` 是完整差异的字节数，`contentSha256` 是完整差异的 SHA-256。面板显示部分预览提示、完整字节数、摘要及完整文件清单。不能把预览摘要当作完整内容或声称已展示全部变更；有界传输不裁切保存的原始记录，应用仍核对完整差异，处理完整清单，而不是只处理预览文本。
 
 外部 MCP 写入和结果不确定的命令不承诺 exactly-once。缺失返回值不能证明操作尚未生效。
 

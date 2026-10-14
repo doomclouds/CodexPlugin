@@ -21,6 +21,10 @@ description: 根据用户任务生成、保存并执行 Workflows 动态工作�
 
 执行中用 `workflow_get_run` 读取真实状态、任务尝试、用量与结果；需要多个记录时用 `workflow_list_runs`。`preparing` 表示仍在核对环境、项目或准备工作区，不等于尚未响应。过程刷新查看准备阶段、任务活动和 `progressSequence`；写入、启动、恢复和应用仍使用最新 `revision`。用户只需简要过程时，用 `workflow_get_node_process` 的默认 `brief` 视图说明当前动作、耗时和错误位置，不输出提示词和原始日志。需要定位开发问题时显式选择 `detail: "developer"`，读取相关节点的有限日志。
 
+`workflow_list_runs` 返回 `listSummary: true` 的轻量摘要页，按 `nextOffset` 继续读取，`totalRuns` 是真实总数。摘要没有完整脚本、输入、任务或授权范围，不能据此构造启动或编辑参数；先用 `workflow_get_run` 读取目标详情。同一版本的摘要不能覆盖已读取的完整控制范围。详情也是有界传输视图，完整存储和指纹不被裁切；默认差异文本最多 256 KiB、日志最多 128 KiB、维护产物 20 项。产物以 `artifactCount` 表示真实总数，按 `nextArtifactOffset` 传 `artifactOffset`、`artifactLimit` 读取后续页，单页最多 200 项；不能把当前样本数当成总数。
+
+响应含 `operationAccepted: true`、`listSummary: true` 和 `projectionError` 时，动作已经被接受，只是完整详情无法装入响应。先按返回的真实运行 ID 查询详情，不因读取失败重发启动、恢复或应用，不把缺失字段补成空脚本或空权限。详情未确认时仍可按用户要求停止该运行；报告须明确区分动作结果与详情读取状态。
+
 等待运行达到真实终态，处理实际失败原因，不返回虚构结果。用户要求停止或取消任务时调用 `workflow_stop` 或 `workflow_cancel_task`，等待退出。恢复使用新读取的版本调用 `workflow_resume`；聊天启动的运行不依赖面板保持打开。面板断线只保留最后读到的记录；重连重建租约、读取实际状态，不因连接恢复而自动启动、恢复或重跑任务。
 
 脚本首条语句必须是纯字面量 `export const meta`，含小写短横线名称、非空描述和可选阶段。使用 `args`、`agent`、`parallel`、`pipeline`、`operation`、`phase`、`log` 及普通分支循环，最终返回有用结果。循环须有结束条件；不得直接调用 Node、文件、shell、网络、模块、定时器、时钟或随机数。
@@ -67,7 +71,7 @@ description: 根据用户任务生成、保存并执行 Workflows 动态工作�
 
 执行完成后检查真实 worker 报告、维护输出、测试结果和统一差异，保留未验证事项。用户已授权应用改动时，用当前 `revision` 调用 `workflow_apply`；授权仅涵盖规划或执行时，先提供具体差异再请求应用授权。面板也可审查和应用。
 
-差异可能只返回最多 4 MiB 的预览。`diff.previewTruncated: true` 时，`text` 不是完整差异；读取 `totalBytes`、完整 `contentSha256` 和完整 `files` 清单说明范围，需要时继续检查实际文件。不能把部分预览说成已审查全部内容。应用仍针对完整变更，并核验完整差异及范围指纹。
+存储中的差异预览最多 4 MiB，工具读取默认进一步限制为 256 KiB。`diff.previewTruncated: true` 时，`text` 不是完整差异；读取 `totalBytes`、完整 `contentSha256` 和完整 `files` 清单说明范围，需要时继续检查实际文件。不能把部分预览说成已审查全部内容。应用仍针对完整变更，并核验完整差异及范围指纹。
 
 `application: "partial"` 表示已有部分应用，但仍有阶段未完成；可能是子模块应用尚未完成，也可能是仓库及子模块均已应用后激活失败。用 `workflow_get_run` 核对应用记录、实际错误和当前项目状态，读取新的 revision 后按已有授权重试 `workflow_apply`，核验已完成部分并继续未完成阶段。只有仓库及子模块均已应用、仅激活失败时，重试才只处理激活。
 

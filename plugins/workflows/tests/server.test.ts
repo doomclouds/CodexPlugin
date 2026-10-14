@@ -15,10 +15,15 @@ import type { WorkflowRun } from "../src/types.ts";
 async function fixture(projects?: ProjectsProvider) {
   const directory = await mkdtemp(path.join(tmpdir(), "workflows-server-contract-"));
   const calls: Array<{ action: string; input: unknown }> = [];
-  const record = (action: string, input: unknown) => { calls.push({ action, input }); return { id: "wf_0123456789abcdef01234567", revision: 1 }; };
+  const baseRun = (): WorkflowRun => ({ id: "wf_0123456789abcdef01234567", revision: 1, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", meta: { name: "contract-run", description: "Protocol contract fixture" }, projectPath: directory, script: 'export const meta={name:"contract-run",description:"Protocol contract fixture"}; return 1;', scriptDigest: "fixture", args: {}, allowWrite: false, limits: { maxReadWorkers: 1, maxCalls: 1, maxTokens: 0, timeoutMs: 1000 }, execution: "draft", review: "unavailable", application: "none", tasks: [], logs: [] });
+  const record = (action: string, input: unknown) => { calls.push({ action, input }); return baseRun(); };
   const engine = {
     store: new RunStore(directory),
-    get: async (id: string) => engine.store.load(id),
+    get: async (id: string) => {
+      try { return await engine.store.load(id); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return baseRun(); throw error; }
+    },
+    list: async (projectPath?: string) => (await engine.store.list()).filter(run => !projectPath || run.projectPath === projectPath),
     forgetDeletedRuns: (ids: string[]) => { record("forget-deleted", ids); },
     preview: async (input: unknown) => record("preview", input),
     getExecutionSettings: async (projectPath: unknown) => record("get-settings", { projectPath }),
@@ -27,16 +32,101 @@ async function fixture(projects?: ProjectsProvider) {
     start: async (input: unknown, resume: boolean) => record(resume ? "resume" : "start", input),
     cancelTask: async (id: string, taskId: string) => record("cancel", { id, taskId }),
     apply: async (id: string, revision: number) => record("apply", { id, revision }),
+    stop: async (id: string) => record("stop", { id }),
   } as unknown as WorkflowEngine;
   const server = createServer(engine, { ...(projects ? { projects } : {}), readDeletionConfig: async () => ({ mcp_servers: {} }) });
   const client = new Client({ name: "workflow-contract-test", version: "1" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
-  return { client, calls, store: engine.store, close: async () => { await client.close(); await server.close(); await rm(directory, { recursive: true, force: true }); } };
+  return { client, calls, engine, store: engine.store, close: async () => { await client.close(); await server.close(); await rm(directory, { recursive: true, force: true }); } };
 }
 
 const id = "wf_0123456789abcdef01234567";
+
+test("oversized plans are rejected before creating, updating or saving a definition", async () => {
+  const { client, calls, engine, store, close } = await fixture();
+  try {
+    const run = await engine.get(id), args = { oversizedInput: "x".repeat(2 * 1024 * 1024) };
+    for (const [name, input] of [
+      ["workflow_preview", { script: run.script, args, projectPath: store.root }],
+      ["workflow_update", { id, revision: 1, script: run.script, args }],
+      ["workflow_save_template", { script: run.script, args }],
+    ] as const) {
+      const response = await client.callTool({ name, arguments: input });
+      assert.equal(response.isError, true);
+      assert.match(JSON.stringify(response.content), /CONTROL_PLANE_TOO_LARGE/);
+    }
+    assert.deepEqual(calls, []);
+    assert.deepEqual(await store.list(), []);
+    const templates = (await client.callTool({ name: "workflow_list_templates", arguments: {} })).structuredContent?.templates as Array<{ source: string }>;
+    assert.ok(templates.every(template => template.source !== "saved"));
+  } finally { await close(); }
+});
+
+test("update preflight includes retained execution scope instead of checking only supplied fields", async () => {
+  const { client, calls, engine, store, close } = await fixture();
+  try {
+    const run = await engine.get(id);
+    run.maintenance = { steps: [0, 1].map(index => ({ id: `large-${index}`, command: ["node", ...Array(100).fill("x".repeat(16_384))] })) };
+    run.allowWrite = true; run.workspaceMode = "git-worktree";
+    await store.create(run);
+    const response = await client.callTool({ name: "workflow_update", arguments: { id, revision: 1, script: run.script, args: {} } });
+    assert.equal(response.isError, true);
+    assert.match(JSON.stringify(response.content), /CONTROL_PLANE_TOO_LARGE/);
+    assert.deepEqual(calls, []);
+    assert.deepEqual((await store.load(id)).maintenance, run.maintenance);
+  } finally { await close(); }
+});
+
+test("stop acknowledges its completed operation even when a legacy control plane cannot be projected", async () => {
+  const { client, calls, engine, store, close } = await fixture();
+  try {
+    const run = await engine.get(id);
+    run.args = { oversizedLegacyInput: "x".repeat(4 * 1024 * 1024) };
+    await store.create(run);
+    engine.stop = async stoppedId => { calls.push({ action: "stop", input: { id: stoppedId } }); return { ...run, execution: "stopped" }; };
+    const response = await client.callTool({ name: "workflow_stop", arguments: { id } });
+    assert.equal(response.isError, undefined);
+    assert.equal(response.structuredContent?.operationAccepted, true);
+    assert.equal(response.structuredContent?.listSummary, true);
+    assert.equal((response.structuredContent?.run as WorkflowRun).execution, "stopped");
+    assert.equal(Object.hasOwn(response.structuredContent!.run as object, "args"), false);
+    assert.equal((response.structuredContent?.projectionError as { code: string }).code, "CONTROL_PLANE_TOO_LARGE");
+    assert.deepEqual(calls, [{ action: "stop", input: { id } }]);
+    assert.equal((await client.callTool({ name: "workflow_get_run", arguments: { id } })).isError, true);
+    assert.equal(calls.length, 1, "A read projection failure must not replay a control action.");
+  } finally { await close(); }
+});
+
+test("run lists shrink pages to the transport budget while preserving full identity and deletion scope", async () => {
+  const { client, engine, close } = await fixture();
+  try {
+    const base = await engine.get(id);
+    const runIds = Array.from({ length: 1000 }, (_, index) => `wf_${index.toString(16).padStart(24, "0")}`);
+    const runs = Array.from({ length: 200 }, (_, index) => ({ ...base, id: `wf_${(index + 1000).toString(16).padStart(24, "0")}`, deletionPending: true, deletionTarget: { kind: "definition" as const, id: "saved:cleanup-group", revision: 1, runIds } }));
+    engine.list = async () => runs;
+    let offset = 0; const received: string[] = [];
+    do {
+      const response = await client.callTool({ name: "workflow_list_runs", arguments: { offset, limit: 200 } });
+      assert.equal(response.isError, undefined);
+      assert.ok(Buffer.byteLength(JSON.stringify(response.structuredContent)) <= 3 * 1024 * 1024);
+      assert.ok(Buffer.byteLength(JSON.stringify(response)) < 10 * 1024 * 1024);
+      const page = response.structuredContent as { runs: Array<WorkflowRun>; totalRuns: number; nextOffset?: number; listSummary: boolean };
+      assert.equal(page.listSummary, true); assert.equal(page.totalRuns, 200);
+      assert.ok(page.runs.length > 0 && page.runs.length < 200);
+      for (const summary of page.runs) {
+        assert.equal(summary.projectPath, base.projectPath);
+        assert.deepEqual(summary.deletionTarget, { kind: "definition", id: "saved:cleanup-group", revision: 1, runIds });
+        assert.equal(Object.hasOwn(summary, "script"), false);
+        received.push(summary.id);
+      }
+      if (page.nextOffset === undefined) break;
+      assert.equal(page.nextOffset, offset + page.runs.length); offset = page.nextOffset;
+    } while (true);
+    assert.deepEqual(received, runs.map(run => run.id));
+  } finally { await close(); }
+});
 
 test("MCP node process and complete deletion route real owned records with explicit confirmation", async () => {
   const { client, store, calls, close } = await fixture();
