@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readFile, readdir, readlink, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ProtocolSession } from "./adapter.ts";
-import { cloneInitializedSubmodules, flattenGitArtifacts, gitCommand, inspectGitManifest, listGitlinks, type GitManifest } from "./submodules.ts";
+import { cloneInitializedSubmodules, flattenGitArtifacts, gitCommand, gitCommandPreview, inspectGitManifest, listGitlinks, type GitManifest } from "./submodules.ts";
 import type { ActivationResult, Diff, MaintenanceArtifact, MaintenancePlan, MaintenanceReview, Workspace } from "./types.ts";
 import { normalizeProtectedPaths } from "./protected-paths.ts";
 
@@ -205,9 +205,8 @@ export async function reviewMaintenance(workspace: Workspace, plan: MaintenanceP
   await ownGit(workspace);
   const target = await head(workspace.root);
   const preparedClean = await clean(workspace.root);
-  const text = await git(workspace.root, ["diff", "--binary", "--no-ext-diff", "--no-textconv", "--no-renames", workspace.git!.base, target, "--"]);
-  if (Buffer.byteLength(text) > 4 * 1024 * 1024) throw new Error("Maintenance review diff exceeds 4 MiB");
-  const names = (await git(workspace.root, ["diff", "--name-status", "--no-renames", "-z", workspace.git!.base, target, "--"])).split("\0").filter(Boolean);
+  const preview = await gitCommandPreview(workspace.root, ["diff", "--binary", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", workspace.git!.base, target, "--"]);
+  const names = (await git(workspace.root, ["diff", "--name-status", "--no-color", "--no-renames", "-z", workspace.git!.base, target, "--"])).split("\0").filter(Boolean);
   const files: Diff["files"] = [];
   for (let index = 0; index < names.length; index += 2) {
     const status = names[index], name = names[index + 1];
@@ -216,7 +215,7 @@ export async function reviewMaintenance(workspace: Workspace, plan: MaintenanceP
   const artifacts = await ignoredArtifacts(workspace);
   const artifactFingerprint = fingerprint(artifacts);
   const state = await maintenanceFingerprint(workspace);
-  const diff: Diff = { text, files, fingerprint: fingerprint({ base: workspace.git!.base, target, state }) };
+  const diff: Diff = { ...preview, files, fingerprint: fingerprint({ base: workspace.git!.base, target, state }) };
   const submodules = submoduleStates(await inspectGitManifest(workspace.root, { enforceOwnedMetadata: true }));
   return { base: workspace.git!.base, target, branch: workspace.git!.branch, ...(workspace.git!.upstream ? { upstream: workspace.git!.upstream } : {}), diff, artifacts, artifactFingerprint, preparedClean, fingerprint: fingerprint({ state, plan }), ...(submodules.length ? { submodules } : {}) };
 }

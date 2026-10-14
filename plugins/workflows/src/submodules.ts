@@ -1,9 +1,10 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, readFile, readdir, readlink, realpath } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { StringDecoder } from "node:string_decoder";
 import type { MaintenanceArtifact } from "./types.ts";
 
 const exec = promisify(execFile);
@@ -17,28 +18,101 @@ export interface GitManifest {
 export interface ManifestOptions { includeIgnored?: boolean; requireClean?: boolean; enforceOwnedMetadata?: boolean }
 
 // Every host Git operation disables implicit submodule transport. Child initialization is local and explicit.
-export async function gitCommand(cwd: string, args: string[]): Promise<string> {
+async function gitInvocation(cwd: string, args: string[], timeoutMs = 120000) {
   const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" };
   for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"]) delete (env as NodeJS.ProcessEnv)[key];
-  try {
-    const disabledFilters: string[] = [];
-    {
-      // A tracked .gitattributes file can otherwise invoke arbitrary global or source-local filters.
-      let names = "";
-      try { names = (await exec("git", ["--no-pager", "config", "--name-only", "--get-regexp", "^filter\\..*\\.(clean|smudge|process|required)$"], { cwd, env, encoding: "utf8", timeout: 120000, maxBuffer: 1024 * 1024 })).stdout; }
-      catch (error) { if (Number((error as { code?: unknown }).code) !== 1) throw error; }
-      const drivers = [...new Set(names.split("\n").filter(Boolean).map(key => key.slice(0, key.lastIndexOf("."))))];
-      for (const driver of drivers) {
-        if (!/^filter\.[^\r\n\0]+$/.test(driver)) throw new Error("Unsupported Git filter configuration");
-        for (const field of ["clean", "smudge", "process"]) disabledFilters.push("-c", `${driver}.${field}=`);
-        disabledFilters.push("-c", `${driver}.required=false`);
-      }
+  const disabledFilters: string[] = [];
+  {
+    // A tracked .gitattributes file can otherwise invoke arbitrary global or source-local filters.
+    let names = "";
+    try { names = (await exec("git", ["--no-pager", "config", "--name-only", "--get-regexp", "^filter\\..*\\.(clean|smudge|process|required)$"], { cwd, env, encoding: "utf8", timeout: timeoutMs, maxBuffer: 1024 * 1024 })).stdout; }
+    catch (error) { if (Number((error as { code?: unknown }).code) !== 1) throw error; }
+    const drivers = [...new Set(names.split("\n").filter(Boolean).map(key => key.slice(0, key.lastIndexOf("."))))];
+    for (const driver of drivers) {
+      if (!/^filter\.[^\r\n\0]+$/.test(driver)) throw new Error("Unsupported Git filter configuration");
+      for (const field of ["clean", "smudge", "process"]) disabledFilters.push("-c", `${driver}.${field}=`);
+      disabledFilters.push("-c", `${driver}.required=false`);
     }
-    const { stdout } = await exec("git", ["--no-pager", "-c", "core.fsmonitor=false", "-c", "submodule.recurse=false", "-c", "fetch.recurseSubmodules=false", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always", ...disabledFilters, ...args], { cwd, env, encoding: "utf8", timeout: 120000, maxBuffer: 32 * 1024 * 1024 });
+  }
+  return { env, args: ["--no-pager", "-c", "core.fsmonitor=false", "-c", "submodule.recurse=false", "-c", "fetch.recurseSubmodules=false", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always", ...disabledFilters, ...args] };
+}
+function gitFailure(args: string[], error: unknown): Error {
+  const code = (error as { code?: unknown }).code;
+  const failure = new Error(`Git ${args[0] ?? "operation"} failed (exit ${String(code ?? "unknown")})`);
+  Object.assign(failure, { code }); return failure;
+}
+export async function gitCommand(cwd: string, args: string[]): Promise<string> {
+  try {
+    const invocation = await gitInvocation(cwd, args);
+    const { stdout } = await exec("git", invocation.args, { cwd, env: invocation.env, encoding: "utf8", timeout: 120000, maxBuffer: 32 * 1024 * 1024 });
     return stdout;
+  } catch (error) { throw gitFailure(args, error); }
+}
+
+export interface GitCommandPreview { text: string; previewTruncated: boolean; totalBytes: number; contentSha256: string }
+export async function gitCommandPreview(cwd: string, args: string[], options: { previewBytes?: number; timeoutMs?: number } = {}): Promise<GitCommandPreview> {
+  const limit = options.previewBytes ?? 4 * 1024 * 1024;
+  const timeoutMs = options.timeoutMs ?? 120000;
+  if (!Number.isSafeInteger(limit) || limit < 0 || limit > 4 * 1024 * 1024 || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000) throw new Error("Invalid bounded Git preview options");
+  try {
+    const invocation = await gitInvocation(cwd, args, timeoutMs);
+    return await new Promise<GitCommandPreview>((resolve, reject) => {
+      const child = spawn("git", invocation.args, { cwd, env: invocation.env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: process.platform !== "win32" });
+      const digest = createHash("sha256"), chunks: Buffer[] = [];
+      let totalBytes = 0, retainedBytes = 0, failure: unknown;
+      let forced: ReturnType<typeof setTimeout> | undefined;
+      const signal = (value: NodeJS.Signals) => {
+        if (process.platform === "win32") {
+          if (child.pid) void exec("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, timeout: 1000, maxBuffer: 65536 }).catch(() => {}).finally(() => child.kill(value));
+          else child.kill(value);
+        } else {
+          try { if (child.pid) process.kill(-child.pid, value); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") child.kill(value); }
+        }
+      };
+      const stop = (error: unknown) => {
+        if (failure) return;
+        failure = error; signal("SIGTERM");
+        forced = setTimeout(() => signal("SIGKILL"), 1000);
+      };
+      const timeout = setTimeout(() => stop(Object.assign(new Error("Git preview timed out"), { code: "ETIMEDOUT" })), timeoutMs);
+      child.stdout.on("data", (chunk: Buffer) => {
+        if (failure) return;
+        totalBytes += chunk.length;
+        if (!Number.isSafeInteger(totalBytes)) { stop(Object.assign(new Error("Git output size is not representable"), { code: "ERR_GIT_OUTPUT_SIZE" })); return; }
+        digest.update(chunk);
+        if (retainedBytes < limit) {
+          const prefix = chunk.subarray(0, Math.min(chunk.length, limit - retainedBytes));
+          chunks.push(Buffer.from(prefix)); retainedBytes += prefix.length;
+        }
+      });
+      // Drain diagnostics without retaining or forwarding potentially private stderr.
+      child.stderr.on("data", () => {});
+      child.stdout.once("error", stop); child.stderr.once("error", stop);
+      child.once("error", error => { failure ??= error; });
+      child.once("close", code => {
+        clearTimeout(timeout); if (forced) clearTimeout(forced);
+        if (process.platform !== "win32") signal("SIGKILL");
+        if (failure) { reject(failure); return; }
+        if (code !== 0) { reject(Object.assign(new Error("Git command failed"), { code: code ?? "unknown" })); return; }
+        const decoder = new StringDecoder("utf8");
+        let previewTruncated = totalBytes > retainedBytes;
+        // An incomplete code point at the raw preview boundary remains pending;
+        // only a complete output may flush the decoder's final bytes.
+        let text = decoder.write(Buffer.concat(chunks, retainedBytes)) + (previewTruncated ? "" : decoder.end());
+        const encoded = Buffer.from(text, "utf8");
+        if (encoded.length > limit) {
+          // Invalid source encodings can expand into multi-byte replacement
+          // characters. Bound the serialized UTF-8 preview as well as raw input.
+          text = new StringDecoder("utf8").write(encoded.subarray(0, limit));
+          previewTruncated = true;
+        }
+        resolve({ text, previewTruncated, totalBytes, contentSha256: digest.digest("hex") });
+      });
+    });
   } catch (error) {
-    const failure = new Error(`Git ${args[0] ?? "operation"} failed (exit ${String((error as { code?: unknown }).code ?? "unknown")})`);
-    Object.assign(failure, { code: (error as { code?: unknown }).code }); throw failure;
+    if ((error as { killed?: boolean }).killed && !(error as { code?: unknown }).code) Object.assign(error as object, { code: "ETIMEDOUT" });
+    throw gitFailure(args, error);
   }
 }
 function relative(root: string, name: string): string {

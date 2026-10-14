@@ -465,6 +465,7 @@ export class WorkflowEngine {
     let cacheInvalidFrom = Number.POSITIVE_INFINITY;
     let totalTokens = run.tasks.reduce((total, task) => total + task.attempts.reduce((subtotal, attempt) => subtotal + (attempt.usage?.totalTokens ?? 0), 0), 0);
     let phase: string | undefined;
+    let reviewing = false;
     const journal = structuredClone(run.tasks);
     // Bind observed-task choices to their producing inputs, independently of
     // launch position or later UI model/effort overrides. Hash shared args once.
@@ -625,6 +626,8 @@ export class WorkflowEngine {
       if (active.controller.signal.aborted) throw new Error("Workflow interrupted");
       run.result = result;
       if (run.workspace) {
+        reviewing = true;
+        delete run.maintenanceReview; delete run.diff;
         if (run.workspace.kind === "git-worktree") { run.maintenanceReview = await reviewMaintenance(run.workspace, run.maintenance ?? { steps: [] }); run.diff = run.maintenanceReview.diff; }
         else run.diff = await workspaceDiff(run.workspace);
         run.review = "ready";
@@ -638,10 +641,10 @@ export class WorkflowEngine {
       if (run.execution === "stopped") { run.stopReason ??= this.closing ? "service-shutdown" : "requested"; delete run.error; }
       else run.error = message(error);
       if (run.execution === "failed") run.failureContext = {
-        kind: "script", ...(phase ? { phase } : {}),
-        ...(run.tasks.length && run.tasks.every(task => task.status === "completed") ? { afterTaskId: run.tasks.at(-1)!.id } : {}),
+        kind: reviewing ? "review" : "script", ...(phase ? { phase } : {}),
+        ...(!reviewing && run.tasks.length && run.tasks.every(task => task.status === "completed") ? { afterTaskId: run.tasks.at(-1)!.id } : {}),
       };
-      if (run.workspace && run.workspace.kind !== "git-worktree") { try { run.diff = await workspaceDiff(run.workspace); } catch {} }
+      if (!reviewing && run.workspace && run.workspace.kind !== "git-worktree") { try { run.diff = await workspaceDiff(run.workspace); } catch {} }
       if (run.execution === "stopped") this.log(run, stopSummary(run.stopReason));
       else this.log(run, run.error!, undefined, "error");
     } finally {

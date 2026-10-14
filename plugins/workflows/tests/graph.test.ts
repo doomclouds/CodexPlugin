@@ -227,3 +227,24 @@ test("snapshot preparation failures do not turn historical completed tasks into 
   assert.equal(buildWorkflowGraph(current).phases.some(phase => phase.resultCheckFailed), false);
   assert.doesNotMatch(renderWorkflowGraph(current), /结果检查失败/);
 });
+
+test("review failure has a separate workflow card while successful workers and their phases stay complete", () => {
+  const current = run({ execution: "failed", tasks: [task("task-1", { status: "completed", phase: "审查" }), task("task-2", { status: "completed", phase: "汇总" })], failureContext: { kind: "review", afterTaskId: "task-2" } });
+  const graph = buildWorkflowGraph(current);
+  assert.deepEqual(graph.phases.map(phase => [phase.title, phase.status]), [["审查", "completed"], ["汇总", "completed"], ["改动审查", "failed"]]);
+  assert.equal(graph.taskCount, 2);
+  const html = renderWorkflowGraph(current);
+  assert.match(html, /审查失败/);
+  assert.match(html, /已完成任务结果保留，可重试审查/);
+  assert.equal((html.match(/data-task="task-[12]" data-status="completed"/g) ?? []).length, 2);
+  assert.equal((html.match(/id="wf-whole-workflow-process"/g) ?? []).length, 1);
+  assert.doesNotMatch(html, /结果检查失败/);
+});
+
+test("review failures without dispatched workers still render a single workflow review card", () => {
+  const current = run({ meta: { name: "no-workers", description: "" }, execution: "failed", failureContext: { kind: "review" } });
+  const graph = buildWorkflowGraph(current);
+  assert.equal(graph.phases.length, 1);
+  assert.equal(graph.phases[0]!.title, "改动审查");
+  assert.equal((renderWorkflowGraph(current).match(/id="wf-whole-workflow-process"/g) ?? []).length, 1);
+});

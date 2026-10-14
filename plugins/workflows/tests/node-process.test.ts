@@ -60,3 +60,26 @@ test("stopped processes explain the recorded cause without presenting an Abort e
   assert.equal(task.error, undefined);
   assert.match(nodeProcess({ ...stopped, stopReason: "owner-exited" }, { scope: "workflow" }).summary, /上次执行进程已退出/);
 });
+
+test("review generation failures belong to the workflow without relabeling successful tasks or phases", () => {
+  const reviewed = { ...run, execution: "failed" as const, failureContext: { kind: "review" as const, phase: "检查" }, error: "Could not build reviewed changes token=private-fixture", tasks: run.tasks.map(task => ({ ...task, status: "completed" as const, error: undefined })) };
+  const workflow = nodeProcess(reviewed, { scope: "workflow" });
+  assert.equal(workflow.status, "failed");
+  assert.equal(workflow.summary, "任务已完成，生成改动审查失败，可重试审查。");
+  assert.match(workflow.error ?? "", /Could not build reviewed changes/);
+  assert.ok(!JSON.stringify(workflow).includes("private-fixture"));
+  for (const input of [{ taskId: "task_1" }, { phase: "检查" }] as const) {
+    const process = nodeProcess(reviewed, input);
+    assert.equal(process.status, "completed");
+    assert.equal(process.error, undefined);
+    assert.equal(process.summary, "本节点已完成。");
+  }
+});
+
+test("a review failure retains its own error when the script handled an earlier failed parallel task", () => {
+  const reviewed = { ...run, execution: "failed" as const, failureContext: { kind: "review" as const }, error: "Review generation unavailable" };
+  const process = nodeProcess(reviewed, { scope: "workflow" });
+  assert.equal(process.summary, "部分任务未成功，继续时会重新执行失效任务并重新生成审查。");
+  assert.equal(process.error, "Review generation unavailable");
+  assert.match(nodeProcess(reviewed, { taskId: "task_1" }).error ?? "", /request/);
+});

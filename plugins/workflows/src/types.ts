@@ -45,6 +45,7 @@ export interface Workspace {
 export interface Diff {
   text: string; files: Array<{ path: string; status: "added" | "modified" | "deleted" }>;
   fingerprint: string; conflicts?: string[];
+  previewTruncated?: boolean; totalBytes?: number; contentSha256?: string;
 }
 export interface MaintenancePlan {
   steps: Array<{ id: string; command: string[]; networkAccess?: boolean; timeoutMs?: number; retries?: number; idempotent?: boolean; protectedPaths?: string[] }>;

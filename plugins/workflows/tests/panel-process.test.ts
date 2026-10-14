@@ -1,8 +1,8 @@
 import { projectFixtureResponse } from "./panel-project-fixture.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deletionPreviewPayload, fullFailureDetails, renderDeletionPreview, renderNodeProcess } from "../prototypes/panel.ts";
-import type { DeletionPreview, NodeProcess, WorkflowActivity } from "../prototypes/panel.ts";
+import { deletionPreviewPayload, fullFailureDetails, renderDeletionPreview, renderNodeProcess, renderWorkflowDiff } from "../prototypes/panel.ts";
+import type { DeletionPreview, NodeProcess, WorkflowActivity, WorkflowRun } from "../prototypes/panel.ts";
 import { elapsedLabel, renderWorkflowGraph } from "../prototypes/panel-graph.ts";
 
 const activity: WorkflowActivity = { id: "activity-1", kind: "command", label: "正在运行测试", status: "running", startedAt: "2026-10-14T00:00:00Z" };
@@ -29,6 +29,29 @@ test("full failure diagnostics are collapsed, escaped and credential redacted", 
   assert.ok(html.includes("diagnostic ".repeat(600)));
   assert.doesNotMatch(html, /<img|private-fixture|<details[^>]* open/);
   assert.match(html, /&lt;img/);
+});
+
+test("large diff previews identify their partial text, full byte count and digest without dropping changed files", () => {
+  const files = Array.from({ length: 321 }, (_, index) => ({ path: `changed-${index}.ts`, status: "modified" }));
+  const totalBytes = 9 * 1024 * 1024 + 17, contentSha256 = "e".repeat(64);
+  const run: WorkflowRun = { id: "large-review", revision: 1, createdAt: "", updatedAt: "", meta: { name: "large-review", description: "" }, script: "return args", args: {}, projectPath: "/fixture", allowWrite: true, execution: "completed", review: "ready", application: "none", tasks: [], logs: [], limits: { maxReadWorkers: 1, maxCalls: 1, timeoutMs: 1000, maxTokens: 0 }, diff: { files, text: "Bounded preview <sample>", fingerprint: "full-review-fingerprint", previewTruncated: true, totalBytes, contentSha256 } };
+  const html = renderWorkflowDiff(run);
+  assert.match(html, /以下仅显示部分差异预览/);
+  assert.match(html, /完整文件清单共 321 项/);
+  assert.match(html, /应用会处理完整清单中的变更/);
+  assert.ok(html.includes(totalBytes.toLocaleString("zh-CN") + " 字节"));
+  assert.ok(html.includes(contentSha256));
+  assert.equal((html.match(/class="wf-file-header"/g) ?? []).length, files.length);
+  assert.match(html, /changed-0\.ts/); assert.match(html, /changed-320\.ts/);
+  assert.match(html, /aria-label="差异部分预览"/);
+  assert.match(html, /Bounded preview &lt;sample&gt;/);
+  const normal = renderWorkflowDiff({ ...run, diff: { ...run.diff!, previewTruncated: false } });
+  assert.doesNotMatch(normal, /以下仅显示部分差异预览/);
+  assert.match(normal, /aria-label="统一差异"/);
+  const failed = renderWorkflowDiff({ ...run, execution: "failed", failureContext: { kind: "review" }, error: "Review temporarily failed" });
+  assert.match(failed, /改动审查失败/);
+  assert.match(failed, /回放有效缓存/);
+  assert.doesNotMatch(failed, /Bounded preview|class="wf-file-header"/);
 });
 const preview: DeletionPreview = { fingerprint: "verified", target: { kind: "run", id: "run", revision: 4 }, runs: [{ id: "run", revision: 4, name: "test", projectPath: "fixture" }], objects: [{ path: "owned-run", kind: "run", bytes: 1024, files: 5 }], totalBytes: 1024, totalFiles: 5, canDelete: false, blocked: [{ code: "ACTIVE_PROCESS", runId: "run", message: "执行器仍在运行，停止后重试" }] };
 test("deletion previews disclose exact counts and blockers without advertising successful cleanup", () => {

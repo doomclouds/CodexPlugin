@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -618,4 +619,49 @@ test("protected operations reject a retained command cwd redirected to the origi
   assert.equal(refused.tasks[0]?.attempts.at(-1)?.startedAt, undefined);
   assert.equal(await readFile(path.join(project, "source.txt"), "utf8"), "original\n");
   assert.equal((await exec("git", ["status", "--porcelain=v1"], { cwd: project })).stdout, "");
+});
+
+test("review transport failure preserves completed workers and commands for a cache-only ordinary resume", { skip: process.platform === "win32" }, async t => {
+  const adapter = new TestAdapter();
+  let commands = 0;
+  (adapter as TestAdapter & WorkerAdapter).command = async () => { commands++; return { exitCode: 0, stdout: "Fixture command completed", stderr: "", attempts: 1 }; };
+  const { root, project, engine } = await fixture(t, adapter);
+  await exec("git", ["-c", "user.name=Workflow Test", "-c", "user.email=workflow-test@example.invalid", "commit", "--quiet", "-m", "Commit review recovery fixture"], { cwd: project });
+  const originalPath = process.env.PATH;
+  let realGit: string | undefined;
+  for (const directory of (originalPath ?? "").split(path.delimiter)) {
+    const candidate = path.join(directory, "git");
+    try { await access(candidate, constants.X_OK); realGit = candidate; break; } catch {}
+  }
+  assert.ok(realGit, "The existing Git executable is required for this real transport fault fixture.");
+  const bin = path.join(root, "git-shim"), marker = path.join(root, "fail-review-diff");
+  await mkdir(bin);
+  await writeFile(marker, "fail only review diff commands\n");
+  await writeFile(path.join(bin, "git"), `#!/usr/bin/env node\nconst fs=require("node:fs");const cp=require("node:child_process");if(fs.existsSync(${JSON.stringify(marker)})&&process.argv.slice(2).includes("diff")){process.stderr.write("Fixture review transport failure\\n");process.exit(128);}const result=cp.spawnSync(${JSON.stringify(realGit)},process.argv.slice(2),{stdio:"inherit",env:process.env});process.exit(result.status??1);\n`, { mode: 0o755 });
+  process.env.PATH = bin + path.delimiter + (originalPath ?? "");
+  try {
+    const run = await engine.preview({ projectPath: project, allowWrite: true, workspaceMode: "git-worktree", maintenance: { steps: [{ id: "inspect", command: ["node", "--version"] }] }, script: script('phase("Review fixture"); await operation("inspect"); return await agent("completed review evidence");') });
+    await engine.start({ id: run.id, revision: run.revision });
+    const failed = await engine.wait(run.id);
+    assert.equal(failed.execution, "failed");
+    assert.deepEqual(failed.failureContext, { kind: "review", phase: "Review fixture" });
+    assert.ok(failed.tasks.every(task => task.status === "completed"));
+    assert.equal(failed.review, "unavailable");
+    assert.equal(failed.diff, undefined);
+    assert.equal(failed.maintenanceReview, undefined);
+    assert.equal(failed.result, "completed review evidence");
+    assert.equal(adapter.calls.length, 1);
+    assert.equal(commands, 1);
+    await rm(marker);
+    await engine.start({ id: run.id, revision: failed.revision }, true);
+    const completed = await engine.wait(run.id);
+    assert.equal(completed.execution, "completed", completed.error);
+    assert.equal(completed.review, "ready");
+    assert.ok(completed.diff);
+    assert.equal(completed.failureContext, undefined);
+    assert.ok(completed.tasks.every(task => task.status === "completed" && task.cached));
+    assert.deepEqual(completed.tasks.map(task => task.attempts.length), [1, 1]);
+    assert.equal(adapter.calls.length, 1, "Retrying review must not launch another model worker.");
+    assert.equal(commands, 1, "A confirmed command must not be repeated just to rebuild review.");
+  } finally { if (originalPath === undefined) delete process.env.PATH; else process.env.PATH = originalPath; }
 });

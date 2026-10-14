@@ -1,5 +1,5 @@
 import type { WorkflowAttempt, WorkflowRun, WorkflowTask } from "./panel.ts";
-import { resultCheckFailure } from "../src/failure-context.ts";
+import { failureContext, resultCheckFailure } from "../src/failure-context.ts";
 import type { WorkflowFailureContext } from "../src/failure-context.ts";
 
 export interface GraphExecutionSettings { model?: string; reasoningEffort?: string }
@@ -35,6 +35,7 @@ export interface WorkflowGraphPhase {
   groups: WorkflowGraphGroup[];
   placeholder: string;
   resultCheckFailed?: boolean;
+  reviewFailed?: boolean;
 }
 export interface WorkflowGraph {
   name: string;
@@ -96,7 +97,7 @@ function phaseStatus(tasks: GraphTask[], run: WorkflowGraphInput): GraphStatus {
   if (tasks.some(task => task.status === "queued")) return "queued";
   if (tasks.some(task => taskStatus(task) === "unknown")) return "unknown";
   if (tasks.length) return "completed";
-  return run.execution === "completed" ? "skipped" : "planned";
+  return run.execution === "completed" || failureContext(run)?.kind === "review" ? "skipped" : "planned";
 }
 
 export function buildWorkflowGraph(run?: WorkflowGraphInput): WorkflowGraph {
@@ -107,6 +108,7 @@ export function buildWorkflowGraph(run?: WorkflowGraphInput): WorkflowGraph {
   const declared = new Set(titles);
   for (const task of [...run.tasks].sort((left, right) => left.index - right.index)) if (task.phase) include(task.phase);
   const resultFailure = resultCheckFailure(run);
+  const reviewFailure = failureContext(run)?.kind === "review";
   if (resultFailure?.phase) include(resultFailure.phase);
   const unphased = run.tasks.filter(task => !task.phase);
   const unphasedTitle = titles.length ? "未分阶段的任务" : "任务执行";
@@ -115,7 +117,7 @@ export function buildWorkflowGraph(run?: WorkflowGraphInput): WorkflowGraph {
     const status = phaseStatus(tasks, run);
     return { title, status, kind: "phase", declared: declared.has(title), groups: groupTasks(tasks), placeholder: status === "skipped" ? "本次没有派发任务" : "任务将在实际派发后显示" };
   });
-  if (unphased.length || !phases.length) {
+  if (unphased.length || !phases.length && !reviewFailure) {
     const workflowOnly = !titles.length && !unphased.length;
     const status: GraphStatus = workflowOnly ? run.execution === "draft" ? "planned" : run.execution === "preparing" ? "running" : workflowStatuses.has(run.execution) ? run.execution : "unknown" : phaseStatus(unphased, run);
     phases.push({ title: workflowOnly ? run.meta.name : unphasedTitle, status, kind: workflowOnly ? "workflow" : "phase", declared: false, groups: groupTasks(unphased), placeholder: run.execution === "draft" ? "启动后展示动态任务" : run.execution === "running" ? "等待脚本派发任务" : "本次尚未派发任务" });
@@ -125,6 +127,7 @@ export function buildWorkflowGraph(run?: WorkflowGraphInput): WorkflowGraph {
     const target = phases.find(phase => phase.title === resultFailure.phase) ?? phases.find(phase => phase.title === relatedTask?.phase) ?? phases.find(phase => phase.groups.some(group => group.tasks.some(task => task.id === relatedTask?.id))) ?? phases.at(-1);
     if (target) { target.status = "failed"; target.resultCheckFailed = true; }
   }
+  if (reviewFailure) phases.push({ title: "改动审查", status: "failed", kind: "workflow", declared: false, groups: [], placeholder: run.tasks.every(task => task.status === "completed") ? "已完成任务结果保留，可重试审查" : "部分任务未完成，可继续恢复", reviewFailed: true });
   return { name: run.meta.name, phases, taskCount: run.tasks.length };
 }
 
@@ -191,7 +194,7 @@ export function renderWorkflowGraph(run?: WorkflowGraphInput, selectedTaskId?: s
     const tasks = phase.groups.flatMap(group => group.tasks);
     const active = tasks.find(task => task.status === "running" || task.status === "stopping") ?? [...tasks].reverse().find(task => task.status === "failed");
     const primary = active ?? tasks.at(-1), latest = primary?.attempts.at(-1);
-    const label = phase.resultCheckFailed ? "结果检查失败" : phase.status === "planned" ? phase.kind === "workflow" ? "待开始" : "待派发" : statusLabels[phase.status];
+    const label = phase.reviewFailed ? "审查失败" : phase.resultCheckFailed ? "结果检查失败" : phase.status === "planned" ? phase.kind === "workflow" ? "待开始" : "待派发" : statusLabels[phase.status];
     const identity = phase.kind === "workflow" ? 'data-process-scope="workflow"' : !phase.declared && tasks.length && tasks.every(task => !task.phase) ? 'data-process-scope="unphased"' : `data-phase="${escape(phase.title)}"`;
     const containerIdentity = identity.startsWith("data-phase=") ? `data-phase-container="${escape(phase.title)}"` : identity;
     const settings = configurationLabel(mergeSettings(run.executionSettings, phase.declared ? run.nodeSettings?.[`phase:${phase.title}`] : undefined));
@@ -199,7 +202,7 @@ export function renderWorkflowGraph(run?: WorkflowGraphInput, selectedTaskId?: s
     const nodeSettings = phase.declared ? settingsButton(`phase:${phase.title}`, phase.title, run) : single && !Object.hasOwn(primary!.options, "operation") ? settingsButton(`task:${primary!.index}`, phase.title, run) : "";
     const completedActivity = primary?.status === "running" ? [...(latest?.activities ?? [])].reverse().find(activity => activity.status === "completed" && ["command", "files", "search", "mcp"].includes(activity.kind)) : undefined;
     const taskList = tasks.length > 1 ? `<details class="wf-graph-task-list" data-graph-detail="${escape(phase.title)}"><summary>${tasks.length} 个实际任务 · 查看明细</summary><div class="wf-graph-groups">${phase.groups.map(group => `<div class="wf-graph-group" data-concurrent="${group.concurrent}">${group.concurrent ? `<div class="wf-graph-group-label">${group.live ? "并行任务组" : "曾有并行"} · ${group.tasks.length} 个任务</div>` : ""}<div class="wf-graph-nodes">${group.tasks.filter(task => task.id !== primary?.id).map(task => renderTask(task, run, selectedTaskId, now)).join("")}</div></div>`).join("")}</div></details>` : "";
-    return `<section class="wf-graph-phase" data-status="${phase.status}" data-kind="${phase.kind}" ${containerIdentity}><header class="wf-graph-phase-heading">${icon(phase.status)}<span class="wf-graph-phase-title">${escape(phase.title)}</span><button type="button" class="wf-node-process-icon" ${phase.kind === "workflow" ? 'id="wf-whole-workflow-process"' : identity.includes("unphased") ? 'id="wf-unphased-process"' : ""} ${identity} aria-label="${escape(`查看 ${phase.title} 的过程与错误`)}"><span class="wf-icon" data-icon="file-text" aria-hidden="true"></span></button>${nodeSettings}</header><div class="wf-graph-phase-state" data-tone="${phase.status === "running" ? "blue" : phase.status === "failed" ? "red" : phase.status === "completed" ? "green" : "neutral"}">${run.stale ? "上次记录 · " : ""}${escape(label)}${latest?.startedAt ? ` · ${elapsedLabel(latest.startedAt, latest.endedAt, now)}` : ""}</div>${primary ? renderTask(primary, run, selectedTaskId, now, true, false) : phase.kind === "workflow" && phase.status === "planned" ? '<p class="wf-graph-node-model">启动后展示动态任务</p>' : ""}${completedActivity ? `<p class="wf-graph-completed-activity"><span class="wf-icon" data-icon="circle-check" aria-hidden="true"></span>${escape(completedActivity.label)}</p>` : ""}${taskList}${["running", "failed", "stopping", "interrupted"].includes(phase.status) ? `<button type="button" class="wf-node-view-process" ${identity}>${phase.status === "failed" ? "查看错误" : "查看过程"}<span class="wf-icon" data-icon="chevron-right" aria-hidden="true"></span></button>` : ""}<span class="wf-graph-node-model">${escape(settings)}</span></section>`;
+    return `<section class="wf-graph-phase" data-status="${phase.status}" data-kind="${phase.kind}" ${containerIdentity}><header class="wf-graph-phase-heading">${icon(phase.status)}<span class="wf-graph-phase-title">${escape(phase.title)}</span><button type="button" class="wf-node-process-icon" ${phase.kind === "workflow" ? 'id="wf-whole-workflow-process"' : identity.includes("unphased") ? 'id="wf-unphased-process"' : ""} ${identity} aria-label="${escape(`查看 ${phase.title} 的过程与错误`)}"><span class="wf-icon" data-icon="file-text" aria-hidden="true"></span></button>${nodeSettings}</header><div class="wf-graph-phase-state" data-tone="${phase.status === "running" ? "blue" : phase.status === "failed" ? "red" : phase.status === "completed" ? "green" : "neutral"}">${run.stale ? "上次记录 · " : ""}${escape(label)}${latest?.startedAt ? ` · ${elapsedLabel(latest.startedAt, latest.endedAt, now)}` : ""}</div>${phase.reviewFailed ? `<p class="wf-muted">${escape(phase.placeholder)}</p>` : ""}${primary ? renderTask(primary, run, selectedTaskId, now, true, false) : phase.kind === "workflow" && phase.status === "planned" ? '<p class="wf-graph-node-model">启动后展示动态任务</p>' : ""}${completedActivity ? `<p class="wf-graph-completed-activity"><span class="wf-icon" data-icon="circle-check" aria-hidden="true"></span>${escape(completedActivity.label)}</p>` : ""}${taskList}${["running", "failed", "stopping", "interrupted"].includes(phase.status) ? `<button type="button" class="wf-node-view-process" ${identity}>${phase.status === "failed" ? "查看错误" : "查看过程"}<span class="wf-icon" data-icon="chevron-right" aria-hidden="true"></span></button>` : ""}${phase.reviewFailed ? "" : `<span class="wf-graph-node-model">${escape(settings)}</span>`}</section>`;
   }).join(connector);
   return `<div class="wf-graph" role="region" aria-label="${escape(`${graph.name} 工作流执行图`)}"><div class="wf-graph-scroll"><div class="wf-graph-track">${phases}</div></div><p class="wf-graph-caption">连线表示阶段展示顺序，动态分支与循环以实际派发节点为准。${run.stale ? "连接恢复后核对实际进度。" : ""}</p></div>`;
 }

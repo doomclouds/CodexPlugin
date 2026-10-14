@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { appendFile, chmod, lstat, mkdir, mkdtemp, open, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +13,7 @@ import { activateMcpServer, applyMaintenance, createGitWorkspace, maintenanceFin
 import type { ActivationSessionFactory } from "../src/maintenance.ts";
 import type { MaintenancePlan } from "../src/types.ts";
 import { assertPrivateFixtureFile, preparePrivateFixtureDirectory } from "./fixtures/private-file.ts";
+import { gitCommandPreview } from "../src/submodules.ts";
 
 const exec = promisify(execFile);
 const plan: MaintenancePlan = { steps: [{ id: "check", command: ["node", "--version"] }] };
@@ -47,6 +49,86 @@ async function fixture(t: TestContext) {
   };
   return { root, project, remote, data, base, advance };
 }
+
+async function fullPatchFingerprint(cwd: string, args: string[]) {
+  const hash = createHash("sha256"); let bytes = 0;
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("git", ["--no-pager", ...args], { cwd, stdio: ["ignore", "pipe", "ignore"] });
+    child.stdout.on("data", (chunk: Buffer) => { bytes += chunk.length; hash.update(chunk); });
+    child.once("error", reject);
+    child.once("close", code => code === 0 ? resolve() : reject(new Error("Reference Git diff failed")));
+  });
+  return { bytes, hash: hash.digest("hex") };
+}
+
+test("Git previews retain complete byte/hash metadata without cutting UTF-8 code points", async t => {
+  const { project } = await fixture(t);
+  const value = "A你🙂Z\n";
+  await writeFile(path.join(project, "utf8.txt"), value);
+  await git(project, "add", "--all"); await git(project, "commit", "--quiet", "-m", "Add Unicode fixture");
+  const clipped = await gitCommandPreview(project, ["show", "HEAD:utf8.txt"], { previewBytes: 5 });
+  assert.equal(clipped.text, "A你");
+  assert.equal(clipped.text.includes("\ufffd"), false);
+  assert.equal(clipped.previewTruncated, true);
+  assert.equal(clipped.totalBytes, Buffer.byteLength(value));
+  assert.equal(clipped.contentSha256, createHash("sha256").update(value).digest("hex"));
+  const complete = await gitCommandPreview(project, ["show", "HEAD:utf8.txt"]);
+  assert.equal(complete.text, value); assert.equal(complete.previewTruncated, false);
+  assert.equal(complete.contentSha256, clipped.contentSha256);
+  const legacyBytes = Buffer.from([0xff, 0xe9, 0x42, 0xfe]);
+  await writeFile(path.join(project, "legacy.txt"), legacyBytes);
+  await git(project, "add", "--all"); await git(project, "commit", "--quiet", "-m", "Add non-UTF8 fixture");
+  const legacy = await gitCommandPreview(project, ["show", "HEAD:legacy.txt"], { previewBytes: 6 });
+  assert.equal(legacy.totalBytes, legacyBytes.length);
+  assert.equal(legacy.contentSha256, createHash("sha256").update(legacyBytes).digest("hex"));
+  assert.equal(legacy.previewTruncated, true, "Replacement characters must not expand a complete raw prefix beyond the serialized preview cap.");
+  assert.ok(Buffer.byteLength(legacy.text) <= 6);
+  assert.equal(legacy.text, "\ufffd\ufffd");
+  await assert.rejects(gitCommandPreview(project, ["show", "private-fixture-secret-revision"]), error => {
+    assert.ok(error instanceof Error); assert.equal(error.message.includes("private-fixture-secret-revision"), false);
+    assert.match(error.message, /Git show failed/); return true;
+  });
+});
+
+test("maintenance reviews and applies a real patch larger than 32 MiB using a bounded preview", async t => {
+  const { project, data, base } = await fixture(t);
+  const workspace = await createGitWorkspace(project, data);
+  const filename = path.join(workspace.root, "bulk.txt");
+  const block = ("large-review-content-" + "x".repeat(106) + "\n").repeat(8192);
+  const contentHash = createHash("sha256"), file = await open(filename, "w");
+  try { for (let index = 0; index < 35; index++) { await file.writeFile(block); contentHash.update(block); } }
+  finally { await file.close(); }
+  const expectedContentHash = contentHash.digest("hex");
+  await git(workspace.root, "add", "--all"); await git(workspace.root, "commit", "--quiet", "-m", "Add large real review fixture");
+  await git(workspace.root, "config", "color.ui", "always");
+  const target = await git(workspace.root, "rev-parse", "HEAD");
+  const args = ["diff", "--binary", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", base, target, "--"];
+  const expected = await fullPatchFingerprint(workspace.root, args);
+  assert.ok(expected.bytes > 32 * 1024 * 1024, "The real patch must exceed the previous Git buffer limit.");
+  const review = await reviewMaintenance(workspace, plan);
+  assert.equal(review.diff.previewTruncated, true);
+  assert.ok(Buffer.byteLength(review.diff.text) <= 4 * 1024 * 1024);
+  assert.equal(review.diff.totalBytes, expected.bytes);
+  assert.equal(review.diff.contentSha256, expected.hash);
+  assert.equal(review.diff.text.includes("\u001b["), false);
+  assert.deepEqual(review.diff.files, [{ path: "bulk.txt", status: "added" }]);
+  assert.equal(review.preparedClean, true);
+  const begin = Date.now();
+  await assert.rejects(gitCommandPreview(workspace.root, args, { timeoutMs: 5 }), error => {
+    assert.equal((error as NodeJS.ErrnoException).code, "ETIMEDOUT"); return true;
+  });
+  assert.ok(Date.now() - begin < 10000, "A timed-out Git process must be terminated and reaped.");
+  await appendFile(filename, "uncommitted change beyond the preview\n");
+  const tampered = await reviewMaintenance(workspace, plan);
+  assert.equal(tampered.diff.text, review.diff.text);
+  assert.equal(tampered.diff.contentSha256, review.diff.contentSha256);
+  assert.notEqual(tampered.fingerprint, review.fingerprint, "Full checkout state, not patch preview or patch hash, protects application.");
+  await assert.rejects(applyMaintenance(workspace, review, plan), /changed since review/);
+  await git(workspace.root, "restore", "--", "bulk.txt");
+  assert.equal((await applyMaintenance(workspace, review, plan)).applied, true);
+  assert.equal(await git(project, "rev-parse", "HEAD"), target);
+  assert.equal(createHash("sha256").update(await readFile(path.join(project, "bulk.txt"))).digest("hex"), expectedContentHash);
+});
 
 test("maintenance plans are explicit argument vectors with bounded retries and a separate network grant", () => {
   assert.deepEqual(validateMaintenance(plan, false), plan);

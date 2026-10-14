@@ -210,3 +210,24 @@ test("new protected-directory permissions create a fresh preview and stay scoped
   assert.equal(Object.hasOwn(mutations()[0]!.args, "protectedPaths"), false, "Step permissions must never become whole-run permissions.");
   await panel.teardown();
 });
+
+test("retrying review resumes the existing completed task cache without requesting worker retry", async () => {
+  const previous = savedRun({ execution: "failed", failureContext: { kind: "review", afterTaskId: "task_1" }, error: "Could not prepare review", tasks: [{ id: "task_1", index: 0, prompt: "verify", options: {}, mode: "read", status: "completed", cached: false, attempts: [], output: "Verified" }] });
+  assert.deepEqual(primaryWorkflowAction(previous), { action: "retry-review", label: "重试审查" });
+  const { panel, mutations } = fixture(previous);
+  await panel.connected();
+  await panel.startWithInput(inputFor(previous));
+  assert.deepEqual(mutations(), [{ name: "workflow_resume", args: { id: previous.id, revision: previous.revision, leaseId: "lease-test" } }]);
+  assert.equal(Object.hasOwn(mutations()[0]!.args, "retryFromTaskId"), false);
+  await panel.teardown();
+});
+
+test("review failure after an ignored parallel worker failure keeps the ordinary resume action", () => {
+  const previous = savedRun({ execution: "failed", failureContext: { kind: "review" }, script: 'return await parallel([() => agent("required"), () => agent("optional")]);', result: ["Verified", null], tasks: [
+    { id: "task_1", index: 0, prompt: "required", options: {}, mode: "read", status: "completed", cached: false, attempts: [], output: "Verified" },
+    { id: "task_2", index: 1, prompt: "optional", options: {}, mode: "read", status: "failed", cached: false, attempts: [], error: "Optional worker failed" },
+  ] });
+  assert.deepEqual(primaryWorkflowAction(previous), { action: "start", label: "继续" });
+  assert.deepEqual(primaryWorkflowAction({ ...previous, tasks: [{ ...previous.tasks[1]!, status: "interrupted" }] }), { action: "start", label: "继续" });
+  assert.deepEqual(primaryWorkflowAction({ ...previous, tasks: [] }), { action: "retry-review", label: "重试审查" });
+});

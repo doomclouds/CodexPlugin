@@ -45008,9 +45008,9 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.5.6",
+    version: "0.5.7",
     stage: "runtime-v2",
-    available: ["declared-protected-command-paths", "explicit-task-retry", "snapshot-checkpoint", "git-context-cache", "preparation-progress", "node-activity", "node-process", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
+    available: ["bounded-diff-preview", "declared-protected-command-paths", "explicit-task-retry", "snapshot-checkpoint", "git-context-cache", "preparation-progress", "node-activity", "node-process", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: true, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree"], submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
     ui: { available: true, stage: "live", hostIntegration: "requires-version-specific-verification", exampleDataOnly: false, entrypoints: ["thread"], projectChatRequired: true, projectSelection: "fixed-current-chat-project", unassignedContext: "project-guidance-with-actions-disabled", programmaticProjectPath: "explicit-user-authorized-target" },
     recovery: { automatic: false, mode: "launch-order-replay", stoppedAgentsRestart: true },
@@ -45868,7 +45868,7 @@ var CodexAdapter = class {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.6" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.7" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config2 = object4(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config2, cwd);
@@ -46026,7 +46026,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.6" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.7" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -46257,7 +46257,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.6" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.7" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object4(object4(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== void 0 || request.reasoningEffort !== void 0) {
@@ -46406,39 +46406,128 @@ var CodexAdapter = class {
 };
 
 // src/submodules.ts
-import { execFile } from "node:child_process";
+import { execFile, spawn as spawn2 } from "node:child_process";
 import { createHash as createHash2 } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat as lstat3, mkdir as mkdir4, open as open2, readFile as readFile3, readdir as readdir2, readlink, realpath as realpath2 } from "node:fs/promises";
 import path5 from "node:path";
 import { promisify } from "node:util";
+import { StringDecoder as StringDecoder2 } from "node:string_decoder";
 var exec = promisify(execFile);
 var digest = (value) => createHash2("sha256").update(JSON.stringify(value)).digest("hex");
-async function gitCommand(cwd, args) {
+async function gitInvocation(cwd, args, timeoutMs = 12e4) {
   const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" };
   for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"]) delete env[key];
-  try {
-    const disabledFilters = [];
-    {
-      let names = "";
-      try {
-        names = (await exec("git", ["--no-pager", "config", "--name-only", "--get-regexp", "^filter\\..*\\.(clean|smudge|process|required)$"], { cwd, env, encoding: "utf8", timeout: 12e4, maxBuffer: 1024 * 1024 })).stdout;
-      } catch (error62) {
-        if (Number(error62.code) !== 1) throw error62;
-      }
-      const drivers = [...new Set(names.split("\n").filter(Boolean).map((key) => key.slice(0, key.lastIndexOf("."))))];
-      for (const driver of drivers) {
-        if (!/^filter\.[^\r\n\0]+$/.test(driver)) throw new Error("Unsupported Git filter configuration");
-        for (const field of ["clean", "smudge", "process"]) disabledFilters.push("-c", `${driver}.${field}=`);
-        disabledFilters.push("-c", `${driver}.required=false`);
-      }
+  const disabledFilters = [];
+  {
+    let names = "";
+    try {
+      names = (await exec("git", ["--no-pager", "config", "--name-only", "--get-regexp", "^filter\\..*\\.(clean|smudge|process|required)$"], { cwd, env, encoding: "utf8", timeout: timeoutMs, maxBuffer: 1024 * 1024 })).stdout;
+    } catch (error62) {
+      if (Number(error62.code) !== 1) throw error62;
     }
-    const { stdout } = await exec("git", ["--no-pager", "-c", "core.fsmonitor=false", "-c", "submodule.recurse=false", "-c", "fetch.recurseSubmodules=false", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always", ...disabledFilters, ...args], { cwd, env, encoding: "utf8", timeout: 12e4, maxBuffer: 32 * 1024 * 1024 });
+    const drivers = [...new Set(names.split("\n").filter(Boolean).map((key) => key.slice(0, key.lastIndexOf("."))))];
+    for (const driver of drivers) {
+      if (!/^filter\.[^\r\n\0]+$/.test(driver)) throw new Error("Unsupported Git filter configuration");
+      for (const field of ["clean", "smudge", "process"]) disabledFilters.push("-c", `${driver}.${field}=`);
+      disabledFilters.push("-c", `${driver}.required=false`);
+    }
+  }
+  return { env, args: ["--no-pager", "-c", "core.fsmonitor=false", "-c", "submodule.recurse=false", "-c", "fetch.recurseSubmodules=false", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always", ...disabledFilters, ...args] };
+}
+function gitFailure(args, error62) {
+  const code = error62.code;
+  const failure2 = new Error(`Git ${args[0] ?? "operation"} failed (exit ${String(code ?? "unknown")})`);
+  Object.assign(failure2, { code });
+  return failure2;
+}
+async function gitCommand(cwd, args) {
+  try {
+    const invocation = await gitInvocation(cwd, args);
+    const { stdout } = await exec("git", invocation.args, { cwd, env: invocation.env, encoding: "utf8", timeout: 12e4, maxBuffer: 32 * 1024 * 1024 });
     return stdout;
   } catch (error62) {
-    const failure2 = new Error(`Git ${args[0] ?? "operation"} failed (exit ${String(error62.code ?? "unknown")})`);
-    Object.assign(failure2, { code: error62.code });
-    throw failure2;
+    throw gitFailure(args, error62);
+  }
+}
+async function gitCommandPreview(cwd, args, options = {}) {
+  const limit2 = options.previewBytes ?? 4 * 1024 * 1024;
+  const timeoutMs = options.timeoutMs ?? 12e4;
+  if (!Number.isSafeInteger(limit2) || limit2 < 0 || limit2 > 4 * 1024 * 1024 || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 12e4) throw new Error("Invalid bounded Git preview options");
+  try {
+    const invocation = await gitInvocation(cwd, args, timeoutMs);
+    return await new Promise((resolve, reject) => {
+      const child = spawn2("git", invocation.args, { cwd, env: invocation.env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: process.platform !== "win32" });
+      const digest3 = createHash2("sha256"), chunks = [];
+      let totalBytes = 0, retainedBytes = 0, failure2;
+      let forced;
+      const signal = (value) => {
+        if (process.platform === "win32") {
+          if (child.pid) void exec("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, timeout: 1e3, maxBuffer: 65536 }).catch(() => {
+          }).finally(() => child.kill(value));
+          else child.kill(value);
+        } else {
+          try {
+            if (child.pid) process.kill(-child.pid, value);
+          } catch (error62) {
+            if (error62.code !== "ESRCH") child.kill(value);
+          }
+        }
+      };
+      const stop = (error62) => {
+        if (failure2) return;
+        failure2 = error62;
+        signal("SIGTERM");
+        forced = setTimeout(() => signal("SIGKILL"), 1e3);
+      };
+      const timeout = setTimeout(() => stop(Object.assign(new Error("Git preview timed out"), { code: "ETIMEDOUT" })), timeoutMs);
+      child.stdout.on("data", (chunk) => {
+        if (failure2) return;
+        totalBytes += chunk.length;
+        if (!Number.isSafeInteger(totalBytes)) {
+          stop(Object.assign(new Error("Git output size is not representable"), { code: "ERR_GIT_OUTPUT_SIZE" }));
+          return;
+        }
+        digest3.update(chunk);
+        if (retainedBytes < limit2) {
+          const prefix = chunk.subarray(0, Math.min(chunk.length, limit2 - retainedBytes));
+          chunks.push(Buffer.from(prefix));
+          retainedBytes += prefix.length;
+        }
+      });
+      child.stderr.on("data", () => {
+      });
+      child.stdout.once("error", stop);
+      child.stderr.once("error", stop);
+      child.once("error", (error62) => {
+        failure2 ??= error62;
+      });
+      child.once("close", (code) => {
+        clearTimeout(timeout);
+        if (forced) clearTimeout(forced);
+        if (process.platform !== "win32") signal("SIGKILL");
+        if (failure2) {
+          reject(failure2);
+          return;
+        }
+        if (code !== 0) {
+          reject(Object.assign(new Error("Git command failed"), { code: code ?? "unknown" }));
+          return;
+        }
+        const decoder = new StringDecoder2("utf8");
+        let previewTruncated = totalBytes > retainedBytes;
+        let text2 = decoder.write(Buffer.concat(chunks, retainedBytes)) + (previewTruncated ? "" : decoder.end());
+        const encoded = Buffer.from(text2, "utf8");
+        if (encoded.length > limit2) {
+          text2 = new StringDecoder2("utf8").write(encoded.subarray(0, limit2));
+          previewTruncated = true;
+        }
+        resolve({ text: text2, previewTruncated, totalBytes, contentSha256: digest3.digest("hex") });
+      });
+    });
+  } catch (error62) {
+    if (error62.killed && !error62.code) Object.assign(error62, { code: "ETIMEDOUT" });
+    throw gitFailure(args, error62);
   }
 }
 function relative(root, name) {
@@ -46901,9 +46990,8 @@ async function reviewMaintenance(workspace, plan) {
   await ownGit(workspace);
   const target = await head(workspace.root);
   const preparedClean = await clean(workspace.root);
-  const text2 = await git(workspace.root, ["diff", "--binary", "--no-ext-diff", "--no-textconv", "--no-renames", workspace.git.base, target, "--"]);
-  if (Buffer.byteLength(text2) > 4 * 1024 * 1024) throw new Error("Maintenance review diff exceeds 4 MiB");
-  const names = (await git(workspace.root, ["diff", "--name-status", "--no-renames", "-z", workspace.git.base, target, "--"])).split("\0").filter(Boolean);
+  const preview = await gitCommandPreview(workspace.root, ["diff", "--binary", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", workspace.git.base, target, "--"]);
+  const names = (await git(workspace.root, ["diff", "--name-status", "--no-color", "--no-renames", "-z", workspace.git.base, target, "--"])).split("\0").filter(Boolean);
   const files2 = [];
   for (let index = 0; index < names.length; index += 2) {
     const status = names[index], name = names[index + 1];
@@ -46912,7 +47000,7 @@ async function reviewMaintenance(workspace, plan) {
   const artifacts = await ignoredArtifacts(workspace);
   const artifactFingerprint = fingerprint(artifacts);
   const state = await maintenanceFingerprint(workspace);
-  const diff = { text: text2, files: files2, fingerprint: fingerprint({ base: workspace.git.base, target, state }) };
+  const diff = { ...preview, files: files2, fingerprint: fingerprint({ base: workspace.git.base, target, state }) };
   const submodules = submoduleStates(await inspectGitManifest(workspace.root, { enforceOwnedMetadata: true }));
   return { base: workspace.git.base, target, branch: workspace.git.branch, ...workspace.git.upstream ? { upstream: workspace.git.upstream } : {}, diff, artifacts, artifactFingerprint, preparedClean, fingerprint: fingerprint({ state, plan }), ...submodules.length ? { submodules } : {} };
 }
@@ -48260,9 +48348,10 @@ function nodeProcess(run, input2) {
   const activities = [...prep, ...tasks.flatMap((task) => task.attempts.flatMap((attempt) => attempt.activities ?? []))].slice(-100).map((activity) => ({ ...activity, label: diagnosticText(activity.label, 100), ...activity.detail ? { detail: diagnosticText(activity.detail, 240) } : {} }));
   const current2 = tasks.find((task) => task.currentActivity?.status === "running")?.currentActivity ?? last?.currentActivity;
   const failure2 = resultCheckFailure(run);
+  const reviewFailed = input2.scope === "workflow" && failureContext(run)?.kind === "review";
   const failedAfterTasks = Boolean(failure2 && (input2.scope === "workflow" || input2.phase && input2.phase === failure2.phase || tasks.some((task) => task.id === failure2.afterTaskId)));
-  const error62 = tasks.find((task) => task.status === "failed")?.error ?? (input2.scope === "workflow" || failedAfterTasks ? run.error : void 0);
-  const summary = failedAfterTasks ? "\u4EFB\u52A1\u6267\u884C\u5DF2\u5B8C\u6210\uFF0C\u4F46\u5DE5\u4F5C\u6D41\u5728\u540E\u7EED\u68C0\u67E5\u6216\u7ED3\u679C\u5224\u65AD\u65F6\u5931\u8D25\u3002\u8BF7\u6838\u5BF9\u9519\u8BEF\uFF0C\u518D\u9009\u62E9\u662F\u5426\u4ECE\u6B64\u8282\u70B9\u91CD\u8BD5\u3002" : status === "failed" ? "\u672C\u8282\u70B9\u6267\u884C\u5931\u8D25\uFF0C\u67E5\u770B\u9519\u8BEF\u4E0E\u8FC7\u7A0B\u540E\u518D\u51B3\u5B9A\u662F\u5426\u7EE7\u7EED\u3002" : status === "completed" ? "\u672C\u8282\u70B9\u5DF2\u5B8C\u6210\u3002" : status === "preparing" ? prep.find((activity) => activity.status === "running")?.label ?? "\u6B63\u5728\u51C6\u5907\u5DE5\u4F5C\u6D41\u3002" : status === "running" ? current2?.label ?? "\u6B63\u5728\u6267\u884C\u4EFB\u52A1\uFF0C\u7B49\u5F85\u65B0\u7684\u6D3B\u52A8\u3002" : status === "stopping" ? "\u6B63\u5728\u7B49\u5F85\u4EFB\u52A1\u9000\u51FA\u3002" : status === "interrupted" || status === "stopped" ? stopSummary(run.stopReason) : "\u672C\u8282\u70B9\u5C1A\u672A\u6267\u884C\u3002";
+  const error62 = reviewFailed ? run.error : tasks.find((task) => task.status === "failed")?.error ?? (input2.scope === "workflow" || failedAfterTasks ? run.error : void 0);
+  const summary = reviewFailed ? run.tasks.every((task) => task.status === "completed") ? "\u4EFB\u52A1\u5DF2\u5B8C\u6210\uFF0C\u751F\u6210\u6539\u52A8\u5BA1\u67E5\u5931\u8D25\uFF0C\u53EF\u91CD\u8BD5\u5BA1\u67E5\u3002" : "\u90E8\u5206\u4EFB\u52A1\u672A\u6210\u529F\uFF0C\u7EE7\u7EED\u65F6\u4F1A\u91CD\u65B0\u6267\u884C\u5931\u6548\u4EFB\u52A1\u5E76\u91CD\u65B0\u751F\u6210\u5BA1\u67E5\u3002" : failedAfterTasks ? "\u4EFB\u52A1\u6267\u884C\u5DF2\u5B8C\u6210\uFF0C\u4F46\u5DE5\u4F5C\u6D41\u5728\u540E\u7EED\u68C0\u67E5\u6216\u7ED3\u679C\u5224\u65AD\u65F6\u5931\u8D25\u3002\u8BF7\u6838\u5BF9\u9519\u8BEF\uFF0C\u518D\u9009\u62E9\u662F\u5426\u4ECE\u6B64\u8282\u70B9\u91CD\u8BD5\u3002" : status === "failed" ? "\u672C\u8282\u70B9\u6267\u884C\u5931\u8D25\uFF0C\u67E5\u770B\u9519\u8BEF\u4E0E\u8FC7\u7A0B\u540E\u518D\u51B3\u5B9A\u662F\u5426\u7EE7\u7EED\u3002" : status === "completed" ? "\u672C\u8282\u70B9\u5DF2\u5B8C\u6210\u3002" : status === "preparing" ? prep.find((activity) => activity.status === "running")?.label ?? "\u6B63\u5728\u51C6\u5907\u5DE5\u4F5C\u6D41\u3002" : status === "running" ? current2?.label ?? "\u6B63\u5728\u6267\u884C\u4EFB\u52A1\uFF0C\u7B49\u5F85\u65B0\u7684\u6D3B\u52A8\u3002" : status === "stopping" ? "\u6B63\u5728\u7B49\u5F85\u4EFB\u52A1\u9000\u51FA\u3002" : status === "interrupted" || status === "stopped" ? stopSummary(run.stopReason) : "\u672C\u8282\u70B9\u5C1A\u672A\u6267\u884C\u3002";
   const ids = new Set(tasks.map((task) => task.id));
   return {
     id: run.id,
@@ -48315,7 +48404,7 @@ function registerPanelToolWithIcons(server2, register) {
   }
 }
 function createServer(engine2, options = {}) {
-  const serverInfo = { name: "workflows", version: "0.5.6", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.5.7", icons: panelIcons };
   const panelHtml = readFileSync3(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);
@@ -49421,6 +49510,7 @@ var WorkflowEngine = class {
     let cacheInvalidFrom = Number.POSITIVE_INFINITY;
     let totalTokens = run.tasks.reduce((total, task) => total + task.attempts.reduce((subtotal, attempt) => subtotal + (attempt.usage?.totalTokens ?? 0), 0), 0);
     let phase;
+    let reviewing = false;
     const journal = structuredClone(run.tasks);
     const configurationScope = digest2({ projectPath: run.projectPath, goal: run.meta.description, args: run.args });
     const issued = /* @__PURE__ */ new Set();
@@ -49624,6 +49714,9 @@ ${prompt}`,
       if (active.controller.signal.aborted) throw new Error("Workflow interrupted");
       run.result = result2;
       if (run.workspace) {
+        reviewing = true;
+        delete run.maintenanceReview;
+        delete run.diff;
         if (run.workspace.kind === "git-worktree") {
           run.maintenanceReview = await reviewMaintenance(run.workspace, run.maintenance ?? { steps: [] });
           run.diff = run.maintenanceReview.diff;
@@ -49641,11 +49734,11 @@ ${prompt}`,
         delete run.error;
       } else run.error = message(error62);
       if (run.execution === "failed") run.failureContext = {
-        kind: "script",
+        kind: reviewing ? "review" : "script",
         ...phase ? { phase } : {},
-        ...run.tasks.length && run.tasks.every((task) => task.status === "completed") ? { afterTaskId: run.tasks.at(-1).id } : {}
+        ...!reviewing && run.tasks.length && run.tasks.every((task) => task.status === "completed") ? { afterTaskId: run.tasks.at(-1).id } : {}
       };
-      if (run.workspace && run.workspace.kind !== "git-worktree") {
+      if (!reviewing && run.workspace && run.workspace.kind !== "git-worktree") {
         try {
           run.diff = await workspaceDiff(run.workspace);
         } catch {

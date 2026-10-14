@@ -22,6 +22,9 @@ test("explicit failure provenance overrides legacy phase heuristics and checkpoi
   assert.deepEqual(failureContext({ ...legacy, failureContext: failure }), failure);
   assert.equal(resultCheckFailure({ ...legacy, failureContext: { kind: "checkpoint" } }), undefined);
   assert.equal(resultCheckFailure({ ...legacy, failureContext: { kind: "preparation" } }), undefined);
+  const review = { kind: "review" as const, phase: "结果验证" };
+  assert.deepEqual(failureContext({ ...legacy, failureContext: review }), review);
+  assert.equal(resultCheckFailure({ ...legacy, failureContext: review }), undefined, "Review generation is not the successful worker's script result check.");
 });
 
 test("legacy fallback ignores earlier attempts, unknown phases and worker-produced phase strings", () => {

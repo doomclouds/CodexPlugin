@@ -1,7 +1,7 @@
 import { elapsedLabel, renderWorkflowGraph } from "./panel-graph.ts";
 import { readParameters, renderParameterFields } from "./panel-parameters.ts";
 import type { WorkflowParameter } from "./panel-parameters.ts";
-import { failureErrorSummary, failureErrorText, resultCheckFailure } from "../src/failure-context.ts";
+import { failureContext, failureErrorSummary, failureErrorText, resultCheckFailure } from "../src/failure-context.ts";
 import { stopSummary } from "../src/stop-context.ts";
 import type { WorkflowStopReason } from "../src/stop-context.ts";
 import type { WorkflowFailureContext } from "../src/failure-context.ts";
@@ -69,6 +69,11 @@ export interface MaintenancePlan {
   activation?: { serverName: string; command: string; args: string[] };
 }
 
+export interface WorkflowDiff {
+  text: string; files: Array<{ path: string; status: string }>; fingerprint: string; conflicts?: string[];
+  previewTruncated?: boolean; totalBytes?: number; contentSha256?: string;
+}
+
 export interface WorkflowRun {
   failureContext?: WorkflowFailureContext;
   stopReason?: WorkflowStopReason;
@@ -104,7 +109,7 @@ export interface WorkflowRun {
   result?: unknown;
   tasks: WorkflowTask[];
   logs: Array<{ at: string; level: "info" | "error"; message: string; taskId?: string }>;
-  diff?: { text: string; files: Array<{ path: string; status: string }>; fingerprint: string; conflicts?: string[] };
+  diff?: WorkflowDiff;
   limits: { maxReadWorkers: number; maxCalls: number; timeoutMs: number; maxTokens: number };
   workspacePath?: string;
 }
@@ -764,10 +769,14 @@ function activationSummary(run: WorkflowRun): string {
   return `<h3 class="wf-section-title">服务激活</h3><div class="wf-notice">${escapeHtml(activation?.serverName ?? plan?.serverName)}：${escapeHtml(status)}</div>${activation?.error ? `<div class="wf-alert" role="alert">${escapeHtml(activation.error)}</div>` : ""}${command ? `<details data-detail="activation-target"><summary>查看目标启动命令</summary><pre>${escapeHtml(jsonInput({ command, args: args ?? [] }))}</pre></details>` : ""}`;
 }
 
-function diff(run: WorkflowRun): string {
+export function renderWorkflowDiff(run: WorkflowRun): string {
+  if (failureContext(run)?.kind === "review") return `<h3 class="wf-section-title">改动审查失败</h3><div class="wf-alert" role="alert">${escapeHtml(failureErrorSummary(run.error ?? "无法完成改动审查"))}</div><p class="wf-muted">${run.tasks.every(task => task.status === "completed") ? "已完成任务结果保留。点击“重试审查”将回放有效缓存并重新汇总差异，无需从任务节点重跑。" : "部分任务未完成。点击“继续”按普通恢复处理，可能重新执行失败或中断的任务；有效结果按恢复检查保留。"}</p>`;
   if (run.execution !== "completed") return '<div class="wf-empty">整个工作流执行完成后统一汇总差异。停止或失败时保留工作区，可恢复后继续。</div>';
   const conflicts = run.diff?.conflicts?.length ? `<div class="wf-alert" role="alert">存在应用冲突：${run.diff.conflicts.map(escapeHtml).join("、")}</div>` : "";
-  const changes = run.diff?.files.length ? `<h3 class="wf-section-title">变更文件</h3>${run.diff.files.map(file => `<div class="wf-file-header"><span>${escapeHtml(file.path)}</span><span>${escapeHtml(file.status)}</span></div>`).join("")}<pre aria-label="统一差异">${escapeHtml(run.diff.text)}</pre>` : '<div class="wf-empty">本次执行没有文件改动。</div>';
+  const bytes = typeof run.diff?.totalBytes === "number" && Number.isSafeInteger(run.diff.totalBytes) && run.diff.totalBytes >= 0 ? `${run.diff.totalBytes.toLocaleString("zh-CN")} 字节` : "未提供";
+  const preview = run.diff?.previewTruncated ? `<div class="wf-notice" role="status">以下仅显示部分差异预览。完整文件清单共 ${run.diff.files.length} 项；应用会处理完整清单中的变更。</div>` : "";
+  const integrity = run.diff?.contentSha256 ? `<details data-detail="diff-integrity"><summary>完整差异校验信息</summary><div class="wf-muted">完整差异总量：${escapeHtml(bytes)}<br>完整差异 SHA-256：<code>${escapeHtml(run.diff.contentSha256)}</code></div></details>` : "";
+  const changes = run.diff?.files.length ? `<h3 class="wf-section-title">变更文件（完整清单 · ${run.diff.files.length} 项）</h3>${run.diff.files.map(file => `<div class="wf-file-header"><span>${escapeHtml(file.path)}</span><span> · ${escapeHtml(file.status)}</span></div>`).join("")}${preview}${run.diff.previewTruncated ? `<p class="wf-muted">完整差异总量：${escapeHtml(bytes)}</p>` : ""}${integrity}<pre aria-label="${run.diff.previewTruncated ? "差异部分预览" : "统一差异"}">${escapeHtml(run.diff.text)}</pre>` : '<div class="wf-empty">本次执行没有文件改动。</div>';
 
   return `${run.application === "partial" ? `<div class="wf-alert" role="alert">${escapeHtml(partialApplicationMessage(run))}</div>` : ""}${conflicts}${changes}${maintenanceReview(run)}${activationSummary(run)}<div class="wf-notice">${escapeHtml(applicationLabels[run.application] ?? run.application)}。${run.activation?.status === "pending_restart" ? "配置已更新；宿主仍需重新加载并核对实际版本，脚本完成不代表新版服务已生效。" : "应用前会检查当前项目；冲突时保留工作区供你处理。"}</div>`;
 }
@@ -799,7 +808,8 @@ export function renderNodeProcess(process: NodeProcess, now = Date.now()): strin
   const entries = process.activities.map(activity => `<li data-status="${escapeHtml(activity.status)}"><span class="wf-icon${activity.status === "running" ? " is-spinning" : ""}" data-icon="${activity.status === "running" ? "loader-2" : activity.status === "completed" ? "circle-check" : activity.status === "failed" ? "alert-circle" : "circle"}" aria-hidden="true"></span><span>${escapeHtml(activity.label)}</span><time>${elapsedLabel(activity.startedAt, activity.endedAt, now)}</time></li>`).join("");
   return `<div class="wf-facts"><span>${escapeHtml(state)}</span>${process.currentActivity ? `<span>${process.status === "running" ? "当前" : "最后活动"}：${escapeHtml(process.currentActivity.label)}</span>` : ""}</div>${process.error ? `<div class="wf-alert" role="alert">${escapeHtml(process.error)}</div>` : ""}${entries ? `<ol class="wf-timeline">${entries}</ol>` : '<p class="wf-muted">此节点尚未报告过程活动。</p>'}${process.summary ? `<div class="wf-process-result">${escapeHtml(process.summary)}</div>` : ""}`;
 }
-export function primaryWorkflowAction(run?: WorkflowRun): { action: "start" | "inspect-failure"; label: string } {
+export function primaryWorkflowAction(run?: WorkflowRun): { action: "start" | "inspect-failure" | "retry-review"; label: string } {
+  if (run && failureContext(run)?.kind === "review" && run.tasks.every(task => task.status === "completed")) return { action: "retry-review", label: "重试审查" };
   return run && resultCheckFailure(run) ? { action: "inspect-failure", label: "查看失败原因" } : { action: "start", label: run && ["stopped", "failed"].includes(run.execution) ? "继续" : "启动" };
 }
 
@@ -832,6 +842,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   let parameterSnapshot: unknown, parametersSaved = false, nodeSignature = "", zoom = 1;
   let processTarget: { id: string; taskId?: string; phase?: string; scope?: "workflow" | "unphased" } | undefined;
   let processLoading = false, processRequest = 0, processSignature = "", developerRequested = false;
+  let reviewSignature = "";
   let deletionPreview: DeletionPreview | undefined, deletionLoading = false, deletionRequest = 0;
   let lastGraph = "", lastGraphOwner = "";
   const returns = new Map<HTMLDialogElement, { id?: string; task?: string; phase?: string; scope?: string; node?: string }>();
@@ -890,8 +901,8 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       if (request !== processRequest || !processDialog.open || JSON.stringify(target) !== JSON.stringify(processTarget)) return;
       const process = data.process as NodeProcess | undefined;
       if (!process || !Array.isArray(process.activities) || typeof process.summary !== "string" || typeof process.label !== "string") throw new Error("节点过程格式无效");
-      element("#wf-process-title").textContent = process.label;
       const run = controller.selected, failure = run && resultCheckFailure(run);
+      element("#wf-process-title").textContent = run && failureContext(run)?.kind === "review" && target.scope === "workflow" ? "改动审查失败" : process.label;
       const relatedFailure = run?.execution === "failed" && (target.scope === "workflow" || failure && (failure.afterTaskId && target.taskId === failure.afterTaskId || failure.phase && target.phase === failure.phase));
       element("#wf-process-body").innerHTML = renderNodeProcess(process) + (relatedFailure && run?.error ? fullFailureDetails(run.error) : "");
       if (developer && developerLogs.open) element("#wf-process-developer").textContent = process.logs?.map(log => `${displayTime(log.at)} ${log.level} ${log.message}`).join("\n") || "此节点暂无开发日志。";
@@ -907,8 +918,8 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (task) controller.state.task = task.id;
     processTarget = { id: run.id, ...(task ? { taskId: task.id } : knownPhase ? { phase: failure!.phase! } : { scope: "workflow" as const }) };
     processSignature = ""; developerRequested = false; developerLogs.open = false;
-    element("#wf-process-title").textContent = "结果检查失败";
-    element("#wf-process-body").textContent = "正在读取失败原因与关联任务。重新执行需明确选择‘从此节点重试’。";
+    element("#wf-process-title").textContent = failureContext(run)?.kind === "review" ? "改动审查失败" : "结果检查失败";
+    element("#wf-process-body").textContent = failureContext(run)?.kind === "review" ? "正在读取改动审查错误，已完成任务的有效结果保留。" : "正在读取失败原因与关联任务。重新执行需明确选择‘从此节点重试’。";
     openDialog(processDialog, trigger); render();
   };
   const targetForDeletion = (): DeletionTarget => {
@@ -1010,7 +1021,8 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     element<HTMLButtonElement>("#wf-refresh").disabled = state.connection === "closed" || state.reconnecting;
     const stateElement = element("#wf-execution-status");
     const resultFailure = run && resultCheckFailure(run);
-    const executionText = run && stale ? "状态待确认" : !controller.projectBound ? "项目待确认" : run?.deletionPending ? "清理未完成" : resultFailure ? "结果检查失败" : run ? executionLabels[run.execution] ?? run.execution : input ? "待开始" : "待选择";
+    const reviewFailed = run && failureContext(run)?.kind === "review";
+    const executionText = run && stale ? "状态待确认" : !controller.projectBound ? "项目待确认" : run?.deletionPending ? "清理未完成" : reviewFailed ? "改动审查失败" : resultFailure ? "结果检查失败" : run ? executionLabels[run.execution] ?? run.execution : input ? "待开始" : "待选择";
     if (stateElement.textContent !== executionText) stateElement.textContent = executionText;
     stateElement.dataset.tone = stale || run?.deletionPending ? "amber" : tone(run?.execution ?? "draft");
     const action = (name: string, label: string, enabled: boolean, primary = false): string => `<button type="button" data-action="${name}" ${primary ? 'class="wf-primary"' : ""} ${enabled ? "" : "disabled"}><span class="wf-icon" data-icon="${name === "stop" ? "player-stop" : "player-play"}" aria-hidden="true"></span>${label}</button>`;
@@ -1020,7 +1032,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (element("#wf-actions").innerHTML !== actionMarkup) element("#wf-actions").innerHTML = actionMarkup;
     const currentTask = run?.tasks.find(task => task.status === "running" || task.status === "stopping");
     const stage = run?.preparation?.stages.find(value => value.status === "running");
-    element("#wf-current-action").textContent = (run && stale ? state.reconnecting ? "正在恢复连接，核对实际进度" : "连接已中断，显示上次读取的进度" : !controller.projectBound ? state.projectsBusy ? "正在确认当前聊天所属项目" : "请从项目聊天打开 Workflows" : run?.deletionPending ? "清理未完成，可从更多操作中重试删除" : resultFailure ? `${resultFailure.phase ? resultFailure.phase + "：" : ""}结果检查未通过，查看原因后选择重试节点` : run?.execution === "preparing" ? stage?.label ?? "正在准备工作流" : run?.execution === "stopped" ? stopSummary(run.stopReason) : currentTask?.currentActivity?.label ?? currentTask?.label ?? (run?.execution === "failed" ? run.tasks.length ? "工作流执行失败，点击失败节点查看原因" : "启动准备失败，点击准备步骤查看原因" : run?.execution === "completed" ? "工作流执行完成" : input?.meta?.description || definition?.description || input?.meta?.name || "选择工作流，查看执行过程")).slice(0, 160);
+    element("#wf-current-action").textContent = (run && stale ? state.reconnecting ? "正在恢复连接，核对实际进度" : "连接已中断，显示上次读取的进度" : !controller.projectBound ? state.projectsBusy ? "正在确认当前聊天所属项目" : "请从项目聊天打开 Workflows" : run?.deletionPending ? "清理未完成，可从更多操作中重试删除" : reviewFailed ? run!.tasks.every(task => task.status === "completed") ? "改动审查失败，已完成任务保留，可重试审查" : "改动审查失败，部分任务未完成，可继续恢复" : resultFailure ? `${resultFailure.phase ? resultFailure.phase + "：" : ""}结果检查未通过，查看原因后选择重试节点` : run?.execution === "preparing" ? stage?.label ?? "正在准备工作流" : run?.execution === "stopped" ? stopSummary(run.stopReason) : currentTask?.currentActivity?.label ?? currentTask?.label ?? (run?.execution === "failed" ? run.tasks.length ? "工作流执行失败，点击失败节点查看原因" : "启动准备失败，点击准备步骤查看原因" : run?.execution === "completed" ? "工作流执行完成" : input?.meta?.description || definition?.description || input?.meta?.name || "选择工作流，查看执行过程")).slice(0, 160);
     const latestAt = [currentTask?.currentActivity?.endedAt, currentTask?.currentActivity?.startedAt, run?.logs.at(-1)?.at, run?.updatedAt].filter((value): value is string => !!value && Number.isFinite(Date.parse(value))).sort((left, right) => Date.parse(right) - Date.parse(left))[0];
     const observedNow = stale && run && Number.isFinite(Date.parse(run.updatedAt)) ? Date.parse(run.updatedAt) : Date.now();
     const elapsed = elapsedLabel(run?.startedAt ?? run?.preparation?.startedAt, run?.endedAt, observedNow);
@@ -1082,10 +1094,14 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       if (historyFocus) Array.from(element("#wf-history-list").querySelectorAll<HTMLElement>("[data-history-run],[data-history-delete]")).find(value => historyDeleteFocus ? value.dataset.historyDelete === historyFocus : value.dataset.historyRun === historyFocus)?.focus({ preventScroll: true });
     }
     if (reviewDialog.open) {
-      element("#wf-review-body").innerHTML = run ? `${run.result !== undefined ? `<div class="wf-process-result">${escapeHtml(formatted(run.result))}</div>` : ""}${diff(run)}` : '<p class="wf-muted">暂无运行记录</p>';
+      const nextReview = JSON.stringify([run?.id, run?.revision, run?.progressSequence, run?.execution, run?.review, run?.application, run?.diff?.fingerprint, run?.diff?.previewTruncated, run?.diff?.totalBytes, run?.diff?.contentSha256]);
+      if (nextReview !== reviewSignature) {
+        reviewSignature = nextReview;
+        element("#wf-review-body").innerHTML = run ? `${run.result !== undefined ? `<div class="wf-process-result">${escapeHtml(formatted(run.result))}</div>` : ""}${renderWorkflowDiff(run)}` : '<p class="wf-muted">暂无运行记录</p>';
+      }
       const apply = element<HTMLButtonElement>("#wf-apply-changes");
       apply.disabled = !controller.canAct || !run || !canApply(run, "diff");
-      apply.textContent = run?.application === "partial" ? "重试未完成步骤" : "应用改动";
+      apply.textContent = run?.application === "partial" ? "重试未完成步骤" : run?.diff?.previewTruncated ? "应用完整变更" : "应用改动";
     }
     const cancelTask = element<HTMLButtonElement>("#wf-cancel-task");
     const selectedProcessTask = run?.tasks.find(task => task.id === processTarget?.taskId);
@@ -1249,6 +1265,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (!action || action.disabled) return;
     if (action.dataset.action === "stop") { void controller.perform("stop", true); return; }
     if (action.dataset.action === "inspect-failure") { openFailureProcess(action); return; }
+    if (action.dataset.action === "retry-review") { void controller.perform("resume", true); return; }
     if (action.dataset.action === "start") {
       try { const input = readInput(); argsValue = input.args; parameterError.hidden = true; void controller.startWithInput(input); }
       catch (error) { parameterSnapshot = structuredClone(argsValue); parametersSaved = false; parameterError.textContent = errorMessage(error); parameterError.hidden = false; openDialog(parameterDialog, element("#wf-parameters-toggle")); }
