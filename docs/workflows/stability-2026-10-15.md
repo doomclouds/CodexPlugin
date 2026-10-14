@@ -63,3 +63,24 @@ node --experimental-strip-types scripts/workflows-stability.ts --real-workers --
 有限循环经过两轮实测；这不保证无限循环或任意业务任务稳定。网络波动、远端副作用的幂等、长时间资源耗尽、真实 MCP 服务故障和 worker 内部协作子代理的恢复仍需各自用例。取消和崩溃仅针对私有 fixture，没有用用户项目做破坏性注入。
 
 单次成功任务从 5–33 秒不等。本轮用于确定可复现的行为，样本不足以作性能基准或对长期稳定性作无条件保证。
+
+## 0.5.2 修复后的签名桌面 CLI 专项
+
+0.5.2 源码加入 `agents.enabled=false`，继续使用 ephemeral worker 和原生工具。该专项在本轮 `runtime/script-worker.js` 构建后启动，以环境中的 `CODEX_CLI_PATH` 选择签名桌面 CLI，实际版本为 `codex-cli 0.162.0-alpha.17.2`。使用全新私有项目和状态，worker 仍逐个显式指定并核验 `gpt-6-luna/max`。
+
+| 用例 | 模型调用 | 耗时 | reported totalTokens | 结果 |
+| --- | ---: | ---: | ---: | --- |
+| 原生工具和结构化返回 | 1 | 11.0 秒 | 20,137 | 通过；真实 `native:commandExecution` 读取随机标记；CLI configured |
+| 左分支、循环、并行、pipeline 首轮 | 7 | 38.8 秒 | 89,798 | 7 个 worker 均完成且 CLI configured，整体工作流 completed；测试的业务断言失败：selected 得到 R，应为 L |
+| 隔离写入、审查和应用 | 1 | 17.7 秒 | 44,259 | 通过；真实 `native:commandExecution` 和 `native:fileChange`；原项目应用前不变，差异和独立测试均通过 |
+| 左分支原样诊断复跑 | 7 | 45.6 秒 | 90,047 | 通过；decision 的实际结构化 data 为 `{marker:"left"}`，循环 `[1,2]`，真实 parallel 重叠，pipeline `[null,4]` |
+| 新状态左分支原样复跑 | 7 | 33.2 秒 | 89,938 | 通过；实际 decision 为 `{marker:"left"}`，循环 `[1,2]`，真实 parallel 重叠，pipeline `[null,4]` |
+| 同批右分支原样复跑 | 7 | 37.0 秒 | 89,511 | 通过；实际 decision 为 `{marker:"right"}`，循环 `[1,2]`，真实 parallel 重叠，pipeline `[null,4]` |
+
+专项累计 30 次真实模型请求、423,690 reported totalTokens，worker 本身均完成，没有模型或思考深度回退。其中第一批 9 次请求，增加 data 记录的诊断复跑 7 次请求，随后在新状态原样复跑左右分支共 14 次请求；最后这一批 reported totalTokens 为 179,449。
+
+首轮分支失败仍保留为未知语义偏差：当时夹具未保存 exact structured data，不能据此确认模型返回了哪个 marker，也不能将根因断定为模型或编排实现。诊断复跑仅增加开发报告中的 `data` 记录，**没有修改提示、schema 或插件源码**，随后取得通过实证；复跑通过不能抹掉首轮失败。
+
+今后的夹具记录结构化 data，便于区分模型内容、schema 契约、编排判断和工具执行的问题。业务工作流应对条件字段声明合适的枚举，并检查意外值；当前自由字符串示例默认落入右分支，所以无法在首轮给出更明确的错误位置。
+
+三批专项的临时项目和状态均已清理，原始摘要分别保留在测试指定的外部报告文件中。这仍是源码 Engine 的专项，不能代替安装包 MCP 传输、真实 App 面板或嵌套协作功能的验收。

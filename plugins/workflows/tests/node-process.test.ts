@@ -35,3 +35,15 @@ test("workflow process includes preparation failure with no task and unphased ha
   const unphased = { ...run, tasks: run.tasks.map(task => { const copy = { ...task }; delete copy.phase; return copy; }) };
   assert.equal(nodeProcess(unphased, { scope: "unphased" }).status, "failed");
 });
+
+test("a completed task distinguishes later workflow validation failure from worker failure", () => {
+  const first = { ...run.tasks[0]!, status: "completed" as const, error: undefined };
+  const last = { ...first, id: "task_2", index: 1, label: "验收结果" };
+  const rejected = { ...run, execution: "failed" as const, tasks: [first, last], error: "Validation rejected token=private-fixture" };
+  const view = nodeProcess(rejected, { taskId: "task_2" });
+  assert.equal(view.status, "completed", "Do not relabel a successful worker as failed.");
+  assert.match(view.summary, /结果判断时失败/);
+  assert.match(view.error ?? "", /Validation rejected/);
+  assert.ok(!JSON.stringify(view).includes("private-fixture"));
+  assert.equal(nodeProcess(rejected, { taskId: "task_1" }).error, undefined, "An earlier completed task is not the later validation failure.");
+});

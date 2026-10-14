@@ -269,10 +269,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path12) {
-  if (!path12)
+function getElementAtPath(obj, path13) {
+  if (!path13)
     return obj;
-  return path12.reduce((acc, key) => acc?.[key], obj);
+  return path13.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -531,11 +531,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path12, issues) {
+function prefixIssues(path13, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path12);
+    iss.path.unshift(path13);
     return iss;
   });
 }
@@ -1068,16 +1068,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path12 = []) => {
+  const processError = (error63, path13 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path12, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path13, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path13, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path13, ...issue2.path]);
       } else {
-        const fullpath = [...path12, ...issue2.path];
+        const fullpath = [...path13, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1116,17 +1116,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result2 = { errors: [] };
-  const processError = (error63, path12 = []) => {
+  const processError = (error63, path13 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path12, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path13, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path13, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path13, ...issue2.path]);
       } else {
-        const fullpath = [...path12, ...issue2.path];
+        const fullpath = [...path13, ...issue2.path];
         if (fullpath.length === 0) {
           result2.errors.push(mapper(issue2));
           continue;
@@ -1165,8 +1165,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path12 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path12) {
+  const path13 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path13) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -19198,13 +19198,13 @@ function resolveRef(ref2, ctx) {
   if (!ref2.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path12 = ref2.slice(1).split("/").filter(Boolean);
-  if (path12.length === 0) {
+  const path13 = ref2.slice(1).split("/").filter(Boolean);
+  if (path13.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path12[0] === defsKey) {
-    const key = path12[1] === void 0 ? void 0 : decodeJSONPointerSegment(path12[1]);
+  if (path13[0] === defsKey) {
+    const key = path13[1] === void 0 ? void 0 : decodeJSONPointerSegment(path13[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref2}`);
     }
@@ -20839,11 +20839,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants4);
+          this.rhs = optimizeExpr(this.rhs, names, constants5);
         return this;
       }
       get names() {
@@ -20860,10 +20860,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants4);
+        this.rhs = optimizeExpr(this.rhs, names, constants5);
         return this;
       }
       get names() {
@@ -20924,8 +20924,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants4) {
-        this.code = optimizeExpr(this.code, names, constants4);
+      optimizeNames(names, constants5) {
+        this.code = optimizeExpr(this.code, names, constants5);
         return this;
       }
       get names() {
@@ -20954,12 +20954,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         const { nodes } = this;
         let i2 = nodes.length;
         while (i2--) {
           const n = nodes[i2];
-          if (n.optimizeNames(names, constants4))
+          if (n.optimizeNames(names, constants5))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i2, 1);
@@ -21012,12 +21012,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         var _a3;
-        this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants4);
-        if (!(super.optimizeNames(names, constants4) || this.else))
+        this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants5);
+        if (!(super.optimizeNames(names, constants5) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants4);
+        this.condition = optimizeExpr(this.condition, names, constants5);
         return this;
       }
       get names() {
@@ -21040,10 +21040,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants4) {
-        if (!super.optimizeNames(names, constants4))
+      optimizeNames(names, constants5) {
+        if (!super.optimizeNames(names, constants5))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants4);
+        this.iteration = optimizeExpr(this.iteration, names, constants5);
         return this;
       }
       get names() {
@@ -21079,10 +21079,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants4) {
-        if (!super.optimizeNames(names, constants4))
+      optimizeNames(names, constants5) {
+        if (!super.optimizeNames(names, constants5))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants4);
+        this.iterable = optimizeExpr(this.iterable, names, constants5);
         return this;
       }
       get names() {
@@ -21124,11 +21124,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         var _a3, _b;
-        super.optimizeNames(names, constants4);
-        (_a3 = this.catch) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants4);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants4);
+        super.optimizeNames(names, constants5);
+        (_a3 = this.catch) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants5);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants5);
         return this;
       }
       get names() {
@@ -21429,7 +21429,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants4) {
+    function optimizeExpr(expr, names, constants5) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -21444,14 +21444,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n) {
-        const c = constants4[n.str];
+        const c = constants5[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants4[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants5[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -23691,8 +23691,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path12) {
-      let input2 = path12;
+    function removeDotSegments(path13) {
+      let input2 = path13;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -24101,8 +24101,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path12 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path12 && path12 !== "/" ? path12 : void 0;
+        const path13 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path13 && path13 !== "/" ? path13 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -27631,7 +27631,7 @@ var require_dist = __commonJS({
 // ../../node_modules/graceful-fs/polyfills.js
 var require_polyfills = __commonJS({
   "../../node_modules/graceful-fs/polyfills.js"(exports, module) {
-    var constants4 = __require("constants");
+    var constants5 = __require("constants");
     var origCwd = process.cwd;
     var cwd = null;
     var platform = process.env.GRACEFUL_FS_PLATFORM || process.platform;
@@ -27655,7 +27655,7 @@ var require_polyfills = __commonJS({
     var chdir;
     module.exports = patch;
     function patch(fs) {
-      if (constants4.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
+      if (constants5.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
         patchLchmod(fs);
       }
       if (!fs.lutimes) {
@@ -27680,14 +27680,14 @@ var require_polyfills = __commonJS({
       fs.fstatSync = statFixSync(fs.fstatSync);
       fs.lstatSync = statFixSync(fs.lstatSync);
       if (fs.chmod && !fs.lchmod) {
-        fs.lchmod = function(path12, mode, cb) {
+        fs.lchmod = function(path13, mode, cb) {
           if (cb) process.nextTick(cb);
         };
         fs.lchmodSync = function() {
         };
       }
       if (fs.chown && !fs.lchown) {
-        fs.lchown = function(path12, uid, gid, cb) {
+        fs.lchown = function(path13, uid, gid, cb) {
           if (cb) process.nextTick(cb);
         };
         fs.lchownSync = function() {
@@ -27754,10 +27754,10 @@ var require_polyfills = __commonJS({
         };
       })(fs.readSync);
       function patchLchmod(fs2) {
-        fs2.lchmod = function(path12, mode, callback) {
+        fs2.lchmod = function(path13, mode, callback) {
           fs2.open(
-            path12,
-            constants4.O_WRONLY | constants4.O_SYMLINK,
+            path13,
+            constants5.O_WRONLY | constants5.O_SYMLINK,
             mode,
             function(err, fd) {
               if (err) {
@@ -27772,8 +27772,8 @@ var require_polyfills = __commonJS({
             }
           );
         };
-        fs2.lchmodSync = function(path12, mode) {
-          var fd = fs2.openSync(path12, constants4.O_WRONLY | constants4.O_SYMLINK, mode);
+        fs2.lchmodSync = function(path13, mode) {
+          var fd = fs2.openSync(path13, constants5.O_WRONLY | constants5.O_SYMLINK, mode);
           var threw = true;
           var ret;
           try {
@@ -27793,9 +27793,9 @@ var require_polyfills = __commonJS({
         };
       }
       function patchLutimes(fs2) {
-        if (constants4.hasOwnProperty("O_SYMLINK") && fs2.futimes) {
-          fs2.lutimes = function(path12, at2, mt, cb) {
-            fs2.open(path12, constants4.O_SYMLINK, function(er, fd) {
+        if (constants5.hasOwnProperty("O_SYMLINK") && fs2.futimes) {
+          fs2.lutimes = function(path13, at2, mt, cb) {
+            fs2.open(path13, constants5.O_SYMLINK, function(er, fd) {
               if (er) {
                 if (cb) cb(er);
                 return;
@@ -27807,8 +27807,8 @@ var require_polyfills = __commonJS({
               });
             });
           };
-          fs2.lutimesSync = function(path12, at2, mt) {
-            var fd = fs2.openSync(path12, constants4.O_SYMLINK);
+          fs2.lutimesSync = function(path13, at2, mt) {
+            var fd = fs2.openSync(path13, constants5.O_SYMLINK);
             var ret;
             var threw = true;
             try {
@@ -27926,11 +27926,11 @@ var require_legacy_streams = __commonJS({
         ReadStream,
         WriteStream
       };
-      function ReadStream(path12, options) {
-        if (!(this instanceof ReadStream)) return new ReadStream(path12, options);
+      function ReadStream(path13, options) {
+        if (!(this instanceof ReadStream)) return new ReadStream(path13, options);
         Stream.call(this);
         var self = this;
-        this.path = path12;
+        this.path = path13;
         this.fd = null;
         this.readable = true;
         this.paused = false;
@@ -27975,10 +27975,10 @@ var require_legacy_streams = __commonJS({
           self._read();
         });
       }
-      function WriteStream(path12, options) {
-        if (!(this instanceof WriteStream)) return new WriteStream(path12, options);
+      function WriteStream(path13, options) {
+        if (!(this instanceof WriteStream)) return new WriteStream(path13, options);
         Stream.call(this);
-        this.path = path12;
+        this.path = path13;
         this.fd = null;
         this.writable = true;
         this.flags = "w";
@@ -28121,14 +28121,14 @@ var require_graceful_fs = __commonJS({
       fs2.createWriteStream = createWriteStream;
       var fs$readFile = fs2.readFile;
       fs2.readFile = readFile9;
-      function readFile9(path12, options, cb) {
+      function readFile9(path13, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$readFile(path12, options, cb);
-        function go$readFile(path13, options2, cb2, startTime) {
-          return fs$readFile(path13, options2, function(err) {
+        return go$readFile(path13, options, cb);
+        function go$readFile(path14, options2, cb2, startTime) {
+          return fs$readFile(path14, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$readFile, [path13, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$readFile, [path14, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28138,14 +28138,14 @@ var require_graceful_fs = __commonJS({
       }
       var fs$writeFile = fs2.writeFile;
       fs2.writeFile = writeFile7;
-      function writeFile7(path12, data2, options, cb) {
+      function writeFile7(path13, data2, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$writeFile(path12, data2, options, cb);
-        function go$writeFile(path13, data3, options2, cb2, startTime) {
-          return fs$writeFile(path13, data3, options2, function(err) {
+        return go$writeFile(path13, data2, options, cb);
+        function go$writeFile(path14, data3, options2, cb2, startTime) {
+          return fs$writeFile(path14, data3, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$writeFile, [path13, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$writeFile, [path14, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28156,14 +28156,14 @@ var require_graceful_fs = __commonJS({
       var fs$appendFile = fs2.appendFile;
       if (fs$appendFile)
         fs2.appendFile = appendFile;
-      function appendFile(path12, data2, options, cb) {
+      function appendFile(path13, data2, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$appendFile(path12, data2, options, cb);
-        function go$appendFile(path13, data3, options2, cb2, startTime) {
-          return fs$appendFile(path13, data3, options2, function(err) {
+        return go$appendFile(path13, data2, options, cb);
+        function go$appendFile(path14, data3, options2, cb2, startTime) {
+          return fs$appendFile(path14, data3, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$appendFile, [path13, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$appendFile, [path14, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28192,33 +28192,33 @@ var require_graceful_fs = __commonJS({
         }
       }
       var fs$readdir = fs2.readdir;
-      fs2.readdir = readdir7;
+      fs2.readdir = readdir8;
       var noReaddirOptionVersions = /^v[0-5]\./;
-      function readdir7(path12, options, cb) {
+      function readdir8(path13, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path13, options2, cb2, startTime) {
-          return fs$readdir(path13, fs$readdirCallback(
-            path13,
+        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path14, options2, cb2, startTime) {
+          return fs$readdir(path14, fs$readdirCallback(
+            path14,
             options2,
             cb2,
             startTime
           ));
-        } : function go$readdir2(path13, options2, cb2, startTime) {
-          return fs$readdir(path13, options2, fs$readdirCallback(
-            path13,
+        } : function go$readdir2(path14, options2, cb2, startTime) {
+          return fs$readdir(path14, options2, fs$readdirCallback(
+            path14,
             options2,
             cb2,
             startTime
           ));
         };
-        return go$readdir(path12, options, cb);
-        function fs$readdirCallback(path13, options2, cb2, startTime) {
+        return go$readdir(path13, options, cb);
+        function fs$readdirCallback(path14, options2, cb2, startTime) {
           return function(err, files2) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
               enqueue([
                 go$readdir,
-                [path13, options2, cb2],
+                [path14, options2, cb2],
                 err,
                 startTime || Date.now(),
                 Date.now()
@@ -28289,7 +28289,7 @@ var require_graceful_fs = __commonJS({
         enumerable: true,
         configurable: true
       });
-      function ReadStream(path12, options) {
+      function ReadStream(path13, options) {
         if (this instanceof ReadStream)
           return fs$ReadStream.apply(this, arguments), this;
         else
@@ -28297,7 +28297,7 @@ var require_graceful_fs = __commonJS({
       }
       function ReadStream$open() {
         var that = this;
-        open4(that.path, that.flags, that.mode, function(err, fd) {
+        open5(that.path, that.flags, that.mode, function(err, fd) {
           if (err) {
             if (that.autoClose)
               that.destroy();
@@ -28309,7 +28309,7 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function WriteStream(path12, options) {
+      function WriteStream(path13, options) {
         if (this instanceof WriteStream)
           return fs$WriteStream.apply(this, arguments), this;
         else
@@ -28317,7 +28317,7 @@ var require_graceful_fs = __commonJS({
       }
       function WriteStream$open() {
         var that = this;
-        open4(that.path, that.flags, that.mode, function(err, fd) {
+        open5(that.path, that.flags, that.mode, function(err, fd) {
           if (err) {
             that.destroy();
             that.emit("error", err);
@@ -28327,22 +28327,22 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function createReadStream(path12, options) {
-        return new fs2.ReadStream(path12, options);
+      function createReadStream(path13, options) {
+        return new fs2.ReadStream(path13, options);
       }
-      function createWriteStream(path12, options) {
-        return new fs2.WriteStream(path12, options);
+      function createWriteStream(path13, options) {
+        return new fs2.WriteStream(path13, options);
       }
       var fs$open = fs2.open;
-      fs2.open = open4;
-      function open4(path12, flags, mode, cb) {
+      fs2.open = open5;
+      function open5(path13, flags, mode, cb) {
         if (typeof mode === "function")
           cb = mode, mode = null;
-        return go$open(path12, flags, mode, cb);
-        function go$open(path13, flags2, mode2, cb2, startTime) {
-          return fs$open(path13, flags2, mode2, function(err, fd) {
+        return go$open(path13, flags, mode, cb);
+        function go$open(path14, flags2, mode2, cb2, startTime) {
+          return fs$open(path14, flags2, mode2, function(err, fd) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$open, [path13, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$open, [path14, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28871,7 +28871,7 @@ var require_mtime_precision = __commonJS({
 var require_lockfile = __commonJS({
   "../../node_modules/proper-lockfile/lib/lockfile.js"(exports, module) {
     "use strict";
-    var path12 = __require("path");
+    var path13 = __require("path");
     var fs = require_graceful_fs();
     var retry = require_retry2();
     var onExit = require_signal_exit();
@@ -28882,7 +28882,7 @@ var require_lockfile = __commonJS({
     }
     function resolveCanonicalPath(file2, options, callback) {
       if (!options.realpath) {
-        return callback(null, path12.resolve(file2));
+        return callback(null, path13.resolve(file2));
       }
       options.fs.realpath(file2, callback);
     }
@@ -31218,8 +31218,8 @@ function getErrorMap2() {
 
 // ../../node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data: data2, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data: data2, path: path13, errorMaps, issueData } = params;
+  const fullPath = [...path13, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -31334,11 +31334,11 @@ var errorUtil;
 
 // ../../node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path13, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path13;
     this._key = key;
   }
   get path() {
@@ -34901,11 +34901,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path12) {
-  if (path12.length === 0) {
+function getDotPath(path13) {
+  if (path13.length === 0) {
     return "object root";
   }
-  return path12.reduce((acc, seg, index) => {
+  return path13.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -45008,9 +45008,9 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.5.2",
+    version: "0.5.3",
     stage: "runtime-v2",
-    available: ["preparation-progress", "node-activity", "node-process", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
+    available: ["explicit-task-retry", "snapshot-checkpoint", "git-context-cache", "preparation-progress", "node-activity", "node-process", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: true, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree"], submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
     ui: { available: true, stage: "live", hostIntegration: "requires-version-specific-verification", exampleDataOnly: false },
     recovery: { automatic: false, mode: "launch-order-replay", stoppedAgentsRestart: true },
@@ -45814,7 +45814,7 @@ var CodexAdapter = class {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.2" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.3" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config2 = object4(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config2, cwd);
@@ -45961,7 +45961,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.2" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.3" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -46174,7 +46174,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.2" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.3" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object4(object4(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== void 0 || request.reasoningEffort !== void 0) {
@@ -46379,6 +46379,31 @@ async function readGitIndex(project) {
     return { mode: match[1], commit: match[2], stage: Number(match[3]), path: match[4] };
   });
 }
+async function readGitIndexState(project) {
+  const [entries, tagged, debug] = await Promise.all([
+    readGitIndex(project),
+    gitCommand(project, ["ls-files", "-v", "-z"]),
+    gitCommand(project, ["ls-files", "--debug", "-z"])
+  ]);
+  const tags = tagged.split("\0").filter(Boolean).map((record5) => {
+    const match = /^([A-Za-z?]) ([\s\S]+)$/.exec(record5);
+    if (!match) throw new Error("Unsupported Git index flag record");
+    return { tag: match[1], path: match[2] };
+  });
+  const intentions = [];
+  let cursor = 0;
+  while (cursor < debug.length) {
+    const end = debug.indexOf("\0", cursor);
+    if (end < 0) throw new Error("Unsupported Git index debug record");
+    const name = debug.slice(cursor, end);
+    const record5 = /^  ctime:[^\n]*\n  mtime:[^\n]*\n  dev:[^\n]*\n  uid:[^\n]*\n  size:[^\n]*flags: ([0-9a-fA-F]{1,8})\r?\n/.exec(debug.slice(end + 1));
+    if (!record5) throw new Error("Unsupported Git index intent-to-add record");
+    intentions.push({ path: name, intentToAdd: (Number.parseInt(record5[1], 16) & 536870912) !== 0 });
+    cursor = end + 1 + record5[0].length;
+  }
+  if (entries.length !== tags.length || entries.length !== intentions.length || entries.some((entry, index) => entry.path !== tags[index]?.path || entry.path !== intentions[index]?.path)) throw new Error("Git index entries changed while reading semantic flags");
+  return { entries, flags: tags.map((entry, index) => ({ ...entry, intentToAdd: intentions[index].intentToAdd })) };
+}
 async function listGitlinks(project) {
   return (await readGitIndex(project)).filter((entry) => entry.mode === "160000");
 }
@@ -46500,6 +46525,33 @@ async function inspectGitManifest(project, options = {}) {
 }
 async function gitAwareContextDigest(project) {
   return digest(await inspectGitManifest(project));
+}
+async function readOnlyGitContextDigest(project) {
+  const optional2 = async (root, args) => {
+    try {
+      return await gitCommand(root, args);
+    } catch (error62) {
+      if (Number(error62.code) === 1) return null;
+      throw error62;
+    }
+  };
+  const inspect = async (root, depth) => {
+    if (depth > 16) throw new Error("Git context nesting exceeds 16 levels");
+    const [head2, branch2, index, refs, config2] = await Promise.all([
+      optional2(root, ["rev-parse", "--verify", "--quiet", "HEAD"]),
+      optional2(root, ["symbolic-ref", "--quiet", "HEAD"]),
+      readGitIndexState(root),
+      gitCommand(root, ["for-each-ref", "--sort=refname", "--format=%(refname)%00%(objectname)%00%(symref)"]),
+      gitCommand(root, ["config", "--local", "--null", "--list"])
+    ]);
+    const children = [];
+    for (const entry of index.entries.filter((item) => item.mode === "160000")) if (await initialized(root, entry.path)) {
+      const child = await realpath2(relative(root, entry.path));
+      children.push([entry.path, await inspect(child, depth + 1)]);
+    }
+    return { head: head2, branch: branch2, index, refs, configFingerprint: digest(config2), children };
+  };
+  return digest(await inspect(await realpath2(project), 0));
 }
 function flattenGitArtifacts(manifest) {
   const result2 = [];
@@ -48002,7 +48054,7 @@ async function readDeletionConfig(projectPaths = []) {
   const session = new ProtocolSession(process.env.WORKFLOWS_CODEX_COMMAND ?? "codex", ["app-server", "--disable", "plugins", "--disable", "apps", "--disable", "remote_plugin"], process.cwd(), 15e3, 5e3, () => {
   });
   try {
-    await session.request("initialize", { clientInfo: { name: "workflows_deletion_preflight", version: "0.5.2" }, capabilities: { experimentalApi: true } });
+    await session.request("initialize", { clientInfo: { name: "workflows_deletion_preflight", version: "0.5.3" }, capabilities: { experimentalApi: true } });
     session.send({ method: "initialized", params: {} });
     const scopes = [];
     for (const cwd of [void 0, ...new Set(projectPaths)].slice(0, 101)) {
@@ -48041,8 +48093,9 @@ function nodeProcess(run, input2) {
   const prep = input2.scope === "workflow" ? (run.preparation?.stages ?? []).map((stage) => ({ ...stage, kind: "initializing" })) : [];
   const activities = [...prep, ...tasks.flatMap((task) => task.attempts.flatMap((attempt) => attempt.activities ?? []))].slice(-100).map((activity) => ({ ...activity, label: diagnosticText(activity.label, 100), ...activity.detail ? { detail: diagnosticText(activity.detail, 240) } : {} }));
   const current2 = tasks.find((task) => task.currentActivity?.status === "running")?.currentActivity ?? last?.currentActivity;
-  const error62 = tasks.find((task) => task.status === "failed")?.error ?? (input2.scope === "workflow" ? run.error : void 0);
-  const summary = status === "failed" ? "\u672C\u8282\u70B9\u6267\u884C\u5931\u8D25\uFF0C\u67E5\u770B\u9519\u8BEF\u4E0E\u8FC7\u7A0B\u540E\u518D\u51B3\u5B9A\u662F\u5426\u7EE7\u7EED\u3002" : status === "completed" ? "\u672C\u8282\u70B9\u5DF2\u5B8C\u6210\u3002" : status === "preparing" ? prep.find((activity) => activity.status === "running")?.label ?? "\u6B63\u5728\u51C6\u5907\u5DE5\u4F5C\u6D41\u3002" : status === "running" ? current2?.label ?? "\u6B63\u5728\u6267\u884C\u4EFB\u52A1\uFF0C\u7B49\u5F85\u65B0\u7684\u6D3B\u52A8\u3002" : status === "stopping" ? "\u6B63\u5728\u7B49\u5F85\u4EFB\u52A1\u9000\u51FA\u3002" : status === "interrupted" || status === "stopped" ? "\u672C\u8282\u70B9\u5DF2\u4E2D\u65AD\uFF0C\u8FDB\u5EA6\u4FDD\u7559\u3002" : "\u672C\u8282\u70B9\u5C1A\u672A\u6267\u884C\u3002";
+  const failedAfterTasks = run.execution === "failed" && !run.preparation?.stages.some((stage) => stage.status === "failed" || stage.status === "interrupted") && run.tasks.length > 0 && run.tasks.every((task) => task.status === "completed") && tasks.some((task) => task.id === run.tasks.at(-1)?.id);
+  const error62 = tasks.find((task) => task.status === "failed")?.error ?? (input2.scope === "workflow" || failedAfterTasks ? run.error : void 0);
+  const summary = failedAfterTasks ? "\u4EFB\u52A1\u6267\u884C\u5DF2\u5B8C\u6210\uFF0C\u4F46\u5DE5\u4F5C\u6D41\u5728\u540E\u7EED\u68C0\u67E5\u6216\u7ED3\u679C\u5224\u65AD\u65F6\u5931\u8D25\u3002\u8BF7\u6838\u5BF9\u9519\u8BEF\uFF0C\u518D\u9009\u62E9\u662F\u5426\u4ECE\u6B64\u8282\u70B9\u91CD\u8BD5\u3002" : status === "failed" ? "\u672C\u8282\u70B9\u6267\u884C\u5931\u8D25\uFF0C\u67E5\u770B\u9519\u8BEF\u4E0E\u8FC7\u7A0B\u540E\u518D\u51B3\u5B9A\u662F\u5426\u7EE7\u7EED\u3002" : status === "completed" ? "\u672C\u8282\u70B9\u5DF2\u5B8C\u6210\u3002" : status === "preparing" ? prep.find((activity) => activity.status === "running")?.label ?? "\u6B63\u5728\u51C6\u5907\u5DE5\u4F5C\u6D41\u3002" : status === "running" ? current2?.label ?? "\u6B63\u5728\u6267\u884C\u4EFB\u52A1\uFF0C\u7B49\u5F85\u65B0\u7684\u6D3B\u52A8\u3002" : status === "stopping" ? "\u6B63\u5728\u7B49\u5F85\u4EFB\u52A1\u9000\u51FA\u3002" : status === "interrupted" || status === "stopped" ? "\u672C\u8282\u70B9\u5DF2\u4E2D\u65AD\uFF0C\u8FDB\u5EA6\u4FDD\u7559\u3002" : "\u672C\u8282\u70B9\u5C1A\u672A\u6267\u884C\u3002";
   const ids = new Set(tasks.map((task) => task.id));
   return {
     id: run.id,
@@ -48095,7 +48148,7 @@ function registerPanelToolWithIcons(server2, register) {
   }
 }
 function createServer(engine2, options = {}) {
-  const serverInfo = { name: "workflows", version: "0.5.2", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.5.3", icons: panelIcons };
   const panelHtml = readFileSync3(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);
@@ -48254,33 +48307,151 @@ function createServer(engine2, options = {}) {
   const appOnly = { ui: { visibility: ["app"] } };
   server2.registerTool("workflow_panel_lease", { description: "Maintain the task panel lifecycle lease; losing the lease stops its active workflows.", inputSchema: { leaseId: external_exports.string().optional(), release: external_exports.boolean().optional() }, _meta: appOnly, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async (input2) => safe(() => engine2.lease({ ...input2.leaseId ? { leaseId: input2.leaseId } : {}, ...input2.release !== void 0 ? { release: input2.release } : {} })));
   for (const action of ["start", "resume"]) server2.registerTool(`workflow_${action}`, {
-    description: `${action} the previewed workflow when the user has authorized execution. Requires the current revision and declared project/write/network scope. UI callers also pass their live panel lease; chat callers omit leaseId.`,
-    inputSchema: { id, revision, leaseId: external_exports.string().min(1).optional() },
+    description: `${action} the previewed workflow when the user has authorized execution. Requires the current revision and declared project/write/network scope. UI callers also pass their live panel lease; chat callers omit leaseId.${action === "resume" ? " Optional retryFromTaskId explicitly reruns that task and invalidates following results, preserving the earlier prefix. Already-started non-idempotent operations cannot be repeated." : ""}`,
+    inputSchema: { id, revision, leaseId: external_exports.string().min(1).optional(), ...action === "resume" ? { retryFromTaskId: external_exports.string().regex(/^task_[1-9][0-9]*$/).optional() } : {} },
     _meta: { ui: { visibility: ["model", "app"] } },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }
-  }, async (input2) => safe(async () => ({ run: await engine2.start({ id: input2.id, revision: input2.revision, ...input2.leaseId ? { leaseId: input2.leaseId } : {} }, action === "resume") })));
+  }, async (input2) => safe(async () => ({ run: await engine2.start({ id: input2.id, revision: input2.revision, ...input2.leaseId ? { leaseId: input2.leaseId } : {}, ..."retryFromTaskId" in input2 && typeof input2.retryFromTaskId === "string" ? { retryFromTaskId: input2.retryFromTaskId } : {} }, action === "resume") })));
   server2.registerTool("workflow_cancel_task", { description: "Cancel one active task on the user request. The script can handle its failure; other tasks keep running.", inputSchema: { id, taskId: external_exports.string().min(1) }, _meta: { ui: { visibility: ["model", "app"] } }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async (input2) => safe(async () => ({ run: await engine2.cancelTask(input2.id, input2.taskId) })));
   server2.registerTool("workflow_apply", { description: "Apply the final reviewed changes when the user has authorized application. Requires the current revision and completed review; detects baseline conflicts and retains project edits. Maintenance activation uses only its predeclared command.", inputSchema: { id, revision }, _meta: { ui: { visibility: ["model", "app"] } }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } }, async (input2) => safe(async () => ({ run: await engine2.apply(input2.id, input2.revision) })));
   return server2;
 }
 
 // src/engine.ts
-import { randomBytes as randomBytes7, createHash as createHash7 } from "node:crypto";
-import { realpath as realpath7, stat as stat2 } from "node:fs/promises";
+import { randomBytes as randomBytes7, createHash as createHash8 } from "node:crypto";
+import { realpath as realpath8, stat as stat2 } from "node:fs/promises";
+
+// src/snapshot-checkpoint.ts
+import { createHash as createHash6 } from "node:crypto";
+import { constants as constants3 } from "node:fs";
+import { lstat as lstat8, open as open4, readdir as readdir7, readlink as readlink4, realpath as realpath6 } from "node:fs/promises";
+import path11 from "node:path";
+var maxFiles2 = 1e5;
+var maxBytes = 2 * 1024 * 1024 * 1024;
+var maxFileBytes = 512 * 1024 * 1024;
+async function assertOwnedGit(root) {
+  const metadata = path11.join(root, ".git");
+  const entry = await lstat8(metadata);
+  if (!entry.isDirectory() || entry.isSymbolicLink() || await realpath6(metadata) !== metadata) throw new Error("Snapshot Git metadata must remain an independent owned directory");
+  const [actual, common, top] = await Promise.all([
+    gitCommand(root, ["rev-parse", "--absolute-git-dir"]),
+    gitCommand(root, ["rev-parse", "--git-common-dir"]),
+    gitCommand(root, ["rev-parse", "--show-toplevel"])
+  ]);
+  if (await realpath6(actual.trim()) !== metadata || await realpath6(path11.resolve(root, common.trim())) !== metadata || await realpath6(top.trim()) !== root) throw new Error("Snapshot Git metadata or working tree redirects outside its independent directory");
+  let parent = metadata;
+  for (const name of ["objects", "info"]) {
+    parent = path11.join(parent, name);
+    let info2;
+    try {
+      info2 = await lstat8(parent);
+    } catch (error62) {
+      if (error62.code === "ENOENT") return;
+      throw error62;
+    }
+    if (!info2.isDirectory() || info2.isSymbolicLink() || await realpath6(parent) !== parent) throw new Error("Snapshot Git object storage must remain owned directories");
+  }
+  const alternates = path11.join(parent, "alternates");
+  let info;
+  try {
+    info = await lstat8(alternates);
+  } catch (error62) {
+    if (error62.code === "ENOENT") return;
+    throw error62;
+  }
+  if (!info.isFile() || info.isSymbolicLink() || info.size > 65536) throw new Error("Snapshot Git cannot share alternate object storage");
+  const descriptor = await open4(alternates, constants3.O_RDONLY | (constants3.O_NOFOLLOW ?? 0));
+  try {
+    const opened = await descriptor.stat();
+    if (!opened.isFile() || opened.size > 65536 || info.dev !== opened.dev || info.ino !== opened.ino || await realpath6(alternates) !== alternates) throw new Error("Snapshot Git cannot share alternate object storage");
+    const buffer = Buffer.alloc(65537);
+    const { bytesRead } = await descriptor.read(buffer, 0, buffer.length, 0);
+    if (bytesRead > 65536 || buffer.subarray(0, bytesRead).toString("utf8").trim()) throw new Error("Snapshot Git cannot share alternate object storage");
+    const after = await descriptor.stat(), current2 = await lstat8(alternates);
+    if (after.size !== info.size || after.mtimeMs !== info.mtimeMs || after.ctimeMs !== info.ctimeMs || current2.isSymbolicLink() || current2.dev !== opened.dev || current2.ino !== opened.ino) throw new Error("Snapshot Git alternate storage changed during validation");
+  } finally {
+    await descriptor.close();
+  }
+}
+async function snapshotFingerprint(workspace, signal) {
+  const original = await lstat8(workspace.root);
+  if (!original.isDirectory() || original.isSymbolicLink()) throw new Error("Snapshot checkpoint requires an owned directory");
+  const root = await realpath6(workspace.root);
+  await assertOwnedGit(root);
+  const digest3 = createHash6("sha256");
+  let files2 = 0, directories = 0, bytes = 0;
+  const append = (value) => {
+    digest3.update(JSON.stringify(value));
+    digest3.update("\n");
+  };
+  const owned = (filename) => filename === root || filename.startsWith(root + path11.sep);
+  const visit2 = async (relative2, depth) => {
+    signal?.throwIfAborted();
+    if (depth > 64) throw new Error("Snapshot checkpoint exceeds 64 directory levels");
+    const filename = relative2 ? path11.join(root, relative2) : root;
+    const before = await lstat8(filename);
+    const mode = before.mode & 511;
+    if (before.isSymbolicLink()) {
+      const target = await readlink4(filename);
+      if (path11.isAbsolute(target) || !owned(path11.resolve(path11.dirname(filename), target))) throw new Error("Snapshot checkpoint cannot follow an external symbolic link");
+      const resolved = await realpath6(filename).catch((error62) => {
+        if (error62.code === "ENOENT") return path11.resolve(path11.dirname(filename), target);
+        throw error62;
+      });
+      if (!owned(resolved)) throw new Error("Snapshot checkpoint symbolic link chain escapes its workspace");
+      if (++files2 > maxFiles2) throw new Error("Snapshot checkpoint exceeds 100000 files");
+      const after = await lstat8(filename);
+      if (!after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || target !== await readlink4(filename)) throw new Error("Snapshot symbolic link changed during checkpoint hashing");
+      append([relative2, "link", mode, target]);
+    } else if (before.isDirectory()) {
+      if (++directories > maxFiles2) throw new Error("Snapshot checkpoint exceeds 100000 directories");
+      if (await realpath6(filename) !== filename) throw new Error("Snapshot checkpoint directory ownership changed");
+      const names = (await readdir7(filename)).sort();
+      append([relative2, "directory", mode]);
+      for (const name of names) await visit2(path11.join(relative2, name), depth + 1);
+      const after = await lstat8(filename);
+      if (!after.isDirectory() || after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || await realpath6(filename) !== filename || JSON.stringify(names) !== JSON.stringify((await readdir7(filename)).sort())) throw new Error("Snapshot directory changed during checkpoint hashing");
+    } else if (before.isFile()) {
+      bytes += before.size;
+      if (++files2 > maxFiles2 || before.size > maxFileBytes || bytes > maxBytes) throw new Error("Snapshot checkpoint exceeds its bounded 100000-file, 512 MiB per file or 2 GiB total limit");
+      const descriptor = await open4(filename, constants3.O_RDONLY | (constants3.O_NOFOLLOW ?? 0));
+      try {
+        const opened = await descriptor.stat();
+        if (!opened.isFile() || before.dev !== opened.dev || before.ino !== opened.ino || await realpath6(filename) !== filename) throw new Error("Snapshot file ownership changed while opening it");
+        const index = relative2 === path11.join(".git", "index") ? await readGitIndexState(root) : void 0;
+        const content = createHash6("sha256");
+        if (!index) for await (const chunk of descriptor.createReadStream({ autoClose: false })) {
+          signal?.throwIfAborted();
+          content.update(chunk);
+        }
+        const after = await descriptor.stat(), current3 = await lstat8(filename);
+        if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || current3.dev !== opened.dev || current3.ino !== opened.ino || current3.isSymbolicLink() || await realpath6(filename) !== filename) throw new Error("Snapshot file changed during checkpoint hashing");
+        append(index ? [relative2, "git-index", mode, index] : [relative2, "file", mode, before.size, content.digest("hex")]);
+      } finally {
+        await descriptor.close();
+      }
+    } else throw new Error("Snapshot checkpoint contains an unsupported filesystem entry");
+  };
+  await visit2("", 0);
+  await assertOwnedGit(root);
+  const current2 = await lstat8(workspace.root);
+  if (!current2.isDirectory() || current2.isSymbolicLink() || current2.dev !== original.dev || current2.ino !== original.ino || await realpath6(workspace.root) !== root) throw new Error("Snapshot root changed during checkpoint hashing");
+  return `snapshot-v1:${digest3.digest("hex")}`;
+}
 
 // src/workspace.ts
 import { execFile as execFile2 } from "node:child_process";
 import { promisify as promisify2 } from "node:util";
-import { createHash as createHash6, randomBytes as randomBytes6 } from "node:crypto";
-import { copyFile, lstat as lstat8, mkdir as mkdir7, readFile as readFile8, readlink as readlink4, realpath as realpath6, rename as rename6, rm as rm7, symlink, writeFile as writeFile6, chmod as chmod2 } from "node:fs/promises";
-import path11 from "node:path";
-import { constants as constants3 } from "node:fs";
+import { createHash as createHash7, randomBytes as randomBytes6 } from "node:crypto";
+import { copyFile, lstat as lstat9, mkdir as mkdir7, readFile as readFile8, readlink as readlink5, realpath as realpath7, rename as rename6, rm as rm7, symlink, writeFile as writeFile6, chmod as chmod2 } from "node:fs/promises";
+import path12 from "node:path";
+import { constants as constants4 } from "node:fs";
 var exec2 = promisify2(execFile2);
-var hash4 = (value) => createHash6("sha256").update(value).digest("hex");
+var hash4 = (value) => createHash7("sha256").update(value).digest("hex");
 function resolveFile(root, name) {
   if (!name || name.includes("\0") || name.split(/[\\/]/).some((part) => part === ".." || part === ".git")) throw new Error(`Unsafe workspace path: ${name}`);
-  const target = path11.resolve(root, name);
-  if (!target.startsWith(root + path11.sep)) throw new Error(`Workspace path escapes root: ${name}`);
+  const target = path12.resolve(root, name);
+  if (!target.startsWith(root + path12.sep)) throw new Error(`Workspace path escapes root: ${name}`);
   return target;
 }
 async function record4(root, name) {
@@ -48288,15 +48459,15 @@ async function record4(root, name) {
   const target = resolveFile(root, name);
   let stat3;
   try {
-    stat3 = await lstat8(target);
+    stat3 = await lstat9(target);
   } catch (error62) {
     if (error62.code === "ENOENT") return;
     throw error62;
   }
   if (stat3.isSymbolicLink()) {
-    const value = await readlink4(target);
-    const destination = path11.resolve(path11.dirname(target), value);
-    if (path11.isAbsolute(value) || !destination.startsWith(root + path11.sep)) throw new Error(`External symbolic link is unsupported: ${name}`);
+    const value = await readlink5(target);
+    const destination = path12.resolve(path12.dirname(target), value);
+    if (path12.isAbsolute(value) || !destination.startsWith(root + path12.sep)) throw new Error(`External symbolic link is unsupported: ${name}`);
     return { hash: hash4(value), kind: "link", mode: stat3.mode & 511 };
   }
   if (!stat3.isFile()) throw new Error(`Unsupported workspace entry: ${name}`);
@@ -48304,12 +48475,12 @@ async function record4(root, name) {
   return { hash: hash4(await readFile8(target)), kind: "file", mode: stat3.mode & 511 };
 }
 async function safeParents2(root, name, create = true) {
-  const pieces = name.split(path11.sep).slice(0, -1);
+  const pieces = name.split(path12.sep).slice(0, -1);
   let directory = root;
   for (const piece of pieces) {
-    directory = path11.join(directory, piece);
+    directory = path12.join(directory, piece);
     try {
-      const stat3 = await lstat8(directory);
+      const stat3 = await lstat9(directory);
       if (!stat3.isDirectory() || stat3.isSymbolicLink()) throw new Error(`Unsafe parent directory: ${name}`);
     } catch (error62) {
       if (error62.code !== "ENOENT") throw error62;
@@ -48323,7 +48494,7 @@ async function copyEntry(source, destination, name, entry) {
   await safeParents2(destination, name);
   const target = resolveFile(destination, name);
   await rm7(target, { force: true });
-  if (entry.kind === "link") await symlink(await readlink4(resolveFile(source, name)), target);
+  if (entry.kind === "link") await symlink(await readlink5(resolveFile(source, name)), target);
   else {
     await copyFile(resolveFile(source, name), target);
     await chmod2(target, entry.mode);
@@ -48334,23 +48505,23 @@ async function replaceEntry(source, destination, name, entry, transaction) {
   await safeParents2(destination, name);
   const target = resolveFile(destination, name);
   const temporary = `${target}.wf-${randomBytes6(8).toString("hex")}.tmp`;
-  const descriptor = { path: path11.relative(destination, temporary), target: name, expected: entry };
+  const descriptor = { path: path12.relative(destination, temporary), target: name, expected: entry };
   await trackProjectTemporary(transaction, destination, descriptor);
   let identity;
   try {
-    if (entry.kind === "link") await symlink(await readlink4(resolveFile(source, name)), temporary);
+    if (entry.kind === "link") await symlink(await readlink5(resolveFile(source, name)), temporary);
     else {
-      await copyFile(resolveFile(source, name), temporary, constants3.COPYFILE_EXCL);
+      await copyFile(resolveFile(source, name), temporary, constants4.COPYFILE_EXCL);
       await chmod2(temporary, entry.mode);
     }
-    const stat3 = await lstat8(temporary);
+    const stat3 = await lstat9(temporary);
     identity = { dev: stat3.dev, ino: stat3.ino };
     await trackProjectTemporary(transaction, destination, { ...descriptor, ...identity });
     await rename6(temporary, target);
   } finally {
     if (identity) {
       try {
-        const stat3 = await lstat8(temporary);
+        const stat3 = await lstat9(temporary);
         if (stat3.dev !== identity.dev || stat3.ino !== identity.ino) throw new Error("Project temporary ownership changed during application");
         await rm7(temporary);
       } catch (error62) {
@@ -48369,13 +48540,13 @@ async function contextDigest(project) {
   return hash4(JSON.stringify(records2));
 }
 async function createWorkspace(project, directory) {
-  const canonical2 = await realpath6(project);
+  const canonical2 = await realpath7(project);
   const { stdout } = await exec2("git", ["rev-parse", "--show-toplevel"], { cwd: canonical2 });
-  if (await realpath6(stdout.trim()) !== canonical2) throw new Error("Writing workflows require the Git repository root as projectPath");
+  if (await realpath7(stdout.trim()) !== canonical2) throw new Error("Writing workflows require the Git repository root as projectPath");
   const gitlinks = await listGitlinks(canonical2);
   if (gitlinks.length) throw new Error("Snapshot writing does not copy Git submodules. Create a new preview with workspaceMode: git-worktree to retain their commit and initialization state.");
-  const root = path11.join(directory, "workspace");
-  const base = path11.join(directory, "baseline");
+  const root = path12.join(directory, "workspace");
+  const base = path12.join(directory, "baseline");
   await rm7(root, { recursive: true, force: true });
   await rm7(base, { recursive: true, force: true });
   await mkdir7(root, { recursive: true, mode: 448 });
@@ -48385,7 +48556,7 @@ async function createWorkspace(project, directory) {
   for (const name of await projectFiles(canonical2)) {
     const entry = await record4(canonical2, name);
     if (!entry) continue;
-    size += (await lstat8(resolveFile(canonical2, name))).size;
+    size += (await lstat9(resolveFile(canonical2, name))).size;
     if (size > 256 * 1024 * 1024) throw new Error("Workspace snapshot exceeds 256 MiB");
     baseline[name] = entry;
     await copyEntry(canonical2, base, name, entry);
@@ -48411,7 +48582,7 @@ async function workspaceDiff(workspace) {
     files2.push({ path: name, status: !before ? "added" : !after ? "deleted" : "modified" });
     details.push([name, before ?? null, after ?? null]);
     const nullFile = process.platform === "win32" ? "NUL" : "/dev/null";
-    const left = before ? resolveFile(path11.join(path11.dirname(workspace.root), "baseline"), name) : nullFile;
+    const left = before ? resolveFile(path12.join(path12.dirname(workspace.root), "baseline"), name) : nullFile;
     const right = after ? resolveFile(workspace.root, name) : nullFile;
     if (before?.kind === "link" || after?.kind === "link") {
       parts.push(`diff -- ${name}
@@ -48430,7 +48601,7 @@ Symbolic link or file type changed
   }
   const raw = parts.join("\n");
   if (raw.length > 4 * 1024 * 1024) throw new Error("Review diff exceeds 4 MiB");
-  const text2 = raw.replaceAll(path11.join(path11.dirname(workspace.root), "baseline") + path11.sep, "").replaceAll(workspace.root + path11.sep, "");
+  const text2 = raw.replaceAll(path12.join(path12.dirname(workspace.root), "baseline") + path12.sep, "").replaceAll(workspace.root + path12.sep, "");
   return { text: text2, files: files2, fingerprint: hash4(JSON.stringify(details)) };
 }
 async function applyWorkspace(workspace, reviewed) {
@@ -48445,15 +48616,15 @@ async function applyWorkspace(workspace, reviewed) {
     targets.set(file2.path, after);
   }
   if (conflicts.length) return { applied: false, conflicts };
-  const transaction = path11.join(path11.dirname(workspace.root), "apply-transaction");
-  const staged = path11.join(transaction, "staged");
+  const transaction = path12.join(path12.dirname(workspace.root), "apply-transaction");
+  const staged = path12.join(transaction, "staged");
   await mkdir7(transaction, { recursive: true, mode: 448 });
   await mkdir7(staged, { recursive: true, mode: 448 });
   for (const file2 of current2.files) {
     const after = targets.get(file2.path);
     if (after) await copyEntry(workspace.root, staged, file2.path, after);
   }
-  await writeFile6(path11.join(transaction, "journal.json"), JSON.stringify({ files: current2.files, fingerprint: current2.fingerprint, state: "prepared" }), { mode: 384 });
+  await writeFile6(path12.join(transaction, "journal.json"), JSON.stringify({ files: current2.files, fingerprint: current2.fingerprint, state: "prepared" }), { mode: 384 });
   const changed = [];
   try {
     for (const file2 of current2.files) {
@@ -48465,10 +48636,10 @@ async function applyWorkspace(workspace, reviewed) {
       if (after) await replaceEntry(staged, workspace.original, file2.path, after, transaction);
       else await rm7(resolveFile(workspace.original, file2.path));
     }
-    await writeFile6(path11.join(transaction, "journal.json"), JSON.stringify({ files: current2.files, state: "completed" }), { mode: 384 });
+    await writeFile6(path12.join(transaction, "journal.json"), JSON.stringify({ files: current2.files, state: "completed" }), { mode: 384 });
     return { applied: true, conflicts: [] };
   } catch (error62) {
-    const base = path11.join(path11.dirname(workspace.root), "baseline");
+    const base = path12.join(path12.dirname(workspace.root), "baseline");
     for (const name of changed.reverse()) {
       const before = workspace.baseline[name];
       if (!equal(await record4(workspace.original, name), targets.get(name))) continue;
@@ -48486,7 +48657,7 @@ function canonical(value) {
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, entry]) => [key, canonical(entry)]));
   return value;
 }
-var digest2 = (value) => createHash7("sha256").update(JSON.stringify(canonical(value))).digest("hex");
+var digest2 = (value) => createHash8("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 var message = (error62) => error62 instanceof Error ? error62.message : String(error62);
 var defaults = { maxReadWorkers: 4, maxCalls: 1e3, timeoutMs: 60 * 60 * 1e3, maxTokens: 0 };
 var taskFingerprint = (prompt, options, settings) => digest2({ prompt, options, ...settings?.model || settings?.reasoningEffort ? { executionSettings: { model: settings.model, reasoningEffort: settings.reasoningEffort } } : {} });
@@ -48693,7 +48864,7 @@ var WorkflowEngine = class {
   }
   async list(projectPath) {
     await this.initialization;
-    const project = projectPath ? await realpath7(projectPath) : void 0;
+    const project = projectPath ? await realpath8(projectPath) : void 0;
     const runs = await this.store.list();
     return runs.filter((run) => !project || run.projectPath === project);
   }
@@ -48707,7 +48878,7 @@ var WorkflowEngine = class {
   }
   async executionEnvironment(projectPath, signal = this.configAbort.signal) {
     if (!this.adapter.executionEnvironment) throw new Error("This worker adapter cannot provide the Codex model catalogue.");
-    const cwd = await realpath7(projectPath ?? process.cwd());
+    const cwd = await realpath8(projectPath ?? process.cwd());
     if (!(await stat2(cwd)).isDirectory()) throw new Error("projectPath must be a directory");
     return this.adapter.executionEnvironment(cwd, signal);
   }
@@ -48761,7 +48932,7 @@ var WorkflowEngine = class {
     const { meta: meta3 } = validateScript(input2.script);
     validateWorkflowArgs(meta3, input2.args === void 0 ? {} : input2.args);
     const nodeSettings = validateNodeSettings(input2.nodeSettings, meta3);
-    const projectPath = await realpath7(input2.projectPath);
+    const projectPath = await realpath8(input2.projectPath);
     if (!(await stat2(projectPath)).isDirectory()) throw new Error("projectPath must be a directory");
     if (input2.workspaceMode === "git-worktree" && !input2.allowWrite) throw new Error("Git maintenance requires an isolated writable workspace");
     if (input2.maintenance && (!input2.allowWrite || input2.workspaceMode !== "git-worktree")) throw new Error("Maintenance operations require git-worktree isolation and allowWrite");
@@ -48880,12 +49051,26 @@ var WorkflowEngine = class {
     this.leases.set(id, expiresAt);
     return { leaseId: id, expiresAt };
   }
+  retryBoundary(run, taskId, resume) {
+    if (taskId === void 0) return void 0;
+    if (!resume) throw new Error("Retrying a task requires workflow_resume");
+    const task = run.tasks.find((item) => item.id === taskId);
+    if (!task || !Number.isSafeInteger(task.index) || task.index < 0 || task.id !== `task_${task.index + 1}`) throw new Error("Unknown workflow retry task");
+    for (const later of run.tasks.filter((item) => item.index >= task.index)) {
+      const operation = later.options.operation;
+      if (operation && later.attempts.some((attempt) => attempt.startedAt) && run.maintenance?.steps.find((step) => step.id === operation.id)?.idempotent !== true) {
+        throw new Error(`Operation ${operation.id} already started and is not declared idempotent. Inspect its actual effects and create a revised preview before retrying this task or its following steps.`);
+      }
+    }
+    return task.index;
+  }
   async start(input2, resume = false) {
     let run = await this.load(input2.id);
     this.assertActionAvailable(run);
     this.assertRevision(run, input2.revision);
     if (this.active.has(run.id) || await this.store.isLocked(run.id)) throw new Error("Old workers have not exited; workflow cannot be relaunched");
     if (resume ? !["stopped", "failed"].includes(run.execution) : run.execution !== "draft") throw new Error("Workflow state does not permit this action");
+    this.retryBoundary(run, input2.retryFromTaskId, resume);
     if (input2.leaseId && (this.leases.get(input2.leaseId) ?? 0) < Date.now()) throw new Error("Panel lease expired");
     const release = await this.store.acquire(run.id);
     let active;
@@ -48896,6 +49081,7 @@ var WorkflowEngine = class {
       this.runs.set(run.id, run);
       this.assertRevision(run, input2.revision);
       if (resume ? !["stopped", "failed"].includes(run.execution) : run.execution !== "draft") throw new Error("Workflow state changed before start");
+      const retryFrom = this.retryBoundary(run, input2.retryFromTaskId, resume);
       const { meta: meta3, mayUseAgent } = validateScript(run.script);
       validateWorkflowArgs(meta3, run.args);
       run.meta = meta3;
@@ -48903,6 +49089,10 @@ var WorkflowEngine = class {
       const settings = await this.settings.get();
       const explicitSettings = settings.model || settings.reasoningEffort || run.executionSettings?.model || run.executionSettings?.reasoningEffort || Object.values(run.nodeSettings).some((settings2) => settings2.model || settings2.reasoningEffort);
       if (!this.adapter.executionEnvironment && explicitSettings) throw new Error("This worker adapter cannot validate configured model settings.");
+      if (retryFrom !== void 0) {
+        for (const task of run.tasks) if (task.index >= retryFrom) task.cacheInvalidated = true;
+        this.log(run, `Explicit retry from ${input2.retryFromTaskId}: preserving earlier results and invalidating this task and its following results.`);
+      }
       run.controlId = randomBytes7(16).toString("hex");
       run.execution = "preparing";
       run.review = "unavailable";
@@ -48991,6 +49181,7 @@ var WorkflowEngine = class {
           const gitlinks = await listGitlinks(run.projectPath);
           if (gitlinks.length && run.allowWrite && run.workspaceMode !== "git-worktree") throw new Error("Snapshot writing does not copy Git submodules. Create a new preview with workspaceMode: git-worktree to retain their commit and initialization state.");
           context = gitlinks.length ? await gitAwareContextDigest(run.projectPath) : await contextDigest(run.projectPath);
+          if (!run.allowWrite) context = digest2({ files: context, git: await readOnlyGitContextDigest(run.projectPath) });
         } catch (error62) {
           if (run.allowWrite) throw error62;
           context = randomBytes7(16).toString("hex");
@@ -49013,6 +49204,11 @@ var WorkflowEngine = class {
         if (run.workspace?.kind === "git-worktree") {
           await validateGitWorkspace(run.workspace);
           if (run.workspaceCheckpoint && await maintenanceFingerprint(run.workspace) !== run.workspaceCheckpoint) throw new Error("Saved Git checkout or artifacts changed; cached steps cannot safely replay. Create a new preview.");
+        } else if (run.workspace) {
+          if (run.workspaceCheckpoint) {
+            if (!run.workspaceCheckpoint.startsWith("snapshot-v1:")) throw new Error("Saved snapshot checkpoint format is unsupported. Create a new preview before replaying verified results.");
+            if (await snapshotFingerprint(run.workspace, active.controller.signal) !== run.workspaceCheckpoint) throw new Error("Saved snapshot workspace or artifacts changed; cached verification cannot safely replay. Create a new preview.");
+          } else if (run.tasks.some((task) => task.status === "completed" || task.attempts.some((attempt) => attempt.startedAt))) throw new Error("Saved snapshot lacks a verified execution checkpoint. Create a new preview before replaying previously started workers or verified results.");
         }
       });
       run.preparation.endedAt = now();
@@ -49034,7 +49230,7 @@ var WorkflowEngine = class {
   async execute(run, active) {
     const readPool = new Pool(run.limits.maxReadWorkers);
     let index = 0;
-    let cacheValid = true;
+    let cacheInvalidFrom = Number.POSITIVE_INFINITY;
     let totalTokens = run.tasks.reduce((total, task) => total + task.attempts.reduce((subtotal, attempt) => subtotal + (attempt.usage?.totalTokens ?? 0), 0), 0);
     let phase;
     const journal = structuredClone(run.tasks);
@@ -49044,6 +49240,7 @@ var WorkflowEngine = class {
       const operation = (async () => {
         const position = index++;
         const previous = journal[position];
+        if (previous?.cacheInvalidated) cacheInvalidFrom = Math.min(cacheInvalidFrom, position);
         let options = rawOptions;
         let executionSettings;
         let configurationTarget;
@@ -49065,7 +49262,7 @@ var WorkflowEngine = class {
             executionSettings = this.workerSettings(run, options, position, taskPhase, await this.agentEnvironment(run, active));
           }
         } catch (error62) {
-          cacheValid = false;
+          cacheInvalidFrom = Math.min(cacheInvalidFrom, position);
           const errorText = message(error62);
           run.tasks[position] = { id: `task_${position + 1}`, index: position, prompt, options, mode: options.mode === "write" || options.isolation === "worktree" ? "write" : "read", status: "failed", cached: false, attempts: [...previous?.attempts ?? [], { id: `task_${position + 1}_attempt_${(previous?.attempts.length ?? 0) + 1}`, status: "failed", error: errorText, endedAt: now() }], error: errorText, ...configurationTarget ? { configurationTarget } : {} };
           this.log(run, errorText, `task_${position + 1}`, "error");
@@ -49076,7 +49273,7 @@ var WorkflowEngine = class {
         const fingerprint2 = taskFingerprint(prompt, options, executionSettings);
         const task = { id: `task_${position + 1}`, index: position, prompt, options, mode, status: "queued", cached: false, attempts: previous?.attempts ?? [], ...configurationTarget ? { configurationTarget } : {}, ...executionSettings ? { executionSettings } : {}, ...typeof options.label === "string" ? { label: options.label } : {}, ...typeof options.phase === "string" ? { phase: options.phase } : phase ? { phase } : {} };
         run.tasks[position] = task;
-        if (cacheValid && previous?.status === "completed" && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint2 && Object.hasOwn(previous, "output")) {
+        if (position < cacheInvalidFrom && previous?.status === "completed" && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint2 && Object.hasOwn(previous, "output")) {
           task.status = "completed";
           task.cached = true;
           task.output = previous.output;
@@ -49087,14 +49284,14 @@ var WorkflowEngine = class {
         }
         const previousOperation = operationId ? journal.find((item) => item.options.operation?.id === operationId && item.attempts.some((attempt2) => attempt2.startedAt)) : void 0;
         if (previousOperation && run.maintenance.steps.find((step) => step.id === operationId)?.idempotent !== true) {
-          cacheValid = false;
+          cacheInvalidFrom = Math.min(cacheInvalidFrom, position);
           task.status = "failed";
           task.error = `Operation ${operationId} already started in a prior attempt. Its result cannot safely be reused here and it will not be repeated automatically. Inspect its actual effects and revise the workflow before continuing.`;
           this.log(run, task.error, task.id, "error");
           await this.persist(run);
           throw new Error(task.error);
         }
-        if (!(previous?.status === "interrupted" && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint2)) cacheValid = false;
+        if (!(previous?.status === "interrupted" && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint2)) cacheInvalidFrom = Math.min(cacheInvalidFrom, position);
         const controller = new AbortController();
         const abort = () => controller.abort();
         active.controller.signal.addEventListener("abort", abort, { once: true });
@@ -49257,6 +49454,14 @@ ${prompt}`,
         } catch (error62) {
           run.execution = run.execution === "completed" ? "failed" : run.execution;
           run.error = `Could not checkpoint isolated checkout: ${message(error62)}`;
+          this.log(run, run.error, void 0, "error");
+        }
+      } else if (run.workspace) {
+        try {
+          run.workspaceCheckpoint = await snapshotFingerprint(run.workspace);
+        } catch (error62) {
+          run.execution = run.execution === "completed" ? "failed" : run.execution;
+          run.error = `Could not checkpoint isolated snapshot: ${message(error62)}`;
           this.log(run, run.error, void 0, "error");
         }
       }

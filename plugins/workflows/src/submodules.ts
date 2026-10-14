@@ -62,6 +62,33 @@ export async function readGitIndex(project: string): Promise<GitIndexEntry[]> {
     return { mode: match[1]!, commit: match[2]!, stage: Number(match[3]), path: match[4]! };
   });
 }
+export async function readGitIndexState(project: string): Promise<{ entries: GitIndexEntry[]; flags: Array<{ path: string; tag: string; intentToAdd: boolean }> }> {
+  const [entries, tagged, debug] = await Promise.all([
+    readGitIndex(project),
+    gitCommand(project, ["ls-files", "-v", "-z"]),
+    gitCommand(project, ["ls-files", "--debug", "-z"]),
+  ]);
+  const tags = tagged.split("\0").filter(Boolean).map(record => {
+    const match = /^([A-Za-z?]) ([\s\S]+)$/.exec(record);
+    if (!match) throw new Error("Unsupported Git index flag record");
+    return { tag: match[1]!, path: match[2]! };
+  });
+  const intentions: Array<{ path: string; intentToAdd: boolean }> = [];
+  let cursor = 0;
+  while (cursor < debug.length) {
+    const end = debug.indexOf("\0", cursor);
+    if (end < 0) throw new Error("Unsupported Git index debug record");
+    const name = debug.slice(cursor, end);
+    const record = /^  ctime:[^\n]*\n  mtime:[^\n]*\n  dev:[^\n]*\n  uid:[^\n]*\n  size:[^\n]*flags: ([0-9a-fA-F]{1,8})\r?\n/.exec(debug.slice(end + 1));
+    if (!record) throw new Error("Unsupported Git index intent-to-add record");
+    // Git's CE_INTENT_TO_ADD is its on-disk bit 29. Stat caches and in-memory
+    // flags from --debug are deliberately excluded from the semantic state.
+    intentions.push({ path: name, intentToAdd: (Number.parseInt(record[1]!, 16) & 0x20000000) !== 0 });
+    cursor = end + 1 + record[0].length;
+  }
+  if (entries.length !== tags.length || entries.length !== intentions.length || entries.some((entry, index) => entry.path !== tags[index]?.path || entry.path !== intentions[index]?.path)) throw new Error("Git index entries changed while reading semantic flags");
+  return { entries, flags: tags.map((entry, index) => ({ ...entry, intentToAdd: intentions[index]!.intentToAdd })) };
+}
 export async function listGitlinks(project: string): Promise<GitIndexEntry[]> { return (await readGitIndex(project)).filter(entry => entry.mode === "160000"); }
 async function initialized(root: string, name: string): Promise<boolean> {
   const child = relative(root, name);
@@ -149,6 +176,33 @@ export async function inspectGitManifest(project: string, options: ManifestOptio
   return inspect(boundary, 0);
 }
 export async function gitAwareContextDigest(project: string): Promise<string> { return digest(await inspectGitManifest(project)); }
+
+// File contents alone miss same-tree branch changes, staged blobs and new refs.
+// Keep this separate from source baselines so older writable runs can resume
+// under their existing workspace validation without an artificial digest drift.
+export async function readOnlyGitContextDigest(project: string): Promise<string> {
+  const optional = async (root: string, args: string[]) => {
+    try { return await gitCommand(root, args); }
+    catch (error) { if (Number((error as { code?: unknown }).code) === 1) return null; throw error; }
+  };
+  const inspect = async (root: string, depth: number): Promise<unknown> => {
+    if (depth > 16) throw new Error("Git context nesting exceeds 16 levels");
+    const [head, branch, index, refs, config] = await Promise.all([
+      optional(root, ["rev-parse", "--verify", "--quiet", "HEAD"]),
+      optional(root, ["symbolic-ref", "--quiet", "HEAD"]),
+      readGitIndexState(root),
+      gitCommand(root, ["for-each-ref", "--sort=refname", "--format=%(refname)%00%(objectname)%00%(symref)"]),
+      gitCommand(root, ["config", "--local", "--null", "--list"]),
+    ]);
+    const children = [];
+    for (const entry of index.entries.filter(item => item.mode === "160000")) if (await initialized(root, entry.path)) {
+      const child = await realpath(relative(root, entry.path));
+      children.push([entry.path, await inspect(child, depth + 1)]);
+    }
+    return { head, branch, index, refs, configFingerprint: digest(config), children };
+  };
+  return digest(await inspect(await realpath(project), 0));
+}
 export function flattenGitArtifacts(manifest: GitManifest): MaintenanceArtifact[] {
   const result: MaintenanceArtifact[] = [];
   const walk = (item: GitManifest, prefix: string) => {

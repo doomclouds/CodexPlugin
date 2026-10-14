@@ -46,6 +46,17 @@ test("authorized tool automation carries the displayed revision and the UI live 
   await panel.teardown();
 });
 
+test("explicit node retry carries the displayed node and revision without replacing the run", async () => {
+  const { panel, calls } = fixture({ execution: "failed", tasks: [{ id: "task_1", index: 0, prompt: "verify", options: {}, mode: "read", status: "completed", cached: true, attempts: [] }] });
+  await panel.connected();
+  await panel.perform("resume", true, "unknown-task");
+  assert.equal(calls.some(call => call.name === "workflow_resume"), false);
+  await panel.perform("resume", true, "task_1");
+  assert.deepEqual(calls.find(call => call.name === "workflow_resume")?.args, { id: "run-1", revision: 7, leaseId: "lease-1", retryFromTaskId: "task_1" });
+  assert.equal(panel.selected?.id, "run-1");
+  await panel.teardown();
+});
+
 test("polling never fabricates worker progress and stop waits for server state", async () => {
   const { panel, timers, update } = fixture();
   await panel.connected();

@@ -30,7 +30,7 @@ const readPrompt = "Use your native shell command tool to read marker.txt from t
 class ObservedRealAdapter implements WorkerAdapter {
   calls = 0;
   commands = 0;
-  readonly requests: Array<{ id: string; model?: string; effort?: string; status: string; ms?: number; error?: string; usage?: WorkerResult["usage"]; tools?: string[]; settings?: WorkerResult["executionSettings"] }> = [];
+  readonly requests: Array<{ id: string; model?: string; effort?: string; status: string; ms?: number; error?: string; usage?: WorkerResult["usage"]; tools?: string[]; settings?: WorkerResult["executionSettings"]; data?: unknown }> = [];
   readonly real = new CodexAdapter({ command: process.env.WORKFLOWS_STABILITY_CODEX ?? "codex" });
   private onProcess?: (pid: number) => void;
   constructor(onProcess?: (pid: number) => void) { this.onProcess = onProcess; }
@@ -52,7 +52,7 @@ class ObservedRealAdapter implements WorkerAdapter {
       assert.equal(result.executionSettings?.model, model);
       assert.equal(result.executionSettings?.reasoningEffort, effort);
       assert.equal(result.executionSettings?.provenance, "configured", "CLI must confirm configuration; a request alone is insufficient.");
-      Object.assign(record, { status: "completed", ms: Date.now() - started, usage: result.usage, tools: result.toolsUsed, settings: result.executionSettings });
+      Object.assign(record, { status: "completed", ms: Date.now() - started, usage: result.usage, tools: result.toolsUsed, settings: result.executionSettings, ...(result.data === undefined ? {} : { data: result.data }) });
       console.log(JSON.stringify({ event: "worker", ...record }));
       return result;
     } catch (error) {

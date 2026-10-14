@@ -664,6 +664,7 @@ export class WorkflowPanelController {
     if (action === "stop" && !["preparing", "running"].includes(run.execution)) return;
     if (action === "apply" && !canApply(run, this.state.tab)) return;
     if (action === "cancel" && (run.execution !== "running" || !taskId || !run.tasks.some(task => task.id === taskId && ["queued", "running"].includes(task.status)))) return;
+    if (action === "resume" && taskId && !run.tasks.some(task => task.id === taskId)) return;
     const args: Record<string, unknown> = { id: run.id };
     if (["start", "resume", "apply"].includes(action)) args.revision = run.revision;
     if (["start", "resume"].includes(action)) {
@@ -671,6 +672,7 @@ export class WorkflowPanelController {
       args.leaseId = this.leaseId;
     }
     if (action === "cancel") args.taskId = taskId;
+    if (action === "resume" && taskId) args.retryFromTaskId = taskId;
     if (action === "start" || action === "resume") this.ownedRuns.add(run.id);
     this.state.busy = true;
     this.state.error = "";
@@ -1060,6 +1062,11 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const selectedProcessTask = run?.tasks.find(task => task.id === processTarget?.taskId);
     cancelTask.hidden = !selectedProcessTask || run?.execution !== "running" || !["queued", "running"].includes(selectedProcessTask.status);
     cancelTask.disabled = !controller.canAct || cancelTask.hidden;
+    const retryTask = element<HTMLButtonElement>("#wf-retry-task");
+    retryTask.hidden = !selectedProcessTask || !run || !["stopped", "failed"].includes(run.execution);
+    const unsafeRetry = selectedProcessTask && run?.tasks.some(task => task.index >= selectedProcessTask.index && Object.hasOwn(task.options, "operation") && task.attempts.some(attempt => attempt.startedAt) && run.maintenance?.steps.find(step => step.id === (task.options.operation as { id?: string }).id)?.idempotent !== true);
+    retryTask.disabled = !controller.canAct || retryTask.hidden || Boolean(unsafeRetry);
+    retryTask.title = unsafeRetry ? "后续有已开始且未声明幂等的命令；请先核对实际效果并重新生成计划。" : "保留前面结果，重新执行此节点及后续节点。";
     const processSettings = element<HTMLButtonElement>("#wf-process-node-settings");
     processSettings.hidden = !selectedProcessTask || Object.hasOwn(selectedProcessTask.options, "operation") || !selectedProcessTask.configurationTarget;
     processSettings.disabled = !controller.canAct || live || !!run?.deletionPending;
@@ -1157,6 +1164,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     })();
   });
   element("#wf-cancel-task").addEventListener("click", () => { if (processTarget?.taskId) void controller.perform("cancel", true, processTarget.taskId); });
+  element("#wf-retry-task").addEventListener("click", () => { if (processTarget?.taskId) { const taskId = processTarget.taskId; processDialog.close(); void controller.perform("resume", true, taskId); } });
   developerLogs.addEventListener("toggle", () => { if (developerLogs.open && !developerRequested) { developerRequested = true; element("#wf-process-developer").textContent = "正在读取开发日志…"; void fetchProcess(true); } });
   nodeModel.addEventListener("change", () => { nodeDirty = true; nodeEffort.innerHTML = effortSelectOptions(controller.state.settings?.models ?? [], nodeModel.value || inheritedChoice().model, nodeEffort.value, "继承上级配置"); nodeNotice = ""; });
   nodeEffort.addEventListener("change", () => { nodeDirty = true; nodeNotice = ""; });

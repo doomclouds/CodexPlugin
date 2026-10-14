@@ -55,7 +55,7 @@ function registerPanelToolWithIcons(server: McpServer, register: () => void) {
 }
 
 export function createServer(engine: WorkflowEngine, options: { projects?: ProjectsProvider; readDeletionConfig?: (projectPaths: string[]) => Promise<Record<string, unknown>> } = {}) {
-  const serverInfo = { name: "workflows", version: "0.5.2", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.5.3", icons: panelIcons };
   const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server = new McpServer(serverInfo);
   const templates = new TemplateStore(engine.store);
@@ -205,11 +205,11 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
   const appOnly = { ui: { visibility: ["app"] } };
   server.registerTool("workflow_panel_lease", { description: "Maintain the task panel lifecycle lease; losing the lease stops its active workflows.", inputSchema: { leaseId: z.string().optional(), release: z.boolean().optional() }, _meta: appOnly, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async input => safe(() => engine.lease({ ...(input.leaseId ? { leaseId: input.leaseId } : {}), ...(input.release !== undefined ? { release: input.release } : {}) })));
   for (const action of ["start", "resume"] as const) server.registerTool(`workflow_${action}`, {
-    description: `${action} the previewed workflow when the user has authorized execution. Requires the current revision and declared project/write/network scope. UI callers also pass their live panel lease; chat callers omit leaseId.`,
-    inputSchema: { id, revision, leaseId: z.string().min(1).optional() },
+    description: `${action} the previewed workflow when the user has authorized execution. Requires the current revision and declared project/write/network scope. UI callers also pass their live panel lease; chat callers omit leaseId.${action === "resume" ? " Optional retryFromTaskId explicitly reruns that task and invalidates following results, preserving the earlier prefix. Already-started non-idempotent operations cannot be repeated." : ""}`,
+    inputSchema: { id, revision, leaseId: z.string().min(1).optional(), ...(action === "resume" ? { retryFromTaskId: z.string().regex(/^task_[1-9][0-9]*$/).optional() } : {}) },
     _meta: { ui: { visibility: ["model", "app"] } },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-  }, async input => safe(async () => ({ run: await engine.start({ id: input.id, revision: input.revision, ...(input.leaseId ? { leaseId: input.leaseId } : {}) }, action === "resume") })));
+  }, async input => safe(async () => ({ run: await engine.start({ id: input.id, revision: input.revision, ...(input.leaseId ? { leaseId: input.leaseId } : {}), ...("retryFromTaskId" in input && typeof input.retryFromTaskId === "string" ? { retryFromTaskId: input.retryFromTaskId } : {}) }, action === "resume") })));
   server.registerTool("workflow_cancel_task", { description: "Cancel one active task on the user request. The script can handle its failure; other tasks keep running.", inputSchema: { id, taskId: z.string().min(1) }, _meta: { ui: { visibility: ["model", "app"] } }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async input => safe(async () => ({ run: await engine.cancelTask(input.id, input.taskId) })));
   server.registerTool("workflow_apply", { description: "Apply the final reviewed changes when the user has authorized application. Requires the current revision and completed review; detects baseline conflicts and retains project edits. Maintenance activation uses only its predeclared command.", inputSchema: { id, revision }, _meta: { ui: { visibility: ["model", "app"] } }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } }, async input => safe(async () => ({ run: await engine.apply(input.id, input.revision) })));
 

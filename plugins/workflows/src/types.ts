@@ -28,6 +28,7 @@ export interface Task {
   id: string; index: number; prompt: string; options: Record<string, unknown>;
   label?: string; phase?: string; mode: "read" | "write";
   status: TaskStatus; cached: boolean; attempts: Attempt[]; output?: unknown; error?: string;
+  cacheInvalidated?: boolean;
   executionSettings?: EffectiveExecutionSettings;
   configurationTarget?: string;
   currentActivity?: Activity;

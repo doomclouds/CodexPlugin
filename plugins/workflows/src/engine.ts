@@ -4,7 +4,8 @@ import { CodexAdapter } from "./adapter.ts";
 import type { WorkerAdapter } from "./adapter.ts";
 import { executeScript, validateScript, validateWorkflowArgs } from "./script.ts";
 import { RunStore } from "./store.ts";
-import { listGitlinks, gitAwareContextDigest } from "./submodules.ts";
+import { listGitlinks, gitAwareContextDigest, readOnlyGitContextDigest } from "./submodules.ts";
+import { snapshotFingerprint } from "./snapshot-checkpoint.ts";
 import { applyWorkspace, contextDigest, createWorkspace, workspaceDiff } from "./workspace.ts";
 import { createGitWorkspace, validateMaintenance, reviewMaintenance, applyMaintenance, maintenanceFingerprint, validateGitWorkspace } from "./maintenance.ts";
 import type { Activity, Attempt, Limits, Task, WorkflowRun, MaintenancePlan, Preparation, DefinitionSource } from "./types.ts";
@@ -308,12 +309,26 @@ export class WorkflowEngine {
     this.leases.set(id, expiresAt);
     return { leaseId: id, expiresAt };
   }
-  async start(input: { id: string; revision: number; leaseId?: string }, resume = false) {
+  private retryBoundary(run: WorkflowRun, taskId: string | undefined, resume: boolean): number | undefined {
+    if (taskId === undefined) return undefined;
+    if (!resume) throw new Error("Retrying a task requires workflow_resume");
+    const task = run.tasks.find(item => item.id === taskId);
+    if (!task || !Number.isSafeInteger(task.index) || task.index < 0 || task.id !== `task_${task.index + 1}`) throw new Error("Unknown workflow retry task");
+    for (const later of run.tasks.filter(item => item.index >= task.index)) {
+      const operation = later.options.operation as { id?: string } | undefined;
+      if (operation && later.attempts.some(attempt => attempt.startedAt) && run.maintenance?.steps.find(step => step.id === operation.id)?.idempotent !== true) {
+        throw new Error(`Operation ${operation.id} already started and is not declared idempotent. Inspect its actual effects and create a revised preview before retrying this task or its following steps.`);
+      }
+    }
+    return task.index;
+  }
+  async start(input: { id: string; revision: number; leaseId?: string; retryFromTaskId?: string }, resume = false) {
     let run = await this.load(input.id);
     this.assertActionAvailable(run);
     this.assertRevision(run, input.revision);
     if (this.active.has(run.id) || await this.store.isLocked(run.id)) throw new Error("Old workers have not exited; workflow cannot be relaunched");
     if (resume ? !["stopped", "failed"].includes(run.execution) : run.execution !== "draft") throw new Error("Workflow state does not permit this action");
+    this.retryBoundary(run, input.retryFromTaskId, resume);
     if (input.leaseId && (this.leases.get(input.leaseId) ?? 0) < Date.now()) throw new Error("Panel lease expired");
     const release = await this.store.acquire(run.id);
     let active: Active | undefined;
@@ -324,6 +339,7 @@ export class WorkflowEngine {
       this.runs.set(run.id, run);
       this.assertRevision(run, input.revision);
       if (resume ? !["stopped", "failed"].includes(run.execution) : run.execution !== "draft") throw new Error("Workflow state changed before start");
+      const retryFrom = this.retryBoundary(run, input.retryFromTaskId, resume);
       const { meta, mayUseAgent } = validateScript(run.script);
       validateWorkflowArgs(meta, run.args);
       run.meta = meta;
@@ -331,6 +347,10 @@ export class WorkflowEngine {
       const settings = await this.settings.get();
       const explicitSettings = settings.model || settings.reasoningEffort || run.executionSettings?.model || run.executionSettings?.reasoningEffort || Object.values(run.nodeSettings).some(settings => settings.model || settings.reasoningEffort);
       if (!this.adapter.executionEnvironment && explicitSettings) throw new Error("This worker adapter cannot validate configured model settings.");
+      if (retryFrom !== undefined) {
+        for (const task of run.tasks) if (task.index >= retryFrom) task.cacheInvalidated = true;
+        this.log(run, `Explicit retry from ${input.retryFromTaskId}: preserving earlier results and invalidating this task and its following results.`);
+      }
       run.controlId = randomBytes(16).toString("hex");
       run.execution = "preparing"; run.review = "unavailable"; run.application = "none";
       run.startedAt = now(); run.preparation = { startedAt: run.startedAt, stages: [] }; delete run.endedAt;
@@ -393,6 +413,7 @@ export class WorkflowEngine {
           const gitlinks = await listGitlinks(run.projectPath);
           if (gitlinks.length && run.allowWrite && run.workspaceMode !== "git-worktree") throw new Error("Snapshot writing does not copy Git submodules. Create a new preview with workspaceMode: git-worktree to retain their commit and initialization state.");
           context = gitlinks.length ? await gitAwareContextDigest(run.projectPath) : await contextDigest(run.projectPath);
+          if (!run.allowWrite) context = digest({ files: context, git: await readOnlyGitContextDigest(run.projectPath) });
         } catch (error) { if (run.allowWrite) throw error; context = randomBytes(16).toString("hex"); }
         if (run.contextDigest && run.contextDigest !== context) {
           if (run.workspace) throw new Error("Project changed since the workspace snapshot. Create a new preview to preserve those changes.");
@@ -409,6 +430,11 @@ export class WorkflowEngine {
         if (run.workspace?.kind === "git-worktree") {
           await validateGitWorkspace(run.workspace);
           if (run.workspaceCheckpoint && await maintenanceFingerprint(run.workspace) !== run.workspaceCheckpoint) throw new Error("Saved Git checkout or artifacts changed; cached steps cannot safely replay. Create a new preview.");
+        } else if (run.workspace) {
+          if (run.workspaceCheckpoint) {
+            if (!run.workspaceCheckpoint.startsWith("snapshot-v1:")) throw new Error("Saved snapshot checkpoint format is unsupported. Create a new preview before replaying verified results.");
+            if (await snapshotFingerprint(run.workspace, active.controller.signal) !== run.workspaceCheckpoint) throw new Error("Saved snapshot workspace or artifacts changed; cached verification cannot safely replay. Create a new preview.");
+          } else if (run.tasks.some(task => task.status === "completed" || task.attempts.some(attempt => attempt.startedAt))) throw new Error("Saved snapshot lacks a verified execution checkpoint. Create a new preview before replaying previously started workers or verified results.");
         }
       });
       run.preparation!.endedAt = now(); run.execution = "running";
@@ -427,7 +453,7 @@ export class WorkflowEngine {
   private async execute(run: WorkflowRun, active: Active) {
     const readPool = new Pool(run.limits.maxReadWorkers);
     let index = 0;
-    let cacheValid = true;
+    let cacheInvalidFrom = Number.POSITIVE_INFINITY;
     let totalTokens = run.tasks.reduce((total, task) => total + task.attempts.reduce((subtotal, attempt) => subtotal + (attempt.usage?.totalTokens ?? 0), 0), 0);
     let phase: string | undefined;
     const journal = structuredClone(run.tasks);
@@ -439,6 +465,7 @@ export class WorkflowEngine {
           const operation = (async () => {
             const position = index++;
             const previous = journal[position];
+            if (previous?.cacheInvalidated) cacheInvalidFrom = Math.min(cacheInvalidFrom, position);
             let options: Record<string, unknown> = rawOptions;
             let executionSettings: EffectiveExecutionSettings | undefined;
             let configurationTarget: string | undefined;
@@ -460,7 +487,7 @@ export class WorkflowEngine {
                 executionSettings = this.workerSettings(run, options, position, taskPhase, await this.agentEnvironment(run, active));
               }
             } catch (error) {
-              cacheValid = false;
+              cacheInvalidFrom = Math.min(cacheInvalidFrom, position);
               const errorText = message(error);
               run.tasks[position] = { id: `task_${position + 1}`, index: position, prompt, options, mode: options.mode === "write" || options.isolation === "worktree" ? "write" : "read", status: "failed", cached: false, attempts: [...(previous?.attempts ?? []), { id: `task_${position + 1}_attempt_${(previous?.attempts.length ?? 0) + 1}`, status: "failed", error: errorText, endedAt: now() }], error: errorText, ...(configurationTarget ? { configurationTarget } : {}) };
               this.log(run, errorText, `task_${position + 1}`, "error");
@@ -471,7 +498,7 @@ export class WorkflowEngine {
             const fingerprint = taskFingerprint(prompt, options, executionSettings);
             const task: Task = { id: `task_${position + 1}`, index: position, prompt, options, mode, status: "queued", cached: false, attempts: previous?.attempts ?? [], ...(configurationTarget ? { configurationTarget } : {}), ...(executionSettings ? { executionSettings } : {}), ...(typeof options.label === "string" ? { label: options.label } : {}), ...(typeof options.phase === "string" ? { phase: options.phase } : phase ? { phase } : {}) };
             run.tasks[position] = task;
-            if (cacheValid && previous?.status === "completed" && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint && Object.hasOwn(previous, "output")) {
+            if (position < cacheInvalidFrom && previous?.status === "completed" && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint && Object.hasOwn(previous, "output")) {
               task.status = "completed"; task.cached = true; task.output = previous.output;
               if (previous.executionSettings) task.executionSettings = previous.executionSettings;
               this.log(run, "Reused completed task result.", task.id);
@@ -480,7 +507,7 @@ export class WorkflowEngine {
             }
             const previousOperation = operationId ? journal.find(item => (item.options.operation as { id?: string } | undefined)?.id === operationId && item.attempts.some(attempt => attempt.startedAt)) : undefined;
             if (previousOperation && run.maintenance!.steps.find(step => step.id === operationId)?.idempotent !== true) {
-              cacheValid = false;
+              cacheInvalidFrom = Math.min(cacheInvalidFrom, position);
               task.status = "failed";
               task.error = `Operation ${operationId} already started in a prior attempt. Its result cannot safely be reused here and it will not be repeated automatically. Inspect its actual effects and revise the workflow before continuing.`;
               this.log(run, task.error, task.id, "error");
@@ -488,7 +515,7 @@ export class WorkflowEngine {
               throw new Error(task.error);
             }
             // A whole-run interruption restarts that task without discarding later completed results.
-            if (!(previous?.status === "interrupted" && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint)) cacheValid = false;
+            if (!(previous?.status === "interrupted" && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint)) cacheInvalidFrom = Math.min(cacheInvalidFrom, position);
             const controller = new AbortController();
             const abort = () => controller.abort();
             active.controller.signal.addEventListener("abort", abort, { once: true });
@@ -597,6 +624,9 @@ export class WorkflowEngine {
       if (run.workspace?.kind === "git-worktree") {
         try { run.workspaceCheckpoint = await maintenanceFingerprint(run.workspace); }
         catch (error) { run.execution = run.execution === "completed" ? "failed" : run.execution; run.error = `Could not checkpoint isolated checkout: ${message(error)}`; this.log(run, run.error, undefined, "error"); }
+      } else if (run.workspace) {
+        try { run.workspaceCheckpoint = await snapshotFingerprint(run.workspace); }
+        catch (error) { run.execution = run.execution === "completed" ? "failed" : run.execution; run.error = `Could not checkpoint isolated snapshot: ${message(error)}`; this.log(run, run.error, undefined, "error"); }
       }
       run.endedAt = now();
       await this.persist(run);
