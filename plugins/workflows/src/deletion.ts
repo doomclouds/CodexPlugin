@@ -31,6 +31,11 @@ const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(valu
 const absent = (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT";
 const text = (error: unknown) => error instanceof Error ? error.message : String(error);
 const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
+function canonicalConfig(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalConfig);
+  if (isObject(value)) return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalConfig(value[key])]));
+  return value;
+}
 function normalizedInput(input: DeleteInput): DeleteInput {
   if (!Number.isSafeInteger(input.revision) || input.revision < 1) throw new Error("Invalid deletion revision");
   if (input.kind === "run") {
@@ -277,8 +282,9 @@ export class DeletionService {
         const scopes = configScopes(config);
         const canonicalPaths = new Map<string, Promise<string | undefined>>();
         for (const entry of directoryVariants) for (const scope of scopes) for (const [serverName, server] of Object.entries(scope.servers)) for (const field of await serverReferences(server, entry.directory, scope.cwd, canonicalPaths)) blocked.push({ code: "config_reference", runId: entry.id, message: `MCP 服务 ${serverName} 仍使用该工作区；先把服务迁移到独立位置并核验配置，再删除。`, reference: { source: "effective MCP configuration", serverName, field } });
-        // Store only a digest: config values may contain credentials.
-        signatures.push(["effectiveConfig", hash(scopes)]);
+        // Codex may serialize configuration maps in a different key order on each read.
+        // Normalize object keys, preserving argv order and all values; store only a digest.
+        signatures.push(["effectiveConfig", hash(canonicalConfig(scopes))]);
       } catch { blocked.push({ code: "config_unavailable", message: "无法读取当前有效 MCP 配置，不能确认删除不会中断服务。" }); }
     } else if (activationEvidence) blocked.push({ code: "config_unavailable", message: "当前连接不能核验有效 MCP 配置，暂时不能删除包含激活记录的工作流。" });
     result.totalBytes = objects.reduce((total, item) => total + item.bytes, 0); result.totalFiles = objects.reduce((total, item) => total + item.files, 0);

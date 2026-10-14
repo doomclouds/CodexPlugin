@@ -100,6 +100,51 @@ test("effective MCP references block deletion and stale configuration cannot aut
   assert.equal((await service.execute({ ...preview.target, fingerprint: preview.fingerprint })).deleted, true); assert.deepEqual(config, {});
 });
 
+test("effective configuration map ordering does not invalidate a fresh deletion preview", async t => {
+  let reads = 0;
+  const { store, service, run } = await fixture(t, { readEffectiveConfig: async () => (++reads % 2 ? {
+    scopes: [{ cwd: ".", mcp_servers: {
+      alpha: { command: "node", args: ["--version", "--help"], env: { FIRST: "private-fixture", SECOND: "same-value" } },
+      beta: { command: "node", args: ["--help"] },
+    } }],
+  } : {
+    scopes: [{ mcp_servers: {
+      beta: { args: ["--help"], command: "node" },
+      alpha: { env: { SECOND: "same-value", FIRST: "private-fixture" }, args: ["--version", "--help"], command: "node" },
+    }, cwd: "." }],
+  }) });
+  const record = await run();
+  const input = { kind: "run" as const, id: record.id, revision: record.revision };
+  const first = await service.preview(input); const second = await service.preview(input);
+  assert.equal(first.canDelete, true); assert.equal(first.fingerprint, second.fingerprint);
+  assert.ok(!JSON.stringify(first).includes("private-fixture"));
+  const deleted = await service.execute({ ...input, fingerprint: first.fingerprint });
+  assert.equal(deleted.deleted, true, JSON.stringify(deleted.blocked));
+  await missing(store.directory(record.id)); await missing(path.join(store.root, ".deletions"));
+});
+
+test("canonical configuration fingerprints still reject changed values and argument order", async t => {
+  let config: Record<string, unknown> = {};
+  const { store, service, run } = await fixture(t, { readEffectiveConfig: async () => config });
+  const record = await run();
+  const input = { kind: "run" as const, id: record.id, revision: record.revision };
+  const server = { command: "node", args: ["--version", "--help"], env: { FIXTURE: "original" } };
+  const changes = [
+    { ...server, command: "another-command" },
+    { ...server, args: [...server.args].reverse() },
+    { ...server, env: { FIXTURE: "changed" } },
+    { ...server, args: [path.join(store.directory(record.id), "workspace", "server.mjs")] },
+  ];
+  for (const changed of changes) {
+    config = { mcp_servers: { production: server } };
+    const preview = await service.preview(input); assert.equal(preview.canDelete, true);
+    config = { mcp_servers: { production: changed } };
+    const rejected = await service.execute({ ...input, fingerprint: preview.fingerprint });
+    assert.equal(rejected.deleted, false); assert.ok(rejected.blocked.some(block => block.code === "preview_changed"));
+    assert.equal((await store.load(record.id)).id, record.id);
+  }
+});
+
 test("other activation journals retain both before and desired dependencies until references are explicitly resolved", async t => {
   const { store, service, run } = await fixture(t);
   const first = await run(); const second = await run();

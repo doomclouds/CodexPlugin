@@ -191,10 +191,34 @@ export interface HostStyleEffects {
   fonts: (css: string) => void;
 }
 
+// Some hosts send only style variables. Keep native menus aligned with that
+// surface instead of using an unrelated operating-system color preference.
+function surfaceTheme(color: string | undefined): "light" | "dark" | undefined {
+  if (!color) return undefined;
+  const value = color.trim();
+  let channels: number[];
+  const hex = /^#([\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i.exec(value)?.[1];
+  if (hex) {
+    const expanded = hex.length <= 4 ? [...hex].map(part => part + part).join("") : hex;
+    if (expanded.length === 8 && expanded.slice(6).toLowerCase() !== "ff") return undefined;
+    channels = expanded.slice(0, 6).match(/../g)!.map(part => parseInt(part, 16) / 255);
+  }
+  else {
+    const rgb = /^rgba?\(\s*([\d.]+)(%)?[\s,]+([\d.]+)(%)?[\s,]+([\d.]+)(%)?(?:\s*[,/]\s*([\d.]+)(%)?)?\s*\)$/i.exec(value);
+    if (!rgb) return undefined;
+    if (rgb[7] !== undefined && Number(rgb[7]) / (rgb[8] ? 100 : 1) !== 1) return undefined;
+    channels = [1, 3, 5].map(index => Number(rgb[index]) / (rgb[index + 1] ? 100 : 255));
+  }
+  if (channels.some(channel => !Number.isFinite(channel) || channel < 0 || channel > 1)) return undefined;
+  const linear = channels.map(channel => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4);
+  return linear[0]! * .2126 + linear[1]! * .7152 + linear[2]! * .0722 > .179 ? "light" : "dark";
+}
+
 // The pinned SDK exposes separate theme, variable and font helpers.
 export function applyPanelHostStyles(context: Record<string, unknown>, effects: HostStyleEffects): void {
-  if (context.theme === "light" || context.theme === "dark") effects.theme(context.theme);
   const styles = context.styles as { variables?: Record<string, string | undefined>; css?: { fonts?: string } } | undefined;
+  const theme = context.theme === "light" || context.theme === "dark" ? context.theme : surfaceTheme(styles?.variables?.["--color-background-primary"]);
+  if (theme) effects.theme(theme);
   if (styles?.variables) effects.variables(styles.variables);
   if (typeof styles?.css?.fonts === "string") effects.fonts(styles.css.fonts);
 }

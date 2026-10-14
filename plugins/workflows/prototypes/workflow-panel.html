@@ -61,7 +61,12 @@ html,body{height:100%;margin:0;overflow:hidden}
 #workflow-panel-prototype{height:100dvh;overflow-y:auto;overflow-x:hidden;padding:24px;scrollbar-width:thin;overscroll-behavior-y:auto}
 #workflow-panel-prototype *{box-sizing:border-box}
 #workflow-panel-prototype [hidden]{display:none!important}
-#workflow-panel-prototype button,#workflow-panel-prototype select,#workflow-panel-prototype input,#workflow-panel-prototype textarea{font:inherit;color:inherit}
+#workflow-panel-prototype button,#workflow-panel-prototype select,#workflow-panel-prototype input,#workflow-panel-prototype textarea{font:inherit;color:inherit;color-scheme:inherit}
+#workflow-panel-prototype option,#workflow-panel-prototype optgroup{font:inherit;color:var(--wf-text);background:var(--wf-bg)}
+#workflow-panel-prototype option:disabled,#workflow-panel-prototype optgroup:disabled{color:var(--wf-muted)}
+#workflow-panel-prototype input::placeholder,#workflow-panel-prototype textarea::placeholder{color:var(--wf-muted);opacity:1}
+#workflow-panel-prototype input[type=checkbox],#workflow-panel-prototype input[type=radio]{accent-color:var(--wf-blue)}
+#workflow-panel-prototype select:disabled,#workflow-panel-prototype input:disabled,#workflow-panel-prototype textarea:disabled{color:var(--wf-muted);-webkit-text-fill-color:var(--wf-muted)}
 #workflow-panel-prototype button{border:var(--wf-border-width) solid var(--wf-border);background:var(--wf-bg);border-radius:var(--wf-radius-md);padding:9px 13px;min-height:38px;cursor:pointer}
 #workflow-panel-prototype button:hover:not(:disabled){background:var(--wf-surface)}
 #workflow-panel-prototype button:disabled{opacity:.45;cursor:default}

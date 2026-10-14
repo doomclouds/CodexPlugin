@@ -45008,7 +45008,7 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.5.0",
+    version: "0.5.1",
     stage: "runtime-v2",
     available: ["preparation-progress", "node-activity", "node-process", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: true, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree"], submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
@@ -45805,7 +45805,7 @@ var CodexAdapter = class {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config2 = object4(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config2, cwd);
@@ -45952,7 +45952,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -46165,7 +46165,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object4(object4(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== void 0 || request.reasoningEffort !== void 0) {
@@ -47503,6 +47503,11 @@ var hash3 = (value) => createHash5("sha256").update(JSON.stringify(value)).diges
 var absent2 = (error62) => error62.code === "ENOENT";
 var text = (error62) => error62 instanceof Error ? error62.message : String(error62);
 var isObject2 = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
+function canonicalConfig(value) {
+  if (Array.isArray(value)) return value.map(canonicalConfig);
+  if (isObject2(value)) return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalConfig(value[key])]));
+  return value;
+}
 function normalizedInput(input2) {
   if (!Number.isSafeInteger(input2.revision) || input2.revision < 1) throw new Error("Invalid deletion revision");
   if (input2.kind === "run") {
@@ -47811,7 +47816,7 @@ var DeletionService = class {
         const scopes = configScopes(config2);
         const canonicalPaths = /* @__PURE__ */ new Map();
         for (const entry of directoryVariants) for (const scope of scopes) for (const [serverName, server2] of Object.entries(scope.servers)) for (const field of await serverReferences(server2, entry.directory, scope.cwd, canonicalPaths)) blocked.push({ code: "config_reference", runId: entry.id, message: `MCP \u670D\u52A1 ${serverName} \u4ECD\u4F7F\u7528\u8BE5\u5DE5\u4F5C\u533A\uFF1B\u5148\u628A\u670D\u52A1\u8FC1\u79FB\u5230\u72EC\u7ACB\u4F4D\u7F6E\u5E76\u6838\u9A8C\u914D\u7F6E\uFF0C\u518D\u5220\u9664\u3002`, reference: { source: "effective MCP configuration", serverName, field } });
-        signatures.push(["effectiveConfig", hash3(scopes)]);
+        signatures.push(["effectiveConfig", hash3(canonicalConfig(scopes))]);
       } catch {
         blocked.push({ code: "config_unavailable", message: "\u65E0\u6CD5\u8BFB\u53D6\u5F53\u524D\u6709\u6548 MCP \u914D\u7F6E\uFF0C\u4E0D\u80FD\u786E\u8BA4\u5220\u9664\u4E0D\u4F1A\u4E2D\u65AD\u670D\u52A1\u3002" });
       }
@@ -47987,7 +47992,7 @@ async function readDeletionConfig(projectPaths = []) {
   const session = new ProtocolSession(process.env.WORKFLOWS_CODEX_COMMAND ?? "codex", ["app-server", "--disable", "plugins", "--disable", "apps", "--disable", "remote_plugin"], process.cwd(), 15e3, 5e3, () => {
   });
   try {
-    await session.request("initialize", { clientInfo: { name: "workflows_deletion_preflight", version: "0.5.0" }, capabilities: { experimentalApi: true } });
+    await session.request("initialize", { clientInfo: { name: "workflows_deletion_preflight", version: "0.5.1" }, capabilities: { experimentalApi: true } });
     session.send({ method: "initialized", params: {} });
     const scopes = [];
     for (const cwd of [void 0, ...new Set(projectPaths)].slice(0, 101)) {
@@ -48080,7 +48085,7 @@ function registerPanelToolWithIcons(server2, register) {
   }
 }
 function createServer(engine2, options = {}) {
-  const serverInfo = { name: "workflows", version: "0.5.0", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.5.1", icons: panelIcons };
   const panelHtml = readFileSync3(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);

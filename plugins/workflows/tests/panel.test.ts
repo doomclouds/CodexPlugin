@@ -307,6 +307,26 @@ test("host context changes immediately update theme, fonts and supplied style va
   assert.equal(properties["--border-radius-md"], "10px");
 });
 
+test("native controls follow host surfaces when the host omits its theme", () => {
+  let theme = "unchanged";
+  const properties: Record<string, string | undefined> = {};
+  const effects = { theme: (value: string) => { theme = value; }, variables: (values: Record<string, string | undefined>) => { Object.assign(properties, values); }, fonts: () => {} };
+  for (const color of ["#181818", "#222", "#222f", "#181818ff", "rgb(24, 24, 24)", "rgb(10% 10% 10%)", "rgba(24, 24, 24, 1)", "rgba(10%, 10%, 10%, 100%)", "rgb(24 24 24 / 1)"]) {
+    theme = "unchanged";
+    applyPanelHostStyles({ styles: { variables: { "--color-background-primary": color, "--font-text-sm-size": "15px" } } }, effects);
+    assert.equal(theme, "dark", color);
+    assert.equal(properties["--font-text-sm-size"], "15px");
+  }
+  applyPanelHostStyles({ styles: { variables: { "--color-background-primary": "#fafafa" } } }, effects);
+  assert.equal(theme, "light");
+  applyPanelHostStyles({ theme: "dark", styles: { variables: { "--color-background-primary": "#fafafa" } } }, effects);
+  assert.equal(theme, "dark", "An explicit host theme stays authoritative");
+  for (const color of [undefined, "var(--another-surface)", "transparent", "rgb(300, 0, 0)", "rgba(255, 255, 255, 0.5)", "#fff8", "#ffffff80"]) {
+    applyPanelHostStyles({ styles: { variables: { "--color-background-primary": color } } }, effects);
+    assert.equal(theme, "dark", "Partial or unresolved styles do not reset the last theme");
+  }
+});
+
 test("editor JSON preserves null, strings, arrays and primitive workflow inputs", () => {
   for (const value of [null, "a string input", [1, "second"], true, 12, { files: ["src/index.ts"] }]) {
     assert.deepEqual(JSON.parse(jsonInput(value)), value);
