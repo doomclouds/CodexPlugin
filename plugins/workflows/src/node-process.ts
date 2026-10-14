@@ -1,4 +1,6 @@
 import type { Activity, WorkflowRun } from "./types.ts";
+import { resultCheckFailure } from "./failure-context.ts";
+import { stopSummary } from "./stop-context.ts";
 
 export function diagnosticText(value: string, maximum = 4000): string {
   return value.replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]")
@@ -16,9 +18,10 @@ export function nodeProcess(run: WorkflowRun, input: { taskId?: string; phase?: 
   const prep: Activity[] = input.scope === "workflow" ? (run.preparation?.stages ?? []).map(stage => ({ ...stage, kind: "initializing" as const })) : [];
   const activities: Activity[] = [...prep, ...tasks.flatMap(task => task.attempts.flatMap(attempt => attempt.activities ?? []))].slice(-100).map(activity => ({ ...activity, label: diagnosticText(activity.label, 100), ...(activity.detail ? { detail: diagnosticText(activity.detail, 240) } : {}) }));
   const current = tasks.find(task => task.currentActivity?.status === "running")?.currentActivity ?? last?.currentActivity;
-  const failedAfterTasks = run.execution === "failed" && !run.preparation?.stages.some(stage => stage.status === "failed" || stage.status === "interrupted") && run.tasks.length > 0 && run.tasks.every(task => task.status === "completed") && tasks.some(task => task.id === run.tasks.at(-1)?.id);
+  const failure = resultCheckFailure(run);
+  const failedAfterTasks = Boolean(failure && (input.scope === "workflow" || input.phase && input.phase === failure.phase || tasks.some(task => task.id === failure.afterTaskId)));
   const error = tasks.find(task => task.status === "failed")?.error ?? (input.scope === "workflow" || failedAfterTasks ? run.error : undefined);
-  const summary = failedAfterTasks ? "任务执行已完成，但工作流在后续检查或结果判断时失败。请核对错误，再选择是否从此节点重试。" : status === "failed" ? "本节点执行失败，查看错误与过程后再决定是否继续。" : status === "completed" ? "本节点已完成。" : status === "preparing" ? prep.find(activity => activity.status === "running")?.label ?? "正在准备工作流。" : status === "running" ? current?.label ?? "正在执行任务，等待新的活动。" : status === "stopping" ? "正在等待任务退出。" : status === "interrupted" || status === "stopped" ? "本节点已中断，进度保留。" : "本节点尚未执行。";
+  const summary = failedAfterTasks ? "任务执行已完成，但工作流在后续检查或结果判断时失败。请核对错误，再选择是否从此节点重试。" : status === "failed" ? "本节点执行失败，查看错误与过程后再决定是否继续。" : status === "completed" ? "本节点已完成。" : status === "preparing" ? prep.find(activity => activity.status === "running")?.label ?? "正在准备工作流。" : status === "running" ? current?.label ?? "正在执行任务，等待新的活动。" : status === "stopping" ? "正在等待任务退出。" : status === "interrupted" || status === "stopped" ? stopSummary(run.stopReason) : "本节点尚未执行。";
   const ids = new Set(tasks.map(task => task.id));
   return {
     id: run.id, ...(input.taskId ? { taskId: input.taskId } : {}), ...(input.phase ? { phase: input.phase } : {}),

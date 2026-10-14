@@ -97,13 +97,14 @@ test("obtaining a new lease cannot enable actions while truthful run synchroniza
   assert.equal(f.panel.canAct, true);
 });
 
-test("a failed project pipe does not invalidate a fixed persisted run directory or invent a fallback", async t => {
+test("a failed project pipe preserves the saved run directory but disables actions until project ownership recovers", async t => {
   const f = fixture(); t.after(() => f.panel.teardown());
   await f.panel.connected();
   f.projectFails(true); await f.panel.reconnect();
   assert.equal(f.panel.state.connection, "connected");
   assert.match(f.panel.state.projectsError, /pipe ended/);
-  assert.equal(f.panel.state.projectPath, "/fixture-project");
+  assert.equal(f.panel.state.projectPath, "");
+  assert.equal(f.panel.canAct, false);
   assert.equal(f.panel.selected?.projectPath, "/fixture-project");
   assert.deepEqual(mutations(f.calls), []);
 });

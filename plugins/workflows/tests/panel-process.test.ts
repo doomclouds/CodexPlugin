@@ -1,6 +1,7 @@
+import { projectFixtureResponse } from "./panel-project-fixture.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deletionPreviewPayload, renderDeletionPreview, renderNodeProcess } from "../prototypes/panel.ts";
+import { deletionPreviewPayload, fullFailureDetails, renderDeletionPreview, renderNodeProcess } from "../prototypes/panel.ts";
 import type { DeletionPreview, NodeProcess, WorkflowActivity } from "../prototypes/panel.ts";
 import { elapsedLabel, renderWorkflowGraph } from "../prototypes/panel-graph.ts";
 
@@ -20,6 +21,14 @@ test("errors and results stay visible and escape executable markup", () => {
   assert.match(html, /&lt;img/);
   assert.doesNotMatch(html, /<img/);
   assert.match(html, /data-icon="alert-circle"/);
+});
+test("full failure diagnostics are collapsed, escaped and credential redacted", () => {
+  const detail = "Result rejected\n\n" + "diagnostic ".repeat(600) + '<img src=x onerror="evil"> token=private-fixture';
+  const html = fullFailureDetails(detail);
+  assert.match(html, /<details class="wf-failure-details"><summary>完整错误<\/summary>/);
+  assert.ok(html.includes("diagnostic ".repeat(600)));
+  assert.doesNotMatch(html, /<img|private-fixture|<details[^>]* open/);
+  assert.match(html, /&lt;img/);
 });
 const preview: DeletionPreview = { fingerprint: "verified", target: { kind: "run", id: "run", revision: 4 }, runs: [{ id: "run", revision: 4, name: "test", projectPath: "fixture" }], objects: [{ path: "owned-run", kind: "run", bytes: 1024, files: 5 }], totalBytes: 1024, totalFiles: 5, canDelete: false, blocked: [{ code: "ACTIVE_PROCESS", runId: "run", message: "执行器仍在运行，停止后重试" }] };
 test("deletion previews disclose exact counts and blockers without advertising successful cleanup", () => {
@@ -50,7 +59,7 @@ test("progress polling cannot replace newer activity with an older response at t
   const current = { id: "run", revision: 2, progressSequence: 5, createdAt: "", updatedAt: "", meta: { name: "test", description: "" }, script: "return args", args: {}, projectPath: "fixture", allowWrite: false, execution: "running" as const, review: "unavailable" as const, application: "none" as const, tasks: [], logs: [], limits: { maxReadWorkers: 1, maxCalls: 2, timeoutMs: 10000, maxTokens: 0 } };
   const panel = new WorkflowPanelController(async name => {
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "fixture" } };
-    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [], contextSource: "global-or-unassigned" } };
+    if (name === "workflow_get_projects") return projectFixtureResponse(current.projectPath);
     if (name === "workflow_list_runs") return { structuredContent: { runs: [{ ...current, progressSequence: 1 }] } };
     if (name === "workflow_list_templates") return { structuredContent: { templates: [] } };
     if (name === "workflow_get_execution_settings") return { isError: true, content: [{ type: "text", text: "Unavailable in fixture" }] };
@@ -71,7 +80,7 @@ test("pending cleanup records cannot restart, mutate their draft or apply retain
   const mutations: string[] = [];
   const panel = new WorkflowPanelController(async name => {
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "fixture" } };
-    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
+    if (name === "workflow_get_projects") return projectFixtureResponse(run.projectPath);
     if (name === "workflow_list_runs") return { structuredContent: { runs: [run] } };
     if (name === "workflow_list_templates") return { structuredContent: { templates: [] } };
     if (name === "workflow_get_execution_settings") return { isError: true, content: [{ type: "text", text: "Unavailable in fixture" }] };

@@ -1,4 +1,6 @@
 import type { WorkflowAttempt, WorkflowRun, WorkflowTask } from "./panel.ts";
+import { resultCheckFailure } from "../src/failure-context.ts";
+import type { WorkflowFailureContext } from "../src/failure-context.ts";
 
 export interface GraphExecutionSettings { model?: string; reasoningEffort?: string }
 export interface GraphTaskExecutionSettings extends GraphExecutionSettings {
@@ -15,6 +17,9 @@ export type WorkflowGraphInput = Pick<WorkflowRun, "meta" | "execution" | "logs"
   nodeSettings?: Record<string, GraphExecutionSettings>;
   deletionPending?: boolean;
   stale?: boolean;
+  failureContext?: WorkflowFailureContext;
+  preparation?: NonNullable<WorkflowRun["preparation"]>;
+  startedAt?: string;
 };
 export type GraphStatus = WorkflowTask["status"] | "planned" | "skipped" | "stopped" | "unknown";
 export interface WorkflowGraphGroup {
@@ -29,6 +34,7 @@ export interface WorkflowGraphPhase {
   declared: boolean;
   groups: WorkflowGraphGroup[];
   placeholder: string;
+  resultCheckFailed?: boolean;
 }
 export interface WorkflowGraph {
   name: string;
@@ -100,6 +106,8 @@ export function buildWorkflowGraph(run?: WorkflowGraphInput): WorkflowGraph {
   for (const phase of run.meta.phases ?? []) include(typeof phase === "string" ? phase : phase.title ?? phase.name ?? "");
   const declared = new Set(titles);
   for (const task of [...run.tasks].sort((left, right) => left.index - right.index)) if (task.phase) include(task.phase);
+  const resultFailure = resultCheckFailure(run);
+  if (resultFailure?.phase) include(resultFailure.phase);
   const unphased = run.tasks.filter(task => !task.phase);
   const unphasedTitle = titles.length ? "未分阶段的任务" : "任务执行";
   const phases: WorkflowGraphPhase[] = titles.map(title => {
@@ -111,6 +119,11 @@ export function buildWorkflowGraph(run?: WorkflowGraphInput): WorkflowGraph {
     const workflowOnly = !titles.length && !unphased.length;
     const status: GraphStatus = workflowOnly ? run.execution === "draft" ? "planned" : run.execution === "preparing" ? "running" : workflowStatuses.has(run.execution) ? run.execution : "unknown" : phaseStatus(unphased, run);
     phases.push({ title: workflowOnly ? run.meta.name : unphasedTitle, status, kind: workflowOnly ? "workflow" : "phase", declared: false, groups: groupTasks(unphased), placeholder: run.execution === "draft" ? "启动后展示动态任务" : run.execution === "running" ? "等待脚本派发任务" : "本次尚未派发任务" });
+  }
+  if (resultFailure) {
+    const relatedTask = run.tasks.find(task => task.id === resultFailure.afterTaskId);
+    const target = phases.find(phase => phase.title === resultFailure.phase) ?? phases.find(phase => phase.title === relatedTask?.phase) ?? phases.find(phase => phase.groups.some(group => group.tasks.some(task => task.id === relatedTask?.id))) ?? phases.at(-1);
+    if (target) { target.status = "failed"; target.resultCheckFailed = true; }
   }
   return { name: run.meta.name, phases, taskCount: run.tasks.length };
 }
@@ -178,7 +191,7 @@ export function renderWorkflowGraph(run?: WorkflowGraphInput, selectedTaskId?: s
     const tasks = phase.groups.flatMap(group => group.tasks);
     const active = tasks.find(task => task.status === "running" || task.status === "stopping") ?? [...tasks].reverse().find(task => task.status === "failed");
     const primary = active ?? tasks.at(-1), latest = primary?.attempts.at(-1);
-    const label = phase.status === "planned" ? phase.kind === "workflow" ? "待开始" : "待派发" : statusLabels[phase.status];
+    const label = phase.resultCheckFailed ? "结果检查失败" : phase.status === "planned" ? phase.kind === "workflow" ? "待开始" : "待派发" : statusLabels[phase.status];
     const identity = phase.kind === "workflow" ? 'data-process-scope="workflow"' : !phase.declared && tasks.length && tasks.every(task => !task.phase) ? 'data-process-scope="unphased"' : `data-phase="${escape(phase.title)}"`;
     const containerIdentity = identity.startsWith("data-phase=") ? `data-phase-container="${escape(phase.title)}"` : identity;
     const settings = configurationLabel(mergeSettings(run.executionSettings, phase.declared ? run.nodeSettings?.[`phase:${phase.title}`] : undefined));

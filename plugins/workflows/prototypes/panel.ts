@@ -1,6 +1,10 @@
 import { elapsedLabel, renderWorkflowGraph } from "./panel-graph.ts";
 import { readParameters, renderParameterFields } from "./panel-parameters.ts";
 import type { WorkflowParameter } from "./panel-parameters.ts";
+import { failureErrorSummary, failureErrorText, resultCheckFailure } from "../src/failure-context.ts";
+import { stopSummary } from "../src/stop-context.ts";
+import type { WorkflowStopReason } from "../src/stop-context.ts";
+import type { WorkflowFailureContext } from "../src/failure-context.ts";
 
 export interface ExecutionChoice { model?: string; reasoningEffort?: string }
 export interface NodeExecutionChoice extends ExecutionChoice { identity?: string }
@@ -62,6 +66,8 @@ export interface MaintenancePlan {
 }
 
 export interface WorkflowRun {
+  failureContext?: WorkflowFailureContext;
+  stopReason?: WorkflowStopReason;
   deletionPending?: boolean;
   deletionTarget?: DeletionTarget;
   sourceDefinition?: { id: string; revision?: number };
@@ -289,7 +295,6 @@ export class WorkflowPanelController {
   private templateRequest = 0;
   private settingsRequest = 0;
   private projectsRequest = 0;
-  private projectSelectionChanged = false;
 
   constructor(callTool: ToolCaller, changed: () => void = () => {}, every = (callback: () => void, milliseconds: number): (() => void) => {
     const timer = setInterval(callback, milliseconds);
@@ -302,16 +307,13 @@ export class WorkflowPanelController {
   }
 
   get selected(): WorkflowRun | undefined { return this.state.runs.find(run => run.id === this.state.selectedRun); }
-  get canAct(): boolean { return this.state.connection === "connected" && !this.state.reconnecting && !this.initializing && !this.state.busy && !this.closing; }
+  get currentProject(): CodexProject | undefined { return this.state.projectsLoaded && this.state.projectContextSource === "thread" ? this.state.projects.find(project => project.projectId === this.state.currentProjectId) : undefined; }
+  get projectBound(): boolean { const project = this.currentProject; return !!project && this.state.selectedProjectId === project.projectId && this.state.projectPath === project.path; }
+  get canAct(): boolean { return this.projectBound && (!this.selected || this.selected.projectPath === this.state.projectPath) && this.state.connection === "connected" && !this.state.reconnecting && !this.initializing && !this.state.busy && !this.closing; }
 
   setProjectPath(projectPath: string): void {
-    if (!this.state.projectPath && projectPath) {
-      this.state.projectPath = projectPath;
-      this.state.selectedProjectId = this.state.projects.find(project => project.path === projectPath)?.projectId;
-      this.projectSelectionChanged = true;
-      this.changed();
-      if (this.state.connection === "connected") void this.refreshExecutionSettings(projectPath);
-    }
+    // A tool argument is a hint, never evidence of the current chat's project.
+    if (this.currentProject && projectPath !== this.currentProject.path) { this.state.error = "此工作流属于其他项目，请从所属项目的聊天打开。"; this.changed(); }
   }
 
   async refreshProjects(): Promise<void> {
@@ -323,42 +325,28 @@ export class WorkflowPanelController {
     try {
       const data = projectsPayload(await this.request("workflow_get_projects", {}));
       if (this.closing || request !== this.projectsRequest) return;
-      const previousContext = this.state.currentProjectId;
       this.state.projects = data.projects;
       this.state.projectsLoaded = true;
-      if (!data.available) { this.state.projectsError = data.reason || "当前宿主无法提供 Codex 项目列表"; return; }
-      this.state.currentProjectId = data.currentProjectId;
-      this.state.projectContextSource = data.contextSource ?? (data.currentProjectId ? "thread" : "global-or-unassigned");
-      const selected = data.projects.find(project => project.projectId === this.state.selectedProjectId) ?? (this.projectSelectionChanged ? data.projects.find(project => project.path === this.state.projectPath) : undefined);
-      const automatic = data.contextSource === "thread" || !this.projectSelectionChanged && (!selected || previousContext !== data.currentProjectId);
-      const project = automatic ? data.projects.find(project => project.projectId === data.currentProjectId) : selected;
+      const project = data.available && data.contextSource !== "global-or-unassigned" ? data.projects.find(project => project.projectId === data.currentProjectId) : undefined;
+      this.state.currentProjectId = project?.projectId;
+      this.state.projectContextSource = project ? "thread" : "global-or-unassigned";
       this.state.selectedProjectId = project?.projectId;
       this.state.projectPath = project?.path ?? "";
-      if (this.selected) this.useRunProject(this.selected);
-    } catch (error) { if (!this.closing && request === this.projectsRequest) this.state.projectsError = `读取项目失败：${errorMessage(error)}`; }
+      if (!project) { this.state.runs = []; this.state.selectedRun = undefined; this.state.projectsError = data.available ? "工作流仅在项目聊天中使用，请从项目内打开。" : `暂时无法确认所属项目：${data.reason || "宿主项目接口不可用"}。请从项目聊天打开并刷新。`; return; }
+      this.state.runs = this.state.runs.filter(run => run.projectPath === project.path);
+      if (!this.selected) this.state.selectedRun = undefined;
+    } catch (error) { if (!this.closing && request === this.projectsRequest) { this.state.currentProjectId = undefined; this.state.selectedProjectId = undefined; this.state.projectContextSource = "global-or-unassigned"; this.state.projectPath = ""; this.state.projectsError = `暂时无法确认所属项目：${errorMessage(error)}。请从项目聊天打开并刷新。`; } }
     finally { if (request === this.projectsRequest) this.state.projectsBusy = false; this.changed(); }
   }
 
   async selectProject(projectId: string): Promise<void> {
-    if (!this.canAct) return;
-    if (this.selected || this.state.projectContextSource === "thread") {
-      this.state.projectsError = "项目所属工作流的目录固定；请在目标项目中新建运行。";
-      this.changed(); return;
-    }
-    const project = this.state.projects.find(project => project.projectId === projectId);
-    if (projectId && !project) { this.state.projectsError = "项目已不在 Codex 项目列表中，请刷新后重新选择"; this.changed(); return; }
-    this.projectSelectionChanged = true;
-    this.state.projectsError = "";
-    this.state.selectedProjectId = project?.projectId;
-    this.state.projectPath = project?.path ?? "";
+    if (projectId === this.currentProject?.projectId) return;
+    this.state.projectsError = this.currentProject ? "项目所属工作流的目录固定；请从目标项目的聊天中新建运行。" : "工作流仅在项目聊天中使用，请从项目内打开。";
     this.changed();
-    await Promise.all([this.refresh(), this.refreshExecutionSettings(this.state.projectPath)]);
   }
 
   private useRunProject(run: WorkflowRun): void {
-    this.projectSelectionChanged = true;
-    this.state.projectPath = run.projectPath;
-    this.state.selectedProjectId = this.state.projects.find(project => project.path === run.projectPath)?.projectId;
+    if (!this.currentProject || run.projectPath !== this.currentProject.path) throw new Error("此工作流属于其他项目，请从所属项目的聊天打开。");
   }
 
   connecting(): void { this.state.connection = "connecting"; this.changed(); }
@@ -412,6 +400,7 @@ export class WorkflowPanelController {
   }
 
   private replace(run: WorkflowRun): void {
+    if (!this.projectBound || run.projectPath !== this.currentProject?.path) return;
     const index = this.state.runs.findIndex(existing => existing.id === run.id);
     if (index < 0) this.state.runs.unshift(run);
     else if (this.state.runs[index]!.revision < run.revision || this.state.runs[index]!.revision === run.revision && (this.state.runs[index]!.progressSequence ?? 0) <= (run.progressSequence ?? 0)) this.state.runs[index] = run;
@@ -423,6 +412,7 @@ export class WorkflowPanelController {
       const data = toolPayload(response);
       if (data.run) {
         const run = parseRun(data.run);
+        if (!this.projectBound || run.projectPath !== this.state.projectPath) { this.state.error = "此工作流属于其他项目，请从所属项目的聊天打开。"; this.changed(); return; }
         this.definitionSelected = false;
         this.state.selectedRun = run.id;
         this.useRunProject(run);
@@ -483,6 +473,7 @@ export class WorkflowPanelController {
   }
 
   async refresh(force = false): Promise<boolean> {
+    if (!this.projectBound) return true;
     const projectPath = this.state.selectedProjectId ? this.state.projectPath : "";
     if (this.closing || !force && (this.pollingProject === projectPath || this.state.connection !== "connected" || this.state.reconnecting)) return false;
     const request = ++this.pollRequest;
@@ -493,7 +484,7 @@ export class WorkflowPanelController {
       if (this.closing || request !== this.pollRequest) return false;
       if (projectPath !== (this.state.selectedProjectId ? this.state.projectPath : "")) return false;
       if (!Array.isArray(data.runs)) throw new Error("宿主未返回运行列表");
-      const runs = data.runs.map(parseRun);
+      const runs = data.runs.map(parseRun).filter(run => run.projectPath === projectPath);
       // Keep the newer response when polling overlaps an explicit action.
       const createdDuringPoll = this.state.runs.filter(run => !knownRuns.has(run.id) && !runs.some(item => item.id === run.id));
       this.state.runs = [...createdDuringPoll, ...runs.map(run => {
@@ -525,7 +516,7 @@ export class WorkflowPanelController {
   }
 
   async refreshExecutionSettings(projectPath = this.selected?.projectPath ?? this.state.projectPath): Promise<void> {
-    if (this.closing || this.state.connection !== "connected") return;
+    if (this.closing || this.state.connection !== "connected" || !this.projectBound || projectPath !== this.currentProject?.path) return;
     const request = ++this.settingsRequest;
     this.state.settingsBusy = true;
     this.state.settingsError = "";
@@ -541,7 +532,7 @@ export class WorkflowPanelController {
   }
 
   async saveExecutionSettings(choice: ExecutionChoice, projectPath = this.selected?.projectPath ?? this.state.projectPath): Promise<void> {
-    if (!this.canAct || this.state.settingsBusy || !this.state.settings) return;
+    if (!this.canAct || this.state.settingsBusy || !this.state.settings || projectPath !== this.currentProject?.path) return;
     const request = ++this.settingsRequest;
     this.state.settingsBusy = true;
     this.state.settingsError = "";
@@ -607,6 +598,7 @@ export class WorkflowPanelController {
   }
 
   async select(id: string): Promise<void> {
+    if (!this.projectBound || !this.state.runs.some(run => run.id === id && run.projectPath === this.state.projectPath)) return;
     this.definitionSelected = false;
     this.state.selectedRun = id;
     this.state.task = undefined;
@@ -622,6 +614,7 @@ export class WorkflowPanelController {
 
   async save(input: WorkflowInput, edit?: { id: string; revision: number }): Promise<WorkflowRun | undefined> {
     if (!this.canAct) return undefined;
+    if (input.projectPath !== this.currentProject?.path) { this.state.error = "项目所属工作流的目录固定；请从目标项目的聊天中新建运行。"; this.changed(); return undefined; }
     if (edit && this.selected?.id === edit.id && this.selected.deletionPending) { this.state.error = "清理未完成，请先重试删除。"; this.changed(); return undefined; }
     this.state.busy = true;
     this.state.error = "";
@@ -629,6 +622,7 @@ export class WorkflowPanelController {
     try {
       const args: Record<string, unknown> = edit ? { id: edit.id, revision: edit.revision, script: input.script, args: input.args, allowWrite: input.allowWrite, ...(input.networkAccess !== undefined ? { networkAccess: input.networkAccess } : {}), ...(input.allowedMcpServers ? { allowedMcpServers: input.allowedMcpServers } : {}), ...(input.allowedMcpTools ? { allowedMcpTools: input.allowedMcpTools } : {}), ...(input.workspaceMode ? { workspaceMode: input.workspaceMode } : {}), ...(input.maintenance ? { maintenance: input.maintenance } : {}), ...(input.nodeSettings ? { nodeSettings: input.nodeSettings } : {}) } : { ...input };
       const run = parseRun((await this.request(edit ? "workflow_update" : "workflow_preview", args)).run);
+      this.useRunProject(run);
       this.definitionSelected = false;
       this.state.selectedRun = run.id;
       this.replace(run);
@@ -649,6 +643,7 @@ export class WorkflowPanelController {
     const sameLimits = !current || !input.limits || Object.entries(input.limits).every(([key, value]) => current.limits[key as keyof WorkflowRun["limits"]] === value);
     if (current && sameLimits && JSON.stringify(scope(current)) === JSON.stringify(scope(input))) {
       if (current.execution === "draft") { await this.perform("start", true); return; }
+      if (resultCheckFailure(current)) { this.state.error = "结果检查未通过。请查看失败原因，明确选择需要重新执行的节点。"; this.changed(); return; }
       if (["stopped", "failed"].includes(current.execution)) { await this.perform("resume", true); return; }
     }
     const sameNodes = !current || JSON.stringify(current.nodeSettings ?? {}) === JSON.stringify(input.nodeSettings ?? {});
@@ -796,6 +791,15 @@ export function renderNodeProcess(process: NodeProcess, now = Date.now()): strin
   const entries = process.activities.map(activity => `<li data-status="${escapeHtml(activity.status)}"><span class="wf-icon${activity.status === "running" ? " is-spinning" : ""}" data-icon="${activity.status === "running" ? "loader-2" : activity.status === "completed" ? "circle-check" : activity.status === "failed" ? "alert-circle" : "circle"}" aria-hidden="true"></span><span>${escapeHtml(activity.label)}</span><time>${elapsedLabel(activity.startedAt, activity.endedAt, now)}</time></li>`).join("");
   return `<div class="wf-facts"><span>${escapeHtml(state)}</span>${process.currentActivity ? `<span>${process.status === "running" ? "当前" : "最后活动"}：${escapeHtml(process.currentActivity.label)}</span>` : ""}</div>${process.error ? `<div class="wf-alert" role="alert">${escapeHtml(process.error)}</div>` : ""}${entries ? `<ol class="wf-timeline">${entries}</ol>` : '<p class="wf-muted">此节点尚未报告过程活动。</p>'}${process.summary ? `<div class="wf-process-result">${escapeHtml(process.summary)}</div>` : ""}`;
 }
+export function primaryWorkflowAction(run?: WorkflowRun): { action: "start" | "inspect-failure"; label: string } {
+  return run && resultCheckFailure(run) ? { action: "inspect-failure", label: "查看失败原因" } : { action: "start", label: run && ["stopped", "failed"].includes(run.execution) ? "继续" : "启动" };
+}
+
+export function fullFailureDetails(error: string): string {
+  const safe = failureErrorText(error);
+  return `<details class="wf-failure-details"><summary>完整错误</summary><pre>${escapeHtml(safe)}</pre></details>`;
+}
+
 export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPanelController {
   const element = <T extends HTMLElement>(selector: string): T => { const value = root.querySelector<T>(selector); if (!value) throw new Error(`Missing panel element: ${selector}`); return value; };
   const controller = new WorkflowPanelController(callTool, () => render());
@@ -879,11 +883,25 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       const process = data.process as NodeProcess | undefined;
       if (!process || !Array.isArray(process.activities) || typeof process.summary !== "string" || typeof process.label !== "string") throw new Error("节点过程格式无效");
       element("#wf-process-title").textContent = process.label;
-      element("#wf-process-body").innerHTML = renderNodeProcess(process);
+      const run = controller.selected, failure = run && resultCheckFailure(run);
+      const relatedFailure = run?.execution === "failed" && (target.scope === "workflow" || failure && (failure.afterTaskId && target.taskId === failure.afterTaskId || failure.phase && target.phase === failure.phase));
+      element("#wf-process-body").innerHTML = renderNodeProcess(process) + (relatedFailure && run?.error ? fullFailureDetails(run.error) : "");
       if (developer && developerLogs.open) element("#wf-process-developer").textContent = process.logs?.map(log => `${displayTime(log.at)} ${log.level} ${log.message}`).join("\n") || "此节点暂无开发日志。";
     } catch (error) {
       if (request === processRequest && processDialog.open) element(developer ? "#wf-process-developer" : "#wf-process-body").textContent = `读取过程失败：${errorMessage(error)}`;
     } finally { if (!developer) processLoading = false; }
+  };
+  const openFailureProcess = (trigger?: HTMLElement): void => {
+    const run = controller.selected;
+    if (!run) return;
+    const failure = resultCheckFailure(run), task = run.tasks.find(task => task.id === failure?.afterTaskId);
+    const knownPhase = failure?.phase && ((run.meta.phases ?? []).some(phase => (typeof phase === "string" ? phase : phase.title ?? phase.name) === failure.phase) || run.tasks.some(task => task.phase === failure.phase));
+    if (task) controller.state.task = task.id;
+    processTarget = { id: run.id, ...(task ? { taskId: task.id } : knownPhase ? { phase: failure!.phase! } : { scope: "workflow" as const }) };
+    processSignature = ""; developerRequested = false; developerLogs.open = false;
+    element("#wf-process-title").textContent = "结果检查失败";
+    element("#wf-process-body").textContent = "正在读取失败原因与关联任务。重新执行需明确选择‘从此节点重试’。";
+    openDialog(processDialog, trigger); render();
   };
   const targetForDeletion = (): DeletionTarget => {
     if (controller.selected?.deletionPending && controller.selected.deletionTarget) return controller.selected.deletionTarget;
@@ -952,13 +970,12 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const stale = state.connection !== "connected" || state.reconnecting;
     root.dataset.connection = state.connection;
     root.dataset.reconnecting = String(state.reconnecting);
-    const projectLocked = !!run || state.projectContextSource === "thread";
-    const unavailableRunProject = run && !state.projects.some(item => item.path === run.projectPath);
-    const projectOptions = '<option value="">选择项目</option>' + (unavailableRunProject ? `<option value="__run_project__" selected disabled>${escapeHtml(run.projectPath.split(/[\\/]/).filter(Boolean).at(-1) || "本次运行项目")}</option>` : "") + state.projects.map(item => `<option value="${escapeHtml(item.projectId)}" ${item.projectId === state.selectedProjectId ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("");
+    const boundProject = controller.currentProject;
+    const projectOptions = boundProject ? `<option value="${escapeHtml(boundProject.projectId)}" selected>${escapeHtml(boundProject.label)}</option>` : '<option value="">请从项目聊天打开</option>';
     if (project.innerHTML !== projectOptions) project.innerHTML = projectOptions;
-    project.disabled = !controller.canAct || projectLocked || state.projectsBusy || !state.projects.length || !!state.projectsError;
-    project.title = run ? "本次运行所属项目固定" : state.projectContextSource === "thread" ? "使用当前对话所属项目" : "选择新运行的目标项目";
-    element("#wf-project-help").textContent = state.projectsError || (state.projectsBusy ? "正在读取项目…" : run && !activeProject() ? `本次运行所属项目：${run.projectPath}` : projectLocked ? "所属项目固定；在其他项目中复用时创建独立运行。" : !activeProject() ? "请选择新运行的目标项目。" : "");
+    project.disabled = true;
+    project.title = "使用当前项目聊天，不能切换工作流目录";
+    element("#wf-project-help").textContent = state.projectsError || (state.projectsBusy ? "正在确认当前聊天所属项目…" : boundProject ? "所属项目固定；跨项目复用请从另一个项目的聊天新建运行。" : "工作流仅在项目聊天中使用，请从项目内打开。");
     element<HTMLButtonElement>("#wf-refresh-projects").disabled = state.connection !== "connected" || state.projectsBusy || state.reconnecting;
     const connectionText = state.reconnecting ? "正在连接并同步…" : ({ offline: "离线预览", connecting: "正在连接…", connected: "已连接宿主", degraded: "连接异常", closed: "面板已关闭" })[state.connection];
     if (element("#wf-connection").textContent !== connectionText) element("#wf-connection").textContent = connectionText;
@@ -967,10 +984,12 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (selector.innerHTML !== options) selector.innerHTML = options;
     selector.disabled = !controller.canAct || live || !state.templates.length && !run;
     const notification = element("#wf-notification");
-    notification.textContent = state.error || run?.error?.slice(0, 480) || ""; notification.hidden = !notification.textContent;
+    notification.textContent = failureErrorSummary(state.error || run?.error || ""); notification.hidden = !notification.textContent;
+    element<HTMLButtonElement>("#wf-error-details").hidden = !run?.error;
+    element<HTMLButtonElement>("#wf-error-details").disabled = stale;
     element<HTMLButtonElement>("#wf-parameters-toggle").disabled = !controller.canAct || !input;
-    element<HTMLButtonElement>("#wf-settings-toggle").disabled = state.connection !== "connected";
-    element<HTMLButtonElement>("#wf-history-toggle").disabled = state.connection !== "connected";
+    element<HTMLButtonElement>("#wf-settings-toggle").disabled = state.connection !== "connected" || !controller.projectBound;
+    element<HTMLButtonElement>("#wf-history-toggle").disabled = state.connection !== "connected" || !controller.projectBound;
     element<HTMLButtonElement>("#wf-more-toggle").disabled = state.connection === "closed" || state.connection === "connecting" || state.busy;
     const reconnectButton = element<HTMLButtonElement>("#wf-reconnect");
     reconnectButton.hidden = state.connection === "connected" && !state.reconnecting || state.connection === "closed";
@@ -982,16 +1001,18 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     element("#wf-delete-toggle").innerHTML = `<span class="wf-icon" data-icon="trash" aria-hidden="true"></span>${run?.deletionPending ? "重试删除…" : "删除工作流…"}`;
     element<HTMLButtonElement>("#wf-refresh").disabled = state.connection === "closed" || state.reconnecting;
     const stateElement = element("#wf-execution-status");
-    const executionText = run && stale ? "状态待确认" : run?.deletionPending ? "清理未完成" : run ? executionLabels[run.execution] ?? run.execution : input ? "待开始" : "待选择";
+    const resultFailure = run && resultCheckFailure(run);
+    const executionText = run && stale ? "状态待确认" : !controller.projectBound ? "项目待确认" : run?.deletionPending ? "清理未完成" : resultFailure ? "结果检查失败" : run ? executionLabels[run.execution] ?? run.execution : input ? "待开始" : "待选择";
     if (stateElement.textContent !== executionText) stateElement.textContent = executionText;
     stateElement.dataset.tone = stale || run?.deletionPending ? "amber" : tone(run?.execution ?? "draft");
     const action = (name: string, label: string, enabled: boolean, primary = false): string => `<button type="button" data-action="${name}" ${primary ? 'class="wf-primary"' : ""} ${enabled ? "" : "disabled"}><span class="wf-icon" data-icon="${name === "stop" ? "player-stop" : "player-play"}" aria-hidden="true"></span>${label}</button>`;
     const canStart = controller.canAct && !run?.deletionPending && !!input && (!!run || !!activeProject() && !state.projectsError) && !live && run?.application !== "applying";
-    const actionMarkup = action("start", run && ["stopped", "failed"].includes(run.execution) ? "继续" : "启动", canStart, true) + action("stop", run?.execution === "stopping" ? "正在停止…" : "停止", controller.canAct && !!run && ["preparing", "running"].includes(run.execution));
+    const primaryAction = primaryWorkflowAction(run);
+    const actionMarkup = action(primaryAction.action, primaryAction.label, canStart, true) + action("stop", run?.execution === "stopping" ? "正在停止…" : "停止", controller.canAct && !!run && ["preparing", "running"].includes(run.execution));
     if (element("#wf-actions").innerHTML !== actionMarkup) element("#wf-actions").innerHTML = actionMarkup;
     const currentTask = run?.tasks.find(task => task.status === "running" || task.status === "stopping");
     const stage = run?.preparation?.stages.find(value => value.status === "running");
-    element("#wf-current-action").textContent = (run && stale ? state.reconnecting ? "正在恢复连接，核对实际进度" : "连接已中断，显示上次读取的进度" : run?.deletionPending ? "清理未完成，可从更多操作中重试删除" : run?.execution === "preparing" ? stage?.label ?? "正在准备工作流" : currentTask?.currentActivity?.label ?? currentTask?.label ?? (run?.execution === "failed" ? run.tasks.length ? "工作流执行失败，点击失败节点查看原因" : "启动准备失败，点击准备步骤查看原因" : run?.execution === "completed" ? "工作流执行完成" : run?.execution === "stopped" ? "工作流已停止，可从进度继续" : input?.meta?.description || definition?.description || input?.meta?.name || "选择工作流，查看执行过程")).slice(0, 160);
+    element("#wf-current-action").textContent = (run && stale ? state.reconnecting ? "正在恢复连接，核对实际进度" : "连接已中断，显示上次读取的进度" : !controller.projectBound ? state.projectsBusy ? "正在确认当前聊天所属项目" : "请从项目聊天打开 Workflows" : run?.deletionPending ? "清理未完成，可从更多操作中重试删除" : resultFailure ? `${resultFailure.phase ? resultFailure.phase + "：" : ""}结果检查未通过，查看原因后选择重试节点` : run?.execution === "preparing" ? stage?.label ?? "正在准备工作流" : run?.execution === "stopped" ? stopSummary(run.stopReason) : currentTask?.currentActivity?.label ?? currentTask?.label ?? (run?.execution === "failed" ? run.tasks.length ? "工作流执行失败，点击失败节点查看原因" : "启动准备失败，点击准备步骤查看原因" : run?.execution === "completed" ? "工作流执行完成" : input?.meta?.description || definition?.description || input?.meta?.name || "选择工作流，查看执行过程")).slice(0, 160);
     const latestAt = [currentTask?.currentActivity?.endedAt, currentTask?.currentActivity?.startedAt, run?.logs.at(-1)?.at, run?.updatedAt].filter((value): value is string => !!value && Number.isFinite(Date.parse(value))).sort((left, right) => Date.parse(right) - Date.parse(left))[0];
     const observedNow = stale && run && Number.isFinite(Date.parse(run.updatedAt)) ? Date.parse(run.updatedAt) : Date.now();
     const elapsed = elapsedLabel(run?.startedAt ?? run?.preparation?.startedAt, run?.endedAt, observedNow);
@@ -1164,6 +1185,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     })();
   });
   element("#wf-cancel-task").addEventListener("click", () => { if (processTarget?.taskId) void controller.perform("cancel", true, processTarget.taskId); });
+  element("#wf-error-details").addEventListener("click", event => openFailureProcess(event.currentTarget as HTMLElement));
   element("#wf-retry-task").addEventListener("click", () => { if (processTarget?.taskId) { const taskId = processTarget.taskId; processDialog.close(); void controller.perform("resume", true, taskId); } });
   developerLogs.addEventListener("toggle", () => { if (developerLogs.open && !developerRequested) { developerRequested = true; element("#wf-process-developer").textContent = "正在读取开发日志…"; void fetchProcess(true); } });
   nodeModel.addEventListener("change", () => { nodeDirty = true; nodeEffort.innerHTML = effortSelectOptions(controller.state.settings?.models ?? [], nodeModel.value || inheritedChoice().model, nodeEffort.value, "继承上级配置"); nodeNotice = ""; });
@@ -1198,7 +1220,11 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     }
     if (target?.closest("summary")?.parentElement?.matches("details[data-graph-detail]")) return;
     const taskButton = target?.closest<HTMLElement>("[data-task],[data-phase],[data-phase-container],[data-process-scope]");
-    if (taskButton && controller.selected) { controller.state.task = taskButton.dataset.task; processTarget = { id: controller.selected.id, ...(taskButton.dataset.task ? { taskId: taskButton.dataset.task } : taskButton.dataset.processScope ? { scope: taskButton.dataset.processScope as "workflow" | "unphased" } : { phase: taskButton.dataset.phase ?? taskButton.dataset.phaseContainer! }) }; processSignature = ""; developerRequested = false; developerLogs.open = false; element("#wf-process-title").textContent = "节点过程"; element("#wf-process-body").textContent = "正在读取简要过程…"; openDialog(processDialog, taskButton); render(); return; }
+    if (taskButton && controller.selected) {
+      const failure = resultCheckFailure(controller.selected);
+      if (!taskButton.dataset.task && failure && (failure.phase && (taskButton.dataset.phase ?? taskButton.dataset.phaseContainer) === failure.phase || taskButton.dataset.processScope)) { openFailureProcess(taskButton); return; }
+      controller.state.task = taskButton.dataset.task; processTarget = { id: controller.selected.id, ...(taskButton.dataset.task ? { taskId: taskButton.dataset.task } : taskButton.dataset.processScope ? { scope: taskButton.dataset.processScope as "workflow" | "unphased" } : { phase: taskButton.dataset.phase ?? taskButton.dataset.phaseContainer! }) }; processSignature = ""; developerRequested = false; developerLogs.open = false; element("#wf-process-title").textContent = "节点过程"; element("#wf-process-body").textContent = "正在读取简要过程…"; openDialog(processDialog, taskButton); render(); return;
+    }
     const historyRun = target?.closest<HTMLButtonElement>("[data-history-run]");
     if (historyRun) { historyDialog.close(); void controller.select(historyRun.dataset.historyRun!); return; }
     const historyDelete = target?.closest<HTMLButtonElement>("[data-history-delete]");
@@ -1214,6 +1240,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const action = target?.closest<HTMLButtonElement>("[data-action]");
     if (!action || action.disabled) return;
     if (action.dataset.action === "stop") { void controller.perform("stop", true); return; }
+    if (action.dataset.action === "inspect-failure") { openFailureProcess(action); return; }
     if (action.dataset.action === "start") {
       try { const input = readInput(); argsValue = input.args; parameterError.hidden = true; void controller.startWithInput(input); }
       catch (error) { parameterSnapshot = structuredClone(argsValue); parametersSaved = false; parameterError.textContent = errorMessage(error); parameterError.hidden = false; openDialog(parameterDialog, element("#wf-parameters-toggle")); }

@@ -9,7 +9,7 @@
 | 工具 | 关键输入与结果 |
 | --- | --- |
 | `workflow_get_capabilities` | 返回实际服务版本、执行器、网络与工作区能力 |
-| `workflow_get_projects` | 读取宿主本机项目和真实聊天归属；项目聊天固定当前项目，已有运行保持绑定，全局新预览才选择项目 |
+| `workflow_get_projects` | 读取宿主本机项目和真实聊天归属；面板固定当前项目，无归属时提示从项目聊天打开，不提供目录切换 |
 | `workflow_get_execution_settings` | 可选 `projectPath`；返回默认配置、实际模型目录及其深度选项。无效默认配置保留原因与目录，供用户修正 |
 | `workflow_update_execution_settings` | 当前 `revision`；可选 `model`、`reasoningEffort`；全量替换插件自己的默认设置，省略字段清除对应覆盖 |
 | `workflow_list_templates`、`workflow_get_template` | 列出或读取独立工作流定义 |
@@ -24,11 +24,13 @@
 | `workflow_stop` | `id`；停止派发、中断活跃执行，等待退出并保存 |
 | `workflow_cancel_task` | `id`、`taskId`；按用户请求取消一个任务 |
 | `workflow_apply` | `id`、当前 `revision`；按应用授权处理完成的审查，保留冲突与当前项目改动 |
-| `workflow_open_panel` | 打开实际任务面板，不开始执行 |
+| `workflow_open_panel` | 从项目聊天打开实际任务面板，不开始执行；只注册 thread 入口，无项目归属时显示提示并禁用操作 |
 
 `workflow_panel_lease` 仅供面板维护生命周期。聊天启动不需要面板租约，不借用其他面板租约。
 
-项目聊天中的运行固定属于当前项目；已有运行固定绑定 `projectPath`，不能移到其他项目。全局入口的新预览可以从宿主目录选项目。跨项目复用读取定义并创建独立运行。读取定义后传入其实际 `id`、`revision` 和脚本作为来源；改写脚本后先保存新定义版本，再关联。新定义使用随机初始版本，更新递增；删除后重建须重新读取版本，不沿用旧预览。
+面板固定使用当前项目聊天，不提供主窗口侧栏的全局入口或项目目录切换。没有 `currentProjectId` 或归属尚未确认时，不读取全局运行历史、模型目录或启动任务。Agent 仍可按用户明确授权的 `projectPath` 调用 `workflow_preview` 等工具；程序化目标不会改变面板归属。已有运行固定绑定创建时的 `projectPath`，不能移到其他项目。
+
+跨项目复用时，从目标项目聊天读取定义并创建独立运行。读取定义后传入其实际 `id`、`revision` 和脚本作为来源；改写脚本后先保存新定义版本，再关联。新定义使用随机初始版本，更新递增；删除后重建须重新读取版本，不沿用旧预览。
 
 主界面是工具栏和横向执行图，参数、设置、历史、差异审查及节点过程放在弹窗中。阶段连线展示阶段顺序，不自动还原脚本的条件分支、循环回边或完整依赖图。分支和有限循环仍由 JavaScript 执行。
 

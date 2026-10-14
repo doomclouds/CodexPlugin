@@ -1,5 +1,7 @@
 import type { WorkflowMeta } from "./script.ts";
 import type { EffectiveExecutionSettings, NodeSettings } from "./execution-settings.ts";
+import type { WorkflowFailureContext } from "./failure-context.ts";
+import type { WorkflowStopReason } from "./stop-context.ts";
 
 export type TaskStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stopping";
 export interface Activity {
@@ -77,6 +79,8 @@ export interface WorkflowRun {
   executionSettings?: Partial<EffectiveExecutionSettings>;
   preparation?: Preparation; startedAt?: string; endedAt?: string;
   progressSequence?: number;
+  failureContext?: WorkflowFailureContext;
+  stopReason?: WorkflowStopReason;
   sourceDefinition?: DefinitionSource;
   deletionPending?: boolean;
   deletionTarget?: { kind: "run" | "definition"; id: string; revision: number; runIds?: string[]; includeAssociatedRuns?: true };

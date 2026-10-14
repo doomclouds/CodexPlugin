@@ -74,7 +74,7 @@ test("the authoritative calling project selects its catalogue path before the fi
   assert.ok(calls.findIndex(call => call.name === "workflow_get_projects") < calls.findIndex(call => call.name === "workflow_list_runs"));
 });
 
-test("a global entry keeps four real catalogue choices without choosing a project or starting work", async t => {
+test("a stale global entry stays readable but cannot select projects, read global history or start work", async t => {
   const { panel, calls } = fixture();
   t.after(() => panel.teardown());
   await panel.connected();
@@ -82,23 +82,46 @@ test("a global entry keeps four real catalogue choices without choosing a projec
   assert.equal(panel.state.selectedProjectId, undefined);
   assert.equal(panel.state.currentProjectId, undefined);
   assert.equal(panel.state.projectPath, "");
-  assert.deepEqual(calls.find(call => call.name === "workflow_list_runs")?.args, {});
+  panel.setProjectPath(catalogue().projects[0]!.path);
+  const input = { projectPath: catalogue().projects[0]!.path, script: definition.script, args: definition.args, allowWrite: false };
+  await panel.save(input);
+  await panel.startWithInput(input);
+  assert.equal(panel.canAct, false);
+  assert.match(panel.state.projectsError, /仅在项目聊天/);
+  assert.equal(calls.some(call => call.name === "workflow_list_runs"), false);
   assert.equal(calls.some(call => ["workflow_preview", "workflow_start", "workflow_resume"].includes(call.name)), false);
 });
 
-test("a global new run can reuse a definition in a separately selected project", async t => {
-  const projects = catalogue();
+test("an explicitly unassigned context cannot adopt a catalogue current-project hint", async t => {
+  const projects = { ...catalogue(projectIds[0]), contextSource: "global-or-unassigned" as const };
   const { panel, calls } = fixture({ structuredContent: projects });
+  t.after(() => panel.teardown());
+  await panel.connected();
+  assert.equal(panel.currentProject, undefined);
+  assert.equal(panel.canAct, false);
+  assert.equal(calls.some(call => call.name === "workflow_list_runs"), false);
+});
+
+test("projectless panels reject directory selection and recover only from authoritative project chat ownership", async t => {
+  const projects = catalogue();
+  const { panel, calls, setProjects } = fixture({ structuredContent: projects });
   t.after(() => panel.teardown());
   await panel.connected();
   panel.selectTemplate(definition.id);
   await panel.loadTemplate(definition.id);
-  const loaded = structuredClone(panel.state.definition);
   await panel.selectProject(projectIds[2]!);
+  assert.equal(panel.state.selectedProjectId, undefined);
+  assert.equal(panel.state.definition, undefined);
+  assert.equal(calls.some(call => call.name === "workflow_get_template" || call.name === "workflow_list_runs"), false);
+  setProjects({ structuredContent: catalogue(projectIds[2]) });
+  await panel.refreshProjects();
+  await panel.loadTemplate(definition.id);
   assert.equal(panel.state.selectedProjectId, projectIds[2]);
   assert.equal(panel.state.projectPath, projects.projects[2]!.path);
   assert.equal(panel.state.selectedTemplate, definition.id);
-  assert.deepEqual(panel.state.definition, loaded);
+  assert.deepEqual(panel.state.definition, definition);
+  await panel.refresh();
+  await panel.refreshExecutionSettings();
   assert.deepEqual(calls.filter(call => call.name === "workflow_list_runs").at(-1)?.args, { projectPath: projects.projects[2]!.path });
   assert.deepEqual(calls.filter(call => call.name === "workflow_get_execution_settings").at(-1)?.args, { projectPath: projects.projects[2]!.path });
   assert.equal(calls.some(call => ["workflow_preview", "workflow_start", "workflow_resume"].includes(call.name)), false);
@@ -120,17 +143,16 @@ test("running and stopping runs refuse project changes without querying another 
   }
 });
 
-test("a global definition selection allows a new project while a prior history poll is pending", async t => {
-  const projects = catalogue();
+test("an authoritative chat project change fences off an older project's pending history response", async t => {
+  const projects = catalogue(projectIds[0]);
   const oldPath = projects.projects[0]!.path, newPath = projects.projects[1]!.path;
-  const { panel, calls, runs, intercept } = fixture({ structuredContent: projects });
+  const { panel, calls, runs, intercept, setProjects } = fixture({ structuredContent: projects });
   t.after(() => panel.teardown());
   const oldRun = savedRun(oldPath, { id: "old-project-run" });
   const newRun = savedRun(newPath, { id: "new-project-run" });
   runs.set(oldPath, [oldRun]);
   runs.set(newPath, [newRun]);
   await panel.connected();
-  await panel.selectProject(projectIds[0]!);
   panel.selectTemplate(definition.id);
   let reply!: (response: ToolResponse) => void;
   let requested!: () => void;
@@ -143,7 +165,9 @@ test("a global definition selection allows a new project while a prior history p
   });
   const oldPolling = panel.refresh();
   await started;
-  await panel.selectProject(projectIds[1]!);
+  setProjects({ structuredContent: catalogue(projectIds[1]) });
+  await panel.refreshProjects();
+  await panel.refresh();
   const changedScopeQueried = calls.some(call => call.name === "workflow_list_runs" && call.args.projectPath === newPath);
   reply({ structuredContent: { runs: [{ ...oldRun, revision: 99 }] } });
   await oldPolling;
@@ -175,16 +199,15 @@ test("unavailable and failed discovery can recover the current project without i
   }
 });
 
-test("refreshing host projects preserves a user's selection and uses its fresh root path", async t => {
-  const { panel, setProjects, calls } = fixture({ structuredContent: catalogue() });
+test("refreshing host projects uses only the chat's authoritative project and its fresh root path", async t => {
+  const { panel, setProjects, calls } = fixture({ structuredContent: catalogue(projectIds[2]) });
   t.after(() => panel.teardown());
   await panel.connected();
-  await panel.selectProject(projectIds[2]!);
-  const moved = catalogue(undefined, "host-relocated-root");
+  const moved = catalogue(projectIds[2], "host-relocated-root");
   setProjects({ structuredContent: moved });
   await panel.refreshProjects();
   await panel.refresh();
-  assert.equal(panel.state.currentProjectId, undefined);
+  assert.equal(panel.state.currentProjectId, projectIds[2]);
   assert.equal(panel.state.selectedProjectId, projectIds[2]);
   assert.equal(panel.state.projectPath, moved.projects[2]!.path);
   assert.equal(panel.state.projects[2]!.path, moved.projects[2]!.path);
@@ -204,20 +227,20 @@ test("malformed, duplicate and foreign current-project identities are rejected a
   ]) assert.throws(() => projectsPayload(invalid), /项目/);
 });
 
-test("an unknown global project choice does not change scope and a valid choice is recoverable", async t => {
+test("neither known nor unknown directory choices can bind a projectless panel", async t => {
   const projects = catalogue();
-  const { panel, calls } = fixture({ structuredContent: projects });
+  const { panel, calls, setProjects } = fixture({ structuredContent: projects });
   t.after(() => panel.teardown());
   await panel.connected();
   await panel.selectProject(projectIds[0]!);
   const before = structuredClone(calls);
   await panel.selectProject("deleted-project");
-  assert.match(panel.state.projectsError, /不在 Codex 项目列表/);
-  assert.equal(panel.state.selectedProjectId, projectIds[0]);
-  assert.equal(panel.state.projectPath, projects.projects[0]!.path);
+  assert.match(panel.state.projectsError, /仅在项目聊天/);
+  assert.equal(panel.state.selectedProjectId, undefined);
+  assert.equal(panel.state.projectPath, "");
   assert.deepEqual(calls, before);
+  setProjects({ structuredContent: catalogue(projectIds[1]) });
   await panel.refreshProjects();
-  await panel.selectProject(projectIds[1]!);
   assert.equal(panel.state.projectsError, "");
   assert.equal(panel.state.selectedProjectId, projectIds[1]);
 });
@@ -238,16 +261,19 @@ test("thread-owned workflows cannot switch project at any execution state", asyn
   }
 });
 
-test("a selected historical run stays fixed in a global panel even when its name matches a library definition", async t => {
+test("global entry and tool-result paths cannot expose or adopt another project's historical run", async t => {
   const projects = catalogue();
   const { panel, calls, runs } = fixture({ structuredContent: projects });
   t.after(() => panel.teardown());
   runs.set("", [savedRun(projects.projects[0]!.path)]);
   await panel.connected();
+  panel.setProjectPath(projects.projects[0]!.path);
+  panel.receive({ structuredContent: { run: savedRun(projects.projects[0]!.path) } });
   const before = structuredClone(calls);
   await panel.selectProject(projectIds[2]!);
   assert.deepEqual(calls, before);
-  assert.equal(panel.selected?.projectPath, projects.projects[0]!.path);
+  assert.equal(panel.selected, undefined);
+  assert.equal(panel.state.projectPath, "");
   assert.equal(panel.state.definition, undefined);
-  assert.match(panel.state.projectsError, /目录固定/);
+  assert.match(panel.state.projectsError, /仅在项目聊天/);
 });

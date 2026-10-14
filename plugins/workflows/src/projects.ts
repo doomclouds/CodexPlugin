@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createConnection } from "node:net";
+import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 
@@ -78,6 +79,27 @@ export function mapProjects(projectsValue: unknown, threadsValue: unknown, threa
   const projectId = sameIdentity(matches.map(thread => thread.projectId ?? undefined), "current project");
   const current = matches.length > 0 && matches.every(thread => thread.hostId === "local") ? projects.find(project => project.projectId === projectId) : undefined;
   return { available: true, projects, ...(current ? { currentProjectId: current.projectId } : {}), contextSource: current ? "thread" : "global-or-unassigned" };
+}
+
+async function canonicalProjects(mapped: Extract<WorkflowProjectsResult, { available: true }>, signal: AbortSignal): Promise<Extract<WorkflowProjectsResult, { available: true }>> {
+  signal.throwIfAborted();
+  const entries = await Promise.all(mapped.projects.map(async project => {
+    try {
+      const directory = await realpath(project.path);
+      if (!(await stat(directory)).isDirectory()) throw new Error("not a directory");
+      signal.throwIfAborted();
+      return { ...project, path: directory };
+    } catch (error) {
+      signal.throwIfAborted();
+      if (project.projectId === mapped.currentProjectId) {
+        const reason = (error as NodeJS.ErrnoException).code ?? "not a directory";
+        throw new Error(`Codex current project directory is unavailable (${reason}); reopen the project chat after restoring its directory.`);
+      }
+      return undefined;
+    }
+  }));
+  signal.throwIfAborted();
+  return { ...mapped, projects: entries.filter((project): project is WorkflowProject => project !== undefined) };
 }
 
 const pipeResponse = z.union([
@@ -213,7 +235,7 @@ export class CodexProjectsProvider implements ProjectsProvider {
       if (process.platform === "win32" ? !/^\\\\[.?]\\pipe\\/i.test(this.pipePath) : !path.isAbsolute(this.pipePath)) throw new Error("Codex did not provide a local desktop project pipe.");
       const projects = await queryWithRetry(this.pipePath, caller, "list_projects", {}, context.signal, this.timeoutMs);
       const threads = await queryWithRetry(this.pipePath, caller, "list_threads", { limit: 50 }, context.signal, this.timeoutMs);
-      return mapProjects(projects, threads, caller.threadId);
+      return await canonicalProjects(mapProjects(projects, threads, caller.threadId), context.signal);
     } catch (error) { return { available: false, projects: [], reason: error instanceof Error ? error.message : "Codex project discovery is unavailable." }; }
   }
 }

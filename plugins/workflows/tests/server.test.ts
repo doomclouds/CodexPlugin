@@ -98,7 +98,7 @@ test("MCP server and panel resource advertise the compact packaged brand icon", 
     assert.deepEqual(panelTool?.icons, expected);
     assert.deepEqual(panelTool?.inputSchema, { type: "object", properties: {}, "$schema": "http://json-schema.org/draft-07/schema#" });
     assert.ok(tools.filter(tool => tool.name !== "workflow_open_panel").every(tool => tool.icons === undefined));
-    assert.deepEqual((panelTool?._meta?.["openai/ui"] as Record<string, unknown>).entrypoints, [{ type: "thread" }, { type: "global" }]);
+    assert.deepEqual((panelTool?._meta?.["openai/ui"] as Record<string, unknown>).entrypoints, [{ type: "thread" }]);
     const opened = await client.callTool({ name: "workflow_open_panel", arguments: {} });
     assert.equal(opened.structuredContent?.executionAvailable, true);
     assert.equal((await client.callTool({ name: "workflow_start", arguments: { id, revision: 1 } })).isError, undefined);

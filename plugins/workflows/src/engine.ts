@@ -6,6 +6,8 @@ import { executeScript, validateScript, validateWorkflowArgs } from "./script.ts
 import { RunStore } from "./store.ts";
 import { listGitlinks, gitAwareContextDigest, readOnlyGitContextDigest } from "./submodules.ts";
 import { snapshotFingerprint } from "./snapshot-checkpoint.ts";
+import { stopSummary } from "./stop-context.ts";
+import type { WorkflowStopReason } from "./stop-context.ts";
 import { applyWorkspace, contextDigest, createWorkspace, workspaceDiff } from "./workspace.ts";
 import { createGitWorkspace, validateMaintenance, reviewMaintenance, applyMaintenance, maintenanceFingerprint, validateGitWorkspace } from "./maintenance.ts";
 import type { Activity, Attempt, Limits, Task, WorkflowRun, MaintenancePlan, Preparation, DefinitionSource } from "./types.ts";
@@ -58,6 +60,7 @@ export class WorkflowEngine {
   private readonly configAbort = new AbortController();
   private readonly configurations = new Set<Promise<unknown>>();
   private readonly progressTimers = new Map<string, NodeJS.Timeout>();
+  private closing = false;
   constructor(options: { store?: RunStore; adapter?: WorkerAdapter } = {}) {
     this.store = options.store ?? new RunStore();
     this.adapter = options.adapter ?? new CodexAdapter();
@@ -67,7 +70,7 @@ export class WorkflowEngine {
       void this.processControls().catch(error => console.error("Workflow control failed:", message(error)));
       for (const [id] of this.active) {
         const run = this.runs.get(id)!;
-        if (run.leaseId && (this.leases.get(run.leaseId) ?? 0) < Date.now()) void this.stop(id).catch(error => console.error("Workflow lease stop failed:", message(error)));
+        if (run.leaseId && (this.leases.get(run.leaseId) ?? 0) < Date.now()) void this.stop(id, "lease-expired").catch(error => console.error("Workflow lease stop failed:", message(error)));
       }
     }, 1000);
     this.watchdog.unref();
@@ -111,6 +114,7 @@ export class WorkflowEngine {
       if (run.deletionPending) { this.runs.set(id, run); return; }
       if (["preparing", "running", "stopping"].includes(run.execution)) {
         run.execution = "stopped";
+        run.stopReason ??= "owner-exited"; delete run.error; delete run.failureContext;
         this.finishPreparation(run, "interrupted");
         run.endedAt = now();
         for (const task of run.tasks) if (["running", "queued", "stopping"].includes(task.status)) {
@@ -285,7 +289,7 @@ export class WorkflowEngine {
     }
     Object.assign(run, scopes);
     run.execution = "draft"; run.review = "unavailable";
-    delete run.result; delete run.diff; delete run.error;
+    delete run.result; delete run.diff; delete run.error; delete run.failureContext; delete run.stopReason;
     delete run.preparation; delete run.startedAt; delete run.endedAt;
     this.log(run, "Plan changed. Start again from the updated preview; replay validates each cached task.");
     await this.persist(run);
@@ -302,7 +306,7 @@ export class WorkflowEngine {
     if (input.leaseId && !this.leases.has(id)) throw new Error("Panel lease is unknown or expired; reconnect the panel");
     if (input.release) {
       this.leases.delete(id);
-      for (const [runId] of this.active) if (this.runs.get(runId)?.leaseId === id) void this.stop(runId).catch(error => console.error("Panel release failed:", message(error)));
+      for (const [runId] of this.active) if (this.runs.get(runId)?.leaseId === id) void this.stop(runId, "panel-closed").catch(error => console.error("Panel release failed:", message(error)));
       return { leaseId: id, expiresAt: 0 };
     }
     const expiresAt = Date.now() + 90000;
@@ -323,6 +327,7 @@ export class WorkflowEngine {
     return task.index;
   }
   async start(input: { id: string; revision: number; leaseId?: string; retryFromTaskId?: string }, resume = false) {
+    if (this.closing) throw new Error("Workflow execution service is closing");
     let run = await this.load(input.id);
     this.assertActionAvailable(run);
     this.assertRevision(run, input.revision);
@@ -335,6 +340,7 @@ export class WorkflowEngine {
     let launch: (() => void) | undefined;
     try {
       run = await this.store.load(input.id);
+      if (this.closing) throw new Error("Workflow execution service is closing");
       this.assertActionAvailable(run);
       this.runs.set(run.id, run);
       this.assertRevision(run, input.revision);
@@ -345,6 +351,7 @@ export class WorkflowEngine {
       run.meta = meta;
       run.nodeSettings = validateNodeSettings(run.nodeSettings, meta);
       const settings = await this.settings.get();
+      if (this.closing) throw new Error("Workflow execution service is closing");
       const explicitSettings = settings.model || settings.reasoningEffort || run.executionSettings?.model || run.executionSettings?.reasoningEffort || Object.values(run.nodeSettings).some(settings => settings.model || settings.reasoningEffort);
       if (!this.adapter.executionEnvironment && explicitSettings) throw new Error("This worker adapter cannot validate configured model settings.");
       if (retryFrom !== undefined) {
@@ -354,7 +361,7 @@ export class WorkflowEngine {
       run.controlId = randomBytes(16).toString("hex");
       run.execution = "preparing"; run.review = "unavailable"; run.application = "none";
       run.startedAt = now(); run.preparation = { startedAt: run.startedAt, stages: [] }; delete run.endedAt;
-      delete run.error; delete run.diff; delete run.result;
+      delete run.error; delete run.diff; delete run.result; delete run.failureContext; delete run.stopReason;
       if (input.leaseId) run.leaseId = input.leaseId; else delete run.leaseId;
       const gate = new Promise<void>(resolve => { launch = resolve; });
       active = { controller: new AbortController(), tasks: new Map(), done: Promise.resolve() };
@@ -381,7 +388,7 @@ export class WorkflowEngine {
   }
   private preparationGuard(run: WorkflowRun, active: Active) {
     if (active.controller.signal.aborted) throw new Error("Workflow interrupted while preparing execution.");
-    if (run.leaseId && (this.leases.get(run.leaseId) ?? 0) < Date.now()) { active.controller.abort(); throw new Error("Panel closed while preparing the workspace; workers were not started"); }
+    if (run.leaseId && (this.leases.get(run.leaseId) ?? 0) < Date.now()) { run.stopReason ??= "lease-expired"; active.controller.abort(); throw new Error("Panel closed while preparing the workspace; workers were not started"); }
   }
   private async preparationStage<T>(run: WorkflowRun, active: Active, id: Preparation["stages"][number]["id"], label: string, operation: () => Promise<T>): Promise<T> {
     this.preparationGuard(run, active);
@@ -443,10 +450,11 @@ export class WorkflowEngine {
       this.preparationGuard(run, active);
       await this.execute(run, active);
     } catch (error) {
-      const interrupted = active.controller.signal.aborted;
+      const interrupted = this.closing || active.controller.signal.aborted && (run.execution === "stopping" || Boolean(run.stopReason));
       this.finishPreparation(run, interrupted ? "interrupted" : "failed");
-      run.execution = interrupted ? "stopped" : "failed"; run.error = message(error); run.endedAt = now();
-      this.log(run, run.error, undefined, "error");
+      run.execution = interrupted ? "stopped" : "failed"; run.endedAt = now();
+      if (interrupted) { run.stopReason ??= this.closing ? "service-shutdown" : "requested"; delete run.error; this.log(run, stopSummary(run.stopReason)); }
+      else { run.error = message(error); run.failureContext = { kind: "preparation" }; this.log(run, run.error, undefined, "error"); }
       await this.persist(run);
     }
   }
@@ -616,17 +624,23 @@ export class WorkflowEngine {
     } catch (error) {
       active.controller.abort();
       await Promise.allSettled(issued);
-      run.execution = active.controller.signal.aborted && run.execution === "stopping" ? "stopped" : "failed";
-      run.error = message(error);
+      run.execution = active.controller.signal.aborted && (run.execution === "stopping" || this.closing) ? "stopped" : "failed";
+      if (run.execution === "stopped") { run.stopReason ??= this.closing ? "service-shutdown" : "requested"; delete run.error; }
+      else run.error = message(error);
+      if (run.execution === "failed") run.failureContext = {
+        kind: "script", ...(phase ? { phase } : {}),
+        ...(run.tasks.length && run.tasks.every(task => task.status === "completed") ? { afterTaskId: run.tasks.at(-1)!.id } : {}),
+      };
       if (run.workspace && run.workspace.kind !== "git-worktree") { try { run.diff = await workspaceDiff(run.workspace); } catch {} }
-      this.log(run, run.error, undefined, "error");
+      if (run.execution === "stopped") this.log(run, stopSummary(run.stopReason));
+      else this.log(run, run.error!, undefined, "error");
     } finally {
       if (run.workspace?.kind === "git-worktree") {
         try { run.workspaceCheckpoint = await maintenanceFingerprint(run.workspace); }
-        catch (error) { run.execution = run.execution === "completed" ? "failed" : run.execution; run.error = `Could not checkpoint isolated checkout: ${message(error)}`; this.log(run, run.error, undefined, "error"); }
+        catch (error) { run.execution = run.execution === "completed" ? "failed" : run.execution; run.error = `Could not checkpoint isolated checkout: ${message(error)}`; run.failureContext = { kind: "checkpoint", ...(phase ? { phase } : {}) }; this.log(run, run.error, undefined, "error"); }
       } else if (run.workspace) {
         try { run.workspaceCheckpoint = await snapshotFingerprint(run.workspace); }
-        catch (error) { run.execution = run.execution === "completed" ? "failed" : run.execution; run.error = `Could not checkpoint isolated snapshot: ${message(error)}`; this.log(run, run.error, undefined, "error"); }
+        catch (error) { run.execution = run.execution === "completed" ? "failed" : run.execution; run.error = `Could not checkpoint isolated snapshot: ${message(error)}`; run.failureContext = { kind: "checkpoint", ...(phase ? { phase } : {}) }; this.log(run, run.error, undefined, "error"); }
       }
       run.endedAt = now();
       await this.persist(run);
@@ -660,7 +674,7 @@ export class WorkflowEngine {
     if (options.schema !== undefined && (!options.schema || typeof options.schema !== "object" || Array.isArray(options.schema))) throw new Error("schema must be a JSON schema object");
     return options;
   }
-  async stop(id: string) {
+  async stop(id: string, reason: WorkflowStopReason = "requested") {
     const run = await this.load(id);
     this.assertActionAvailable(run);
     const active = this.active.get(id);
@@ -676,6 +690,7 @@ export class WorkflowEngine {
     // that boundary waits for cleanup without reverting a terminal outcome.
     if (!["preparing", "running", "stopping"].includes(run.execution)) { await active.done; return structuredClone(run); }
     if (run.execution !== "stopping") {
+      run.stopReason = reason;
       run.execution = "stopping";
       for (const task of run.tasks) if (task.status === "running") { task.status = "stopping"; const attempt = task.attempts.at(-1); if (attempt) attempt.status = "stopping"; }
       this.log(run, "Stopping dispatch and interrupting all active workers; waiting for their exit.");
@@ -737,11 +752,12 @@ export class WorkflowEngine {
   async wait(id: string) { await this.active.get(id)?.done; return this.get(id); }
   forgetDeletedRuns(ids: string[]) { for (const id of ids) { if (this.active.has(id)) throw new Error("Cannot forget an active workflow; wait for its workers to exit."); this.clearProgress(id); this.runs.delete(id); } }
   async close() {
+    this.closing = true;
     clearInterval(this.watchdog);
     this.configAbort.abort();
     await Promise.allSettled([...this.configurations]);
     await this.initialization;
-    const stopped = await Promise.allSettled([...this.active.keys()].map(id => this.stop(id)));
+    const stopped = await Promise.allSettled([...this.active.keys()].map(id => this.stop(id, "service-shutdown")));
     try { await this.adapter.close(); } finally { await this.store.flush(); }
     const failure = stopped.find(result => result.status === "rejected");
     if (failure?.status === "rejected") throw failure.reason;

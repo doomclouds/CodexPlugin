@@ -52,7 +52,7 @@ try {
   assert.match(noProjectContext.structuredContent.reason, /real thread identity/);
   assert.equal(panelTool._meta.ui.resourceUri, "ui://workflows/panel.html");
   assert.equal(panelTool._meta["ui/resourceUri"], "ui://workflows/panel.html");
-  assert.deepEqual(panelTool._meta["openai/ui"].entrypoints, [{ type: "thread" }, { type: "global" }]);
+  assert.deepEqual(panelTool._meta["openai/ui"].entrypoints, [{ type: "thread" }]);
   assert.deepEqual(panelTool.icons, expectedIcons);
   const panelResult = await client.callTool({ name: "workflow_open_panel", arguments: {} });
   assert.equal(panelResult.structuredContent.version, manifest.version);

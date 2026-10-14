@@ -209,3 +209,21 @@ test("disconnected graphs label cached execution as a previous record rather tha
   assert.match(html, /连接恢复后核对实际进度/);
   assert.match(html, /data-status="running"/);
 });
+
+test("script result failure colors its entered phase red while its completed worker retains execution success", () => {
+  const current = run({ execution: "failed", tasks: [task("task-1", { status: "completed", cached: true })], logs: [{ at: at(10), level: "info", message: "Phase: 汇总" }] });
+  const graph = buildWorkflowGraph(current);
+  assert.deepEqual(graph.phases.map(phase => [phase.title, phase.status]), [["审查", "completed"], ["汇总", "failed"]]);
+  assert.equal(graph.phases[1]!.resultCheckFailed, true);
+  const html = renderWorkflowGraph(current);
+  assert.match(html, /data-status="failed" data-kind="phase" data-phase-container="汇总"/);
+  assert.match(html, /结果检查失败/);
+  assert.match(html, /data-task="task-1" data-status="completed"/);
+  assert.match(html, /查看错误/);
+});
+
+test("snapshot preparation failures do not turn historical completed tasks into result checks", () => {
+  const current = run({ execution: "failed", tasks: [task("task-1", { status: "completed" })], failureContext: { kind: "preparation" } });
+  assert.equal(buildWorkflowGraph(current).phases.some(phase => phase.resultCheckFailed), false);
+  assert.doesNotMatch(renderWorkflowGraph(current), /结果检查失败/);
+});

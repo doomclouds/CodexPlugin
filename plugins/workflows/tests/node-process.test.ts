@@ -47,3 +47,16 @@ test("a completed task distinguishes later workflow validation failure from work
   assert.ok(!JSON.stringify(view).includes("private-fixture"));
   assert.equal(nodeProcess(rejected, { taskId: "task_1" }).error, undefined, "An earlier completed task is not the later validation failure.");
 });
+
+test("stopped processes explain the recorded cause without presenting an Abort error", () => {
+  const stopped = { ...run, execution: "stopped" as const, stopReason: "panel-closed" as const, tasks: run.tasks.map(task => ({ ...task, status: "interrupted" as const, error: undefined })) };
+  const workflow = nodeProcess(stopped, { scope: "workflow" });
+  const task = nodeProcess(stopped, { taskId: "task_1" });
+  assert.equal(workflow.status, "stopped");
+  assert.match(workflow.summary, /面板已关闭/);
+  assert.equal(task.status, "interrupted");
+  assert.match(task.summary, /面板已关闭/);
+  assert.equal(workflow.error, undefined);
+  assert.equal(task.error, undefined);
+  assert.match(nodeProcess({ ...stopped, stopReason: "owner-exited" }, { scope: "workflow" }).summary, /上次执行进程已退出/);
+});

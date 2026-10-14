@@ -1,3 +1,4 @@
+import { projectFixtureResponse } from "./panel-project-fixture.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { WorkflowPanelController, applyPanelHostStyles, canApply, escapeHtml, jsonInput, parseToolGrants, partialApplicationMessage, summarizeMaintenanceReview, toolPayload } from "../prototypes/panel.ts";
@@ -21,7 +22,7 @@ function fixture(overrides: Partial<WorkflowRun> = {}) {
     calls.push({ name, args });
     if (failure) throw new Error(failure);
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease-1", expiresAt: "2026-10-13T00:01:00Z" } };
-    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
+    if (name === "workflow_get_projects") return projectFixtureResponse();
     if (name === "workflow_list_runs") return { structuredContent: { runs: [run] } };
     if (name === "workflow_list_templates") return { structuredContent: { templates: [] } };
     if (name === "workflow_start" || name === "workflow_resume") run = { ...run, revision: run.revision + 1, execution: "running" };
@@ -163,7 +164,7 @@ test("an older list response cannot discard a preview saved while polling", asyn
   let resolveList!: (value: { structuredContent: { runs: WorkflowRun[] } }) => void;
   const panel = new WorkflowPanelController(async name => {
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease-1" } };
-    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
+    if (name === "workflow_get_projects") return projectFixtureResponse();
     if (name === "workflow_list_runs") return pendingList ?? { structuredContent: { runs: [first] } };
     if (name === "workflow_list_templates") return { structuredContent: { templates: [] } };
     return { structuredContent: { run: created } };
@@ -185,7 +186,7 @@ test("saved definitions load independently and create a fresh run for a differen
   const panel = new WorkflowPanelController(async (name, args) => {
     calls.push({ name, args });
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease-1" } };
-    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
+    if (name === "workflow_get_projects") return projectFixtureResponse("/other-project");
     if (name === "workflow_list_runs") return { structuredContent: { runs: [draft()] } };
     if (name === "workflow_list_templates") return { structuredContent: { templates: [definition] } };
     if (name === "workflow_get_template") return { structuredContent: definition };
@@ -194,7 +195,7 @@ test("saved definitions load independently and create a fresh run for a differen
   await panel.connected();
   const loaded = await panel.loadTemplate("saved:review");
   assert.equal(loaded?.revision, 3);
-  assert.equal(panel.selected?.id, "run-1");
+  assert.equal(panel.selected, undefined, "Another project's history must not be adopted by this project chat.");
   await panel.save({ projectPath: "/other-project", script: loaded!.script, args: loaded!.args, allowWrite: loaded!.allowWrite! });
   const preview = calls.find(call => call.name === "workflow_preview");
   assert.deepEqual(preview?.args, { projectPath: "/other-project", script: definition.script, args: definition.args, allowWrite: true });
@@ -210,7 +211,7 @@ test("an explicitly selected workflow remains independent of history polling unt
   const panel = new WorkflowPanelController(async name => {
     calls.push(name);
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease-1" } };
-    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
+    if (name === "workflow_get_projects") return projectFixtureResponse();
     if (name === "workflow_list_runs") return { structuredContent: { runs: [draft()] } };
     if (name === "workflow_list_templates") return { structuredContent: { templates: [definition] } };
     if (name === "workflow_get_template") return { structuredContent: definition };
@@ -243,7 +244,7 @@ test("a template response cannot overwrite a later workflow selection or closed 
     const response = new Promise<{ structuredContent: Record<string, unknown> }>(resolve => { respond = resolve; });
     const panel = new WorkflowPanelController(async name => {
       if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease-1" } };
-      if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
+      if (name === "workflow_get_projects") return projectFixtureResponse();
       if (name === "workflow_list_runs") return { structuredContent: { runs: [] } };
       if (name === "workflow_list_templates") return { structuredContent: { templates: [] } };
       if (name === "workflow_get_execution_settings") return { isError: true, content: [{ type: "text", text: "Execution settings unavailable in this delayed-template fixture." }] };
@@ -270,7 +271,7 @@ test("saving a loaded definition includes its revision and refreshes the workflo
   const panel = new WorkflowPanelController(async (name, args) => {
     calls.push({ name, args });
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease-1" } };
-    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
+    if (name === "workflow_get_projects") return projectFixtureResponse();
     if (name === "workflow_list_runs") return { structuredContent: { runs: [] } };
     if (name === "workflow_list_templates") { listCount++; return { structuredContent: { templates: listCount > 1 ? [saved] : [] } }; }
     return { structuredContent: { template: saved } };
@@ -288,7 +289,7 @@ test("saving a loaded definition includes its revision and refreshes the workflo
 test("a duplicate definition name asks for loading the existing revision before saving", async () => {
   const panel = new WorkflowPanelController(async name => {
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease-1" } };
-    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
+    if (name === "workflow_get_projects") return projectFixtureResponse();
     if (name === "workflow_list_runs") return { structuredContent: { runs: [] } };
     if (name === "workflow_list_templates") return { structuredContent: { templates: [] } };
     return { isError: true, content: [{ type: "text", text: "REVISION_CONFLICT: definition already exists" }] };

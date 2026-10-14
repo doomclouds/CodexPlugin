@@ -158,7 +158,7 @@ async function variant(name, mutation) {
     assert.equal(tools.length, 21);
     const entrypoint = tools.find(tool => tool.name === "workflow_open_panel");
     assert.ok(entrypoint, "Actual host discovers the Workflows entrypoint tool");
-    assert.deepEqual(entrypoint._meta["openai/ui"].entrypoints, [{ type: "thread" }, { type: "global" }]);
+    assert.deepEqual(entrypoint._meta["openai/ui"].entrypoints, [{ type: "thread" }]);
     if (liveProjectProbe) {
       const probe = inventory.data.find(server => server.name === "desktop_transport_probe");
       assert.equal(probe?.runtimeStatus, "connected", probe?.toolsError ?? "Read-only native transport fixture is unavailable");

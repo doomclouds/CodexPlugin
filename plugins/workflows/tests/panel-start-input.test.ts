@@ -1,6 +1,7 @@
+import { projectFixtureResponse } from "./panel-project-fixture.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowPanelController } from "../prototypes/panel.ts";
+import { WorkflowPanelController, primaryWorkflowAction } from "../prototypes/panel.ts";
 import type { ToolCaller, ToolResponse, WorkflowInput, WorkflowRun } from "../prototypes/panel.ts";
 
 function savedRun(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
@@ -25,7 +26,7 @@ function fixture(initial?: WorkflowRun, intercept?: (name: string, args: Record<
     const intercepted = await intercept?.(name, args);
     if (intercepted) return intercepted;
     if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease-test" } };
-    if (name === "workflow_get_projects") return { structuredContent: { available: true, projects: [] } };
+    if (name === "workflow_get_projects") return projectFixtureResponse(current?.projectPath);
     if (name === "workflow_list_runs") return { structuredContent: { runs: current ? [current] : [] } };
     if (name === "workflow_list_templates") return { structuredContent: { templates: [] } };
     if (name === "workflow_get_execution_settings") return { isError: true, content: [{ type: "text", text: "Execution settings are unavailable in this start-input fixture." }] };
@@ -178,5 +179,19 @@ test("omitting limits retains the saved run's budget when resuming identical par
   await panel.startWithInput(inputFor(previous));
   assert.deepEqual(mutations(), [{ name: "workflow_resume", args: { id: previous.id, revision: previous.revision, leaseId: "lease-test" } }]);
   assert.deepEqual(panel.selected?.limits, limits);
+  await panel.teardown();
+});
+
+test("a rejected script result opens inspection instead of silently resuming cached completed workers", async () => {
+  const previous = savedRun({ execution: "failed", error: "验收拒绝", tasks: [{ id: "task_1", index: 0, prompt: "check", options: {}, mode: "read", status: "completed", cached: true, attempts: [], output: { ok: false } }] });
+  assert.deepEqual(primaryWorkflowAction(previous), { action: "inspect-failure", label: "查看失败原因" });
+  const { panel, mutations } = fixture(previous);
+  await panel.connected();
+  await panel.startWithInput(inputFor(previous));
+  assert.deepEqual(mutations(), []);
+  assert.match(panel.state.error, /结果检查未通过/);
+  assert.equal(panel.selected?.execution, "failed");
+  await panel.perform("resume", true, "task_1");
+  assert.deepEqual(mutations(), [{ name: "workflow_resume", args: { id: previous.id, revision: previous.revision, leaseId: "lease-test", retryFromTaskId: "task_1" } }]);
   await panel.teardown();
 });

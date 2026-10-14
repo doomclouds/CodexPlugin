@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -8,6 +8,8 @@ import path from "node:path";
 import test from "node:test";
 import type { TestContext } from "node:test";
 import { callerContext, CodexProjectsProvider, mapProjects } from "../src/projects.ts";
+import { WorkflowEngine } from "../src/engine.ts";
+import { RunStore } from "../src/store.ts";
 
 type Request = { id: string; jsonrpc: string; method: string; params?: { namespace: string; tool: string; arguments: Record<string, unknown>; callerSource: string; threadId: string; callId: string; turnId: string } };
 function encode(value: unknown): Buffer {
@@ -19,6 +21,7 @@ function encode(value: unknown): Buffer {
 function response(request: Request, data: unknown): Buffer { return encode({ jsonrpc: "2.0", id: request.id, result: { success: true, contentItems: [{ type: "inputText", text: JSON.stringify(data) }] } }); }
 async function pipeFixture(t: TestContext, handle: (request: Request, socket: Socket) => void) {
   const root = await mkdtemp(path.join(tmpdir(), "workflow-project-pipe-"));
+  await mkdir(path.join(root, "source project"));
   const pipePath = process.platform === "win32" ? `\\\\.\\pipe\\workflow-project-pipe-${randomUUID()}` : path.join(root, "projects.sock");
   const sockets = new Set<Socket>();
   const requests: Request[] = [];
@@ -108,6 +111,53 @@ test("global ephemeral caller can list projects but never receives a guessed sel
   const result = await new CodexProjectsProvider({ pipePath: fixture.pipePath }).getProjects({ meta: { thread_id: "real-ephemeral" }, signal: new AbortController().signal });
   assert.equal(result.available, true);
   if (result.available) { assert.equal(result.projects.length, 1); assert.equal(result.currentProjectId, undefined); assert.equal(result.contextSource, "global-or-unassigned"); }
+});
+
+test("a real symbolic-link project preserves host ownership and matches the engine's canonical run directory", async t => {
+  let root = "", alias = "";
+  const fixture = await pipeFixture(t, (request, socket) => {
+    if (request.method !== "tools/call") return;
+    const projects = inventory(root);
+    projects.projects[0]!.path = alias;
+    socket.write(response(request, request.params!.tool === "list_projects" ? projects : roster));
+  });
+  root = fixture.root;
+  alias = path.join(root, "project-alias");
+  await symlink(path.join(root, "source project"), alias, process.platform === "win32" ? "junction" : "dir");
+  const provider = new CodexProjectsProvider({ pipePath: fixture.pipePath });
+  const result = await provider.getProjects(context());
+  assert.equal(result.available, true);
+  if (!result.available) return;
+  assert.equal(result.currentProjectId, "project-a");
+  assert.equal(result.contextSource, "thread");
+  assert.equal(result.projects[0]!.path, await realpath(alias));
+  const engine = new WorkflowEngine({ store: new RunStore(path.join(root, "isolated-state")) });
+  try {
+    const run = await engine.preview({ projectPath: alias, script: 'export const meta={name:"canonical-project",description:"Canonical project fixture"}; return args;' });
+    assert.equal(run.projectPath, result.projects[0]!.path, "The project-bound panel must recognize the engine's canonical run as its own.");
+    const unassigned = await provider.getProjects({ meta: { threadId: "unassigned-thread", projectPath: alias }, signal: new AbortController().signal });
+    assert.equal(unassigned.available, true);
+    if (unassigned.available) assert.equal(unassigned.currentProjectId, undefined, "Filesystem aliases must never supply missing host thread ownership.");
+  } finally { await engine.close(); }
+});
+
+test("a missing or non-directory current project is unavailable and cannot fall back to another local project", async t => {
+  let root = "";
+  const fixture = await pipeFixture(t, (request, socket) => {
+    if (request.method !== "tools/call") return;
+    const projects = inventory(root);
+    projects.projects.push({ projectId: "other-local", projectKind: "local", label: "Other", path: root, hostId: "local" });
+    socket.write(response(request, request.params!.tool === "list_projects" ? projects : roster));
+  });
+  root = fixture.root;
+  await rm(path.join(root, "source project"), { recursive: true });
+  const provider = new CodexProjectsProvider({ pipePath: fixture.pipePath });
+  for (const nonDirectory of [false, true]) {
+    if (nonDirectory) await writeFile(path.join(root, "source project"), "A file cannot be a project root.");
+    const result = await provider.getProjects(context());
+    assert.equal(result.available, false);
+    if (!result.available) { assert.deepEqual(result.projects, []); assert.match(result.reason, /current project directory is unavailable/); }
+  }
 });
 
 test("missing/ambiguous caller context does not borrow a shared environment identity or open a socket", async t => {

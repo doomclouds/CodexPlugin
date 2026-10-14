@@ -32,12 +32,12 @@ if (scenario === "stubborn" || scenario === "command-stubborn") {
   record({ type: "descendant", pid: descendant.pid });
 }
 
-function finish(output, phase = "final_answer") {
+function finish(output, phase = "final_answer", terminalItems = []) {
   notify("item/agentMessage/delta", { threadId, turnId, itemId: "final", delta: output.slice(0, 4) });
   notify("item/agentMessage/delta", { threadId, turnId, itemId: "final", delta: output.slice(4) });
   notify("item/completed", { threadId, turnId, item: { type: "agentMessage", id: "final", text: output, phase } });
   notify("thread/tokenUsage/updated", { threadId, turnId, tokenUsage: { total: { inputTokens: 11, outputTokens: 7, totalTokens: 18 } } });
-  notify("turn/completed", { threadId, turn: { id: turnId, status: "completed", items: [] } });
+  notify("turn/completed", { threadId, turn: { id: turnId, status: "completed", items: terminalItems } });
 }
 
 createInterface({ input: process.stdin }).on("line", line => {
@@ -113,6 +113,19 @@ createInterface({ input: process.stdin }).on("line", line => {
     }
     if (scenario === "server-error") {
       notify("turn/completed", { threadId, turn: { id: turnId, status: "failed", items: [], error: { message: "token=private-test-token https://private.example.test/path" } } });
+      return;
+    }
+    if (["terminal-command-output", "terminal-command-long", "streamed-terminal-command", "terminal-command-no-output"].includes(scenario)) {
+      const command = { type: "commandExecution", id: "terminal-command", command: ["node", "-e", "full-command-private-marker"], status: "completed", exitCode: scenario === "terminal-command-output" ? -9 : 0,
+        aggregatedOutput: scenario === "terminal-command-long" ? "LONG_BEGIN\n" + "x".repeat(32_740) + "\nsk-abcdefghijklmnopqrstuvwxyz1234567890\n" + "tail".repeat(10_000)
+          : scenario === "streamed-terminal-command" ? "STREAM_DUPLICATE_MARKER\ntoken=private-stream-terminal-secret\n"
+          : "here-document: Operation not permitted\ntoken=private-terminal-secret\n" };
+      if (scenario === "terminal-command-no-output") { command.status = "failed"; command.exitCode = null; command.aggregatedOutput = null; }
+      notify("item/started", { threadId, turnId, item: { type: command.type, id: command.id, command: command.command, status: "inProgress" } });
+      if (scenario === "streamed-terminal-command") notify("item/commandExecution/outputDelta", { threadId, turnId, itemId: command.id, delta: command.aggregatedOutput });
+      if (scenario === "terminal-command-long") notify("item/commandExecution/outputDelta", { threadId, turnId, itemId: command.id, delta: "" });
+      notify("item/completed", { threadId, turnId, item: command });
+      finish("worker complete", "final_answer", [command]);
       return;
     }
     if (scenario === "sensitive-stream") {

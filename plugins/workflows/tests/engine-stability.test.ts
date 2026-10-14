@@ -46,16 +46,30 @@ async function fixture(t: TestContext, adapter: StabilityAdapter) {
 test("ordinary resume never interprets business result fields as execution failure", async t => {
   const adapter = new StabilityAdapter(async () => ({ accepted: false }));
   const { project, engine } = await fixture(t, adapter);
-  const run = await engine.preview({ projectPath: project, script: script(`const report = await agent("verify", {schema:${JSON.stringify(schema)}}); if (!report.accepted) throw new Error("Verification rejected"); return report;`) });
+  const run = await engine.preview({ projectPath: project, script: script(`phase("Verification"); const report = await agent("verify", {schema:${JSON.stringify(schema)}}); if (!report.accepted) throw new Error("Verification rejected"); return report;`) });
   await engine.start({ id: run.id, revision: run.revision });
   const first = await engine.wait(run.id);
   assert.equal(first.execution, "failed");
   assert.equal(first.tasks[0]?.status, "completed", "Worker execution succeeded; the script owns the acceptance decision.");
-  await engine.start({ id: run.id, revision: first.revision }, true);
+  assert.deepEqual(first.failureContext, { kind: "script", phase: "Verification", afterTaskId: "task_1" });
+  const preparing = await engine.start({ id: run.id, revision: first.revision }, true);
+  assert.equal(preparing.failureContext, undefined, "A new execution does not display the previous failure provenance.");
   const resumed = await engine.wait(run.id);
   assert.equal(resumed.execution, "failed");
   assert.equal(resumed.tasks[0]?.cached, true);
   assert.deepEqual(adapter.calls, ["verify"]);
+});
+
+test("preparation errors record preparation provenance without inventing a failed worker", async t => {
+  const adapter = new StabilityAdapter();
+  (adapter as StabilityAdapter & WorkerAdapter).executionEnvironment = async () => { throw new Error("Fixture catalogue unavailable"); };
+  const { project, engine } = await fixture(t, adapter);
+  const run = await engine.preview({ projectPath: project, script: script('return await agent("verify");') });
+  await engine.start({ id: run.id, revision: run.revision });
+  const failed = await engine.wait(run.id);
+  assert.equal(failed.execution, "failed");
+  assert.deepEqual(failed.failureContext, { kind: "preparation" });
+  assert.deepEqual(failed.tasks, []); assert.deepEqual(adapter.calls, []);
 });
 
 test("explicit retry from a completed validation task invalidates its tail and preserves the prefix", async t => {

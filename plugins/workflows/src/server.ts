@@ -55,7 +55,7 @@ function registerPanelToolWithIcons(server: McpServer, register: () => void) {
 }
 
 export function createServer(engine: WorkflowEngine, options: { projects?: ProjectsProvider; readDeletionConfig?: (projectPaths: string[]) => Promise<Record<string, unknown>> } = {}) {
-  const serverInfo = { name: "workflows", version: "0.5.4", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.5.5", icons: panelIcons };
   const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server = new McpServer(serverInfo);
   const templates = new TemplateStore(engine.store);
@@ -69,7 +69,7 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
     annotations,
     _meta: {
       ui: { resourceUri: panelResourceUri },
-      "openai/ui": { entrypoints: [{ type: "thread" }, { type: "global" }] },
+      "openai/ui": { entrypoints: [{ type: "thread" }] },
     },
   }, async () => result({ version: serverInfo.version, prototype: false, executionAvailable: true, description: "动态工作流任务面板：查看代理生成的计划、执行进度和改动审查。" })));
 
@@ -155,7 +155,7 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
   const safe = (operation: () => Promise<Record<string, unknown>> | Record<string, unknown>): Promise<CallToolResult> => Promise.resolve().then(operation).then(result).catch(error => ({ isError: true, content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }] }));
   server.registerTool("workflow_get_projects", {
     title: "读取 Codex 本机项目",
-    description: "Read the current Codex desktop's local projects and this request's real thread/project ownership through the host's read-only app tools. Returns explicit unavailable status if pipe, caller metadata or schemas are unsupported. Global/unassigned callers receive no automatic project selection. Does not infer a project from cwd or shared server environment, inspect GUI databases, validate path existence, or start workers.",
+    description: "Read the current Codex desktop's local projects and this request's real thread/project ownership through the host's read-only app tools. Canonicalizes accessible local project directories without inferring caller ownership. Returns explicit unavailable status if pipe, caller metadata, schemas or the current project directory are unavailable. Global/unassigned callers receive no automatic project selection. Does not infer a project from cwd or shared server environment, inspect GUI databases, or start workers.",
     inputSchema: {}, annotations, _meta: { ui: { visibility: ["model", "app"] } },
   }, async (_input, extra) => safe(async () => ({ ...await projects.getProjects({ meta: extra._meta, signal: extra.signal }) })));
   server.registerTool("workflow_get_execution_settings", {

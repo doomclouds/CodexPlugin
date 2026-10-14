@@ -45,6 +45,32 @@ test("protocol fixture streams final output and usage with an initialized, isola
   } finally { await context.cleanup(); }
 });
 
+test("temporary-file command guidance is scoped to the enforced read-only sandbox", async () => {
+  for (const mode of ["read", "write"] as const) {
+    const context = await setup("native-items");
+    try {
+      const result = await context.adapter.run({ ...context.request, mode }, context.controller.signal, () => {});
+      assert.ok(result.toolsUsed?.includes("native:commandExecution"));
+      const transcript = await context.transcript();
+      const thread = transcript.find(message => message.method === "thread/start")!;
+      const turn = transcript.find(message => message.method === "turn/start")!;
+      if (mode === "read") {
+        assert.equal(thread.params.sandbox, "read-only");
+        assert.deepEqual(turn.params.sandboxPolicy, { type: "readOnly", networkAccess: false });
+        assert.match(thread.params.developerInstructions, /does not grant temporary-file writes/);
+        assert.match(thread.params.developerInstructions, /native file-reading tools and direct argument vectors/);
+        assert.match(thread.params.developerInstructions, /here-documents, here-strings and output file redirection/);
+        assert.match(thread.params.developerInstructions, /node -e, python -c or printf pipelines/);
+        assert.match(thread.params.developerInstructions, /Do not expand the sandbox/);
+      } else {
+        assert.equal(thread.params.sandbox, "workspace-write");
+        assert.equal(turn.params.sandboxPolicy.type, "workspaceWrite");
+        assert.equal(thread.params.developerInstructions.includes("temporary-file writes"), false);
+      }
+    } finally { await context.cleanup(); }
+  }
+});
+
 test("completion received before the turn/start acknowledgement is retained", async () => {
   const context = await setup("completion-before-ack");
   try {
@@ -121,6 +147,50 @@ test("native item notifications produce safe live actions followed by terminal a
     assert.ok(activities.some(activity => activity?.kind === "files"));
     assert.ok(activities.some(activity => activity?.kind === "search"));
     assert.equal(JSON.stringify(activities).includes("working commentary"), false);
+  } finally { await context.cleanup(); }
+});
+
+test("terminal-only command output is redacted and reports negative exits without duplicate capture", async () => {
+  const context = await setup("terminal-command-output");
+  try {
+    await context.adapter.run(context.request, context.controller.signal, event => context.events.push(event));
+    const logs = context.events.filter(event => event.type === "log").map(event => event.message).join("\n");
+    assert.equal(logs.match(/here-document: Operation not permitted/g)?.length, 1);
+    assert.equal(logs.match(/Native command failed \(exit -9\)/g)?.length, 1);
+    assert.equal(logs.includes("private-terminal-secret"), false);
+    assert.equal(logs.includes("full-command-private-marker"), false);
+    assert.ok(logs.includes("[redacted]"));
+    assert.ok(context.events.some(event => event.type === "activity" && event.activity.id === "terminal-command" && event.activity.status === "failed"));
+  } finally { await context.cleanup(); }
+});
+
+test("terminal command output never repeats already streamed output", async () => {
+  const context = await setup("streamed-terminal-command");
+  try {
+    await context.adapter.run(context.request, context.controller.signal, event => context.events.push(event));
+    const logs = context.events.filter(event => event.type === "log").map(event => event.message).join("\n");
+    assert.equal(logs.match(/STREAM_DUPLICATE_MARKER/g)?.length, 1);
+    assert.equal(logs.includes("private-stream-terminal-secret"), false);
+  } finally { await context.cleanup(); }
+});
+
+test("terminal aggregate fallback is bounded after redaction and empty deltas do not suppress it", async () => {
+  const context = await setup("terminal-command-long");
+  try {
+    await context.adapter.run(context.request, context.controller.signal, event => context.events.push(event));
+    const logs = context.events.filter(event => event.type === "log").map(event => event.message);
+    assert.equal(logs.filter(message => message.includes("LONG_BEGIN")).length, 1);
+    assert.ok(logs.every(message => message.length <= 32_768));
+    assert.ok(logs.some(message => message.includes("[Native command output truncated.]")));
+    assert.equal(logs.join("\n").includes("sk-abc"), false, "Redact before the cap can split a credential below its recognizer's minimum length.");
+  } finally { await context.cleanup(); }
+});
+
+test("terminal command failures without captured output still produce a short failure log", async () => {
+  const context = await setup("terminal-command-no-output");
+  try {
+    await context.adapter.run(context.request, context.controller.signal, event => context.events.push(event));
+    assert.equal(context.events.filter(event => event.type === "log" && event.message === "Native command failed.").length, 1);
   } finally { await context.cleanup(); }
 });
 
