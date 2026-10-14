@@ -7,7 +7,7 @@ import path from "node:path";
 const scenario = process.argv[2];
 const traceFile = process.argv[3];
 const record = value => appendFileSync(traceFile, JSON.stringify(value) + "\n");
-record({ type: "pid", pid: process.pid });
+record({ type: "pid", pid: process.pid, arguments: process.argv.slice(4) });
 const keepAlive = setInterval(() => {}, 1000);
 let initialized = false;
 let handshake = false;
@@ -66,7 +66,7 @@ createInterface({ input: process.stdin }).on("line", line => {
     threadParams = params;
     const required = ["apps", "plugins", "browser_use", "computer_use", "multi_agent", "hooks"];
     const server = params.config.mcp_servers?.[configuredName];
-    if (required.some(feature => !process.argv.includes(feature) || params.config[`features.${feature}`] !== false) || !server || typeof server.enabled !== "boolean" || server.required !== server.enabled || !params.developerInstructions.includes("user-authorized delegated task")) {
+    if (required.some(feature => !process.argv.includes(feature) || params.config[`features.${feature}`] !== false) || !process.argv.includes("agents.enabled=false") || params.config["agents.enabled"] !== false || !server || typeof server.enabled !== "boolean" || server.required !== server.enabled || !params.developerInstructions.includes("user-authorized delegated task")) {
       send({ id, error: { code: -32000, message: "Missing worker isolation" } });
       return;
     }

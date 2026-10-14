@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import type { WorkflowRun } from "./types.ts";
 import lockfile from "proper-lockfile";
 import { randomBytes } from "node:crypto";
+import { listTemplates } from "./catalog.ts";
 
 export interface PendingDeletionTarget { kind: "run" | "definition"; id: string; revision: number; runIds?: string[]; includeAssociatedRuns?: true }
 export interface DeletedRunSummary { id: string; revision: number; name: string; projectPath: string; createdAt: string; sourceDefinition?: WorkflowRun["sourceDefinition"] }
@@ -151,7 +152,18 @@ export class RunStore {
     if (!info.isFile() || info.isSymbolicLink()) throw new Error("Invalid saved workflow state file");
     const run = JSON.parse(await readFile(filename, "utf8")) as WorkflowRun;
     if (run.id !== id || !Array.isArray(run.tasks) || !Array.isArray(run.logs) || !Number.isSafeInteger(run.revision) || run.revision < 1) throw new Error("Invalid saved workflow state");
-    if (run.sourceDefinition && (!/^(saved|builtin):[a-z][a-z0-9-]{0,63}$/.test(run.sourceDefinition.id) || !Number.isSafeInteger(run.sourceDefinition.revision) || run.sourceDefinition.revision < 1)) throw new Error("Invalid saved workflow provenance");
+    if (run.sourceDefinition) {
+      const source = run.sourceDefinition;
+      if (typeof source.id !== "string" || !Number.isSafeInteger(source.revision)) throw new Error("Invalid saved workflow provenance");
+      const saved = /^saved:[a-z][a-z0-9-]{0,63}$/.test(source.id) && source.revision >= 1;
+      // Older servers persisted the catalogue's bare builtin ID with revision zero.
+      // Migrate only known catalogue IDs; canonical IDs remain readable if a later
+      // plugin version removes that builtin, since runs retain their own scripts.
+      const legacyBuiltin = source.revision === 0 && listTemplates().some(template => template.id === source.id);
+      const builtin = /^builtin:[a-z][a-z0-9-]{0,63}$/.test(source.id) && source.revision >= 0;
+      if (!saved && !legacyBuiltin && !builtin) throw new Error("Invalid saved workflow provenance");
+      if (legacyBuiltin) run.sourceDefinition = { id: `builtin:${source.id}`, revision: source.revision };
+    }
     return run;
   }
   async list() {

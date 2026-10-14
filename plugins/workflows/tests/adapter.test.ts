@@ -97,6 +97,23 @@ test("native item notifications produce safe live actions followed by terminal a
   } finally { await context.cleanup(); }
 });
 
+test("ephemeral workers exclude code-mode delegation without disabling native execution", async () => {
+  const context = await setup("native-items");
+  try {
+    const result = await context.adapter.run(context.request, context.controller.signal, () => {});
+    assert.ok(result.toolsUsed?.includes("native:commandExecution"));
+    assert.ok(result.toolsUsed?.includes("native:fileChange"));
+    const transcript = await context.transcript();
+    const startupArguments = transcript.find(message => message.type === "pid")!.arguments as string[];
+    assert.ok(startupArguments.some((value, index) => value === "-c" && startupArguments[index + 1] === "agents.enabled=false"));
+    assert.equal(startupArguments.includes("code_mode_host"), false);
+    const thread = transcript.find(message => message.method === "thread/start")!;
+    assert.equal(thread.params.ephemeral, true);
+    assert.equal(thread.params.config["agents.enabled"], false);
+    assert.equal(thread.params.config["features.code_mode_host"], undefined);
+  } finally { await context.cleanup(); }
+});
+
 test("model and effort overrides are catalogue-validated and observed configured settings are reported", async () => {
   const context = await setup("complete");
   try {

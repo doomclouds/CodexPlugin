@@ -45008,7 +45008,7 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.5.1",
+    version: "0.5.2",
     stage: "runtime-v2",
     available: ["preparation-progress", "node-activity", "node-process", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: true, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree"], submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
@@ -45217,7 +45217,15 @@ var RunStore = class {
     if (!info.isFile() || info.isSymbolicLink()) throw new Error("Invalid saved workflow state file");
     const run = JSON.parse(await readFile(filename, "utf8"));
     if (run.id !== id || !Array.isArray(run.tasks) || !Array.isArray(run.logs) || !Number.isSafeInteger(run.revision) || run.revision < 1) throw new Error("Invalid saved workflow state");
-    if (run.sourceDefinition && (!/^(saved|builtin):[a-z][a-z0-9-]{0,63}$/.test(run.sourceDefinition.id) || !Number.isSafeInteger(run.sourceDefinition.revision) || run.sourceDefinition.revision < 1)) throw new Error("Invalid saved workflow provenance");
+    if (run.sourceDefinition) {
+      const source = run.sourceDefinition;
+      if (typeof source.id !== "string" || !Number.isSafeInteger(source.revision)) throw new Error("Invalid saved workflow provenance");
+      const saved = /^saved:[a-z][a-z0-9-]{0,63}$/.test(source.id) && source.revision >= 1;
+      const legacyBuiltin = source.revision === 0 && listTemplates().some((template2) => template2.id === source.id);
+      const builtin = /^builtin:[a-z][a-z0-9-]{0,63}$/.test(source.id) && source.revision >= 0;
+      if (!saved && !legacyBuiltin && !builtin) throw new Error("Invalid saved workflow provenance");
+      if (legacyBuiltin) run.sourceDefinition = { id: `builtin:${source.id}`, revision: source.revision };
+    }
     return run;
   }
   async list() {
@@ -45500,6 +45508,7 @@ function itemActivity(value, status, startedAt) {
 
 // src/adapter.ts
 var disabledFeatures = ["apps", "plugins", "remote_plugin", "browser_use", "computer_use", "multi_agent", "hooks", "skill_mcp_dependency_install", "memories"];
+var workerIsolationArguments = [...disabledFeatures.flatMap((feature) => ["--disable", feature]), "-c", "agents.enabled=false"];
 var maxMessageBytes = 16 * 1024 * 1024;
 var maxOutputBytes = 4 * 1024 * 1024;
 function object4(value) {
@@ -45798,14 +45807,14 @@ var CodexAdapter = class {
     return environment;
   }
   async inspectExecutionEnvironment(cwd, signal) {
-    const session = new ProtocolSession(this.options.command, [...this.options.args, ...disabledFeatures.flatMap((feature) => ["--disable", feature])], cwd, this.options.startupTimeoutMs, this.options.shutdownTimeoutMs, () => {
+    const session = new ProtocolSession(this.options.command, [...this.options.args, ...workerIsolationArguments], cwd, this.options.startupTimeoutMs, this.options.shutdownTimeoutMs, () => {
     });
     const timer = setTimeout(() => session.fail(timeoutError("Codex model catalogue discovery timed out.")), this.options.startupTimeoutMs);
     const abort = () => session.fail(abortError2());
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.2" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config2 = object4(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config2, cwd);
@@ -45938,7 +45947,7 @@ var CodexAdapter = class {
       void session.request("command/exec/terminate", { processId }, this.options.interruptTimeoutMs).catch(() => session.fail(reason));
     };
     const abort = () => cancel(abortError2("Command execution was interrupted."));
-    session = new ProtocolSession(this.options.command, [...this.options.args, ...disabledFeatures.flatMap((feature) => ["--disable", feature])], request.cwd, this.options.startupTimeoutMs, this.options.shutdownTimeoutMs, (method, params) => {
+    session = new ProtocolSession(this.options.command, [...this.options.args, ...workerIsolationArguments], request.cwd, this.options.startupTimeoutMs, this.options.shutdownTimeoutMs, (method, params) => {
       if (method !== "command/exec/outputDelta" || params.processId !== processId) return;
       if (!["stdout", "stderr"].includes(String(params.stream)) || typeof params.deltaBase64 !== "string") {
         session.fail(new Error("Codex emitted an invalid command output event."));
@@ -45952,7 +45961,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.2" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -46120,7 +46129,7 @@ var CodexAdapter = class {
       interrupt();
     };
     const abort = () => cancel(abortError2());
-    session = new ProtocolSession(this.options.command, [...this.options.args, ...disabledFeatures.flatMap((feature) => ["--disable", feature])], request.cwd, this.options.startupTimeoutMs, this.options.shutdownTimeoutMs, (method, params) => {
+    session = new ProtocolSession(this.options.command, [...this.options.args, ...workerIsolationArguments], request.cwd, this.options.startupTimeoutMs, this.options.shutdownTimeoutMs, (method, params) => {
       if (threadId && typeof params.threadId === "string" && params.threadId !== threadId) return;
       if (method === "turn/started" || method === "turn/completed") {
         const turn = object4(params.turn);
@@ -46165,7 +46174,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.2" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object4(object4(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== void 0 || request.reasoningEffort !== void 0) {
@@ -46206,6 +46215,7 @@ var CodexAdapter = class {
       const config2 = { "web_search": networkAccess ? "live" : "disabled" };
       if (request.reasoningEffort !== void 0) config2.model_reasoning_effort = request.reasoningEffort;
       for (const feature of disabledFeatures) config2[`features.${feature}`] = false;
+      config2["agents.enabled"] = false;
       config2.mcp_servers = Object.fromEntries(Object.entries(configuredMcps).map(([name, value]) => {
         if (!authorizedMcps.has(name)) return [name, { enabled: false, required: false }];
         const server2 = { ...object4(omitUnsetConfig(value)), enabled: true, required: true };
@@ -47992,7 +48002,7 @@ async function readDeletionConfig(projectPaths = []) {
   const session = new ProtocolSession(process.env.WORKFLOWS_CODEX_COMMAND ?? "codex", ["app-server", "--disable", "plugins", "--disable", "apps", "--disable", "remote_plugin"], process.cwd(), 15e3, 5e3, () => {
   });
   try {
-    await session.request("initialize", { clientInfo: { name: "workflows_deletion_preflight", version: "0.5.1" }, capabilities: { experimentalApi: true } });
+    await session.request("initialize", { clientInfo: { name: "workflows_deletion_preflight", version: "0.5.2" }, capabilities: { experimentalApi: true } });
     session.send({ method: "initialized", params: {} });
     const scopes = [];
     for (const cwd of [void 0, ...new Set(projectPaths)].slice(0, 101)) {
@@ -48085,7 +48095,7 @@ function registerPanelToolWithIcons(server2, register) {
   }
 }
 function createServer(engine2, options = {}) {
-  const serverInfo = { name: "workflows", version: "0.5.1", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.5.2", icons: panelIcons };
   const panelHtml = readFileSync3(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);
@@ -48129,7 +48139,7 @@ function createServer(engine2, options = {}) {
     inputSchema: { id: external_exports.string().min(1).max(80) },
     annotations
   }, async ({ id: id2 }) => {
-    const template2 = id2.startsWith("saved:") ? await templates.get(id2) : await getTemplate(id2);
+    const template2 = id2.startsWith("saved:") ? await templates.get(id2) : await getTemplate(id2.replace(/^builtin:/, ""));
     return template2 ? result({ ...template2 }) : {
       isError: true,
       content: [{ type: "text", text: `Unknown workflow template: ${id2}` }]
@@ -48151,7 +48161,7 @@ function createServer(engine2, options = {}) {
     if (!source) return void 0;
     const template2 = source.id.startsWith("saved:") ? await templates.get(source.id) : await getTemplate(source.id.replace(/^builtin:/, ""));
     if (!template2 || ("revision" in template2 ? template2.revision : 0) !== source.revision || template2.script !== script) throw new Error("Workflow definition changed or does not match the planned script; reload it before creating a run.");
-    return { id: template2.id, revision: source.revision };
+    return { id: template2.source === "builtin" ? `builtin:${template2.id}` : template2.id, revision: source.revision };
   };
   const nodeSettings = external_exports.record(external_exports.string().min(1).max(256), nodeModelSettingsSchema).optional();
   const limits = external_exports.object({ maxReadWorkers: external_exports.number().int().min(1).max(16).optional(), maxCalls: external_exports.number().int().min(1).max(1e3).optional(), timeoutMs: external_exports.number().int().min(100).max(864e5).optional(), maxTokens: external_exports.number().int().nonnegative().optional() }).optional();

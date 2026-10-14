@@ -79,6 +79,11 @@ type Usage = WorkerResult["usage"];
 type Completion = { id: string; status: string; items?: unknown; error?: unknown };
 
 const disabledFeatures = ["apps", "plugins", "remote_plugin", "browser_use", "computer_use", "multi_agent", "hooks", "skill_mcp_dependency_install", "memories"];
+// Recent Codex code-mode hosts gate delegation through agents.enabled rather
+// than the legacy multi_agent feature. Ephemeral workers have no durable
+// rollout to fork; the workflow engine owns parallel dispatch and its budget.
+// Keep code_mode_host enabled so native shell, file and patch tools still work.
+const workerIsolationArguments = [...disabledFeatures.flatMap(feature => ["--disable", feature]), "-c", "agents.enabled=false"];
 const maxMessageBytes = 16 * 1024 * 1024;
 const maxOutputBytes = 4 * 1024 * 1024;
 
@@ -375,13 +380,13 @@ export class CodexAdapter implements WorkerAdapter {
   }
 
   private async inspectExecutionEnvironment(cwd: string, signal: AbortSignal): Promise<ExecutionEnvironment> {
-    const session = new ProtocolSession(this.options.command, [...this.options.args, ...disabledFeatures.flatMap(feature => ["--disable", feature])], cwd, this.options.startupTimeoutMs, this.options.shutdownTimeoutMs, () => {});
+    const session = new ProtocolSession(this.options.command, [...this.options.args, ...workerIsolationArguments], cwd, this.options.startupTimeoutMs, this.options.shutdownTimeoutMs, () => {});
     const timer = setTimeout(() => session.fail(timeoutError("Codex model catalogue discovery timed out.")), this.options.startupTimeoutMs);
     const abort = () => session.fail(abortError());
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.2" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config = object(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config, cwd);
@@ -477,7 +482,7 @@ export class CodexAdapter implements WorkerAdapter {
       void session.request("command/exec/terminate", { processId }, this.options.interruptTimeoutMs).catch(() => session.fail(reason));
     };
     const abort = () => cancel(abortError("Command execution was interrupted."));
-    session = new ProtocolSession(this.options.command, [...this.options.args, ...disabledFeatures.flatMap(feature => ["--disable", feature])], request.cwd, this.options.startupTimeoutMs, this.options.shutdownTimeoutMs, (method, params) => {
+    session = new ProtocolSession(this.options.command, [...this.options.args, ...workerIsolationArguments], request.cwd, this.options.startupTimeoutMs, this.options.shutdownTimeoutMs, (method, params) => {
       if (method !== "command/exec/outputDelta" || params.processId !== processId) return;
       if (!["stdout", "stderr"].includes(String(params.stream)) || typeof params.deltaBase64 !== "string") { session.fail(new Error("Codex emitted an invalid command output event.")); return; }
       const stream = params.stream as "stdout" | "stderr";
@@ -488,7 +493,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.2" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer); startupTimer = undefined;
       if (canceled || signal.aborted) throw canceled ?? abortError();
@@ -614,7 +619,7 @@ export class CodexAdapter implements WorkerAdapter {
       interrupt();
     };
     const abort = () => cancel(abortError());
-    session = new ProtocolSession(this.options.command, [...this.options.args, ...disabledFeatures.flatMap(feature => ["--disable", feature])], request.cwd, this.options.startupTimeoutMs, this.options.shutdownTimeoutMs, (method, params) => {
+    session = new ProtocolSession(this.options.command, [...this.options.args, ...workerIsolationArguments], request.cwd, this.options.startupTimeoutMs, this.options.shutdownTimeoutMs, (method, params) => {
       if (threadId && typeof params.threadId === "string" && params.threadId !== threadId) return;
       if (method === "turn/started" || method === "turn/completed") {
         const turn = object(params.turn);
@@ -659,7 +664,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.2" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object(object(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== undefined || request.reasoningEffort !== undefined) {
@@ -697,6 +702,7 @@ export class CodexAdapter implements WorkerAdapter {
       const config: JsonObject = { "web_search": networkAccess ? "live" : "disabled" };
       if (request.reasoningEffort !== undefined) config.model_reasoning_effort = request.reasoningEffort;
       for (const feature of disabledFeatures) config[`features.${feature}`] = false;
+      config["agents.enabled"] = false;
       config.mcp_servers = Object.fromEntries(Object.entries(configuredMcps).map(([name, value]) => {
         if (!authorizedMcps.has(name)) return [name, { enabled: false, required: false }];
         // Exact table keys support dotted names. User approval policies and deny filters remain intact.

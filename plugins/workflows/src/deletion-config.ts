@@ -6,7 +6,7 @@ import { stat } from "node:fs/promises";
 export async function readDeletionConfig(projectPaths: string[] = []): Promise<Record<string, unknown>> {
   const session = new ProtocolSession(process.env.WORKFLOWS_CODEX_COMMAND ?? "codex", ["app-server", "--disable", "plugins", "--disable", "apps", "--disable", "remote_plugin"], process.cwd(), 15000, 5000, () => {});
   try {
-    await session.request("initialize", { clientInfo: { name: "workflows_deletion_preflight", version: "0.5.1" }, capabilities: { experimentalApi: true } });
+    await session.request("initialize", { clientInfo: { name: "workflows_deletion_preflight", version: "0.5.2" }, capabilities: { experimentalApi: true } });
     session.send({ method: "initialized", params: {} });
     const scopes: Array<{ cwd: string; mcp_servers: unknown }> = [];
     for (const cwd of [undefined, ...new Set(projectPaths)].slice(0, 101)) {

@@ -55,7 +55,7 @@ function registerPanelToolWithIcons(server: McpServer, register: () => void) {
 }
 
 export function createServer(engine: WorkflowEngine, options: { projects?: ProjectsProvider; readDeletionConfig?: (projectPaths: string[]) => Promise<Record<string, unknown>> } = {}) {
-  const serverInfo = { name: "workflows", version: "0.5.1", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.5.2", icons: panelIcons };
   const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server = new McpServer(serverInfo);
   const templates = new TemplateStore(engine.store);
@@ -105,7 +105,7 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
     inputSchema: { id: z.string().min(1).max(80) },
     annotations,
   }, async ({ id }) => {
-    const template = id.startsWith("saved:") ? await templates.get(id) : await getTemplate(id);
+    const template = id.startsWith("saved:") ? await templates.get(id) : await getTemplate(id.replace(/^builtin:/, ""));
     return template ? result({ ...template }) : {
       isError: true,
       content: [{ type: "text", text: `Unknown workflow template: ${id}` }],
@@ -128,7 +128,7 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
     if (!source) return undefined;
     const template = source.id.startsWith("saved:") ? await templates.get(source.id) : await getTemplate(source.id.replace(/^builtin:/, ""));
     if (!template || ("revision" in template ? template.revision : 0) !== source.revision || template.script !== script) throw new Error("Workflow definition changed or does not match the planned script; reload it before creating a run.");
-    return { id: template.id, revision: source.revision };
+    return { id: template.source === "builtin" ? `builtin:${template.id}` : template.id, revision: source.revision };
   };
   const nodeSettings = z.record(z.string().min(1).max(256), nodeModelSettingsSchema).optional();
   const limits = z.object({ maxReadWorkers: z.number().int().min(1).max(16).optional(), maxCalls: z.number().int().min(1).max(1000).optional(), timeoutMs: z.number().int().min(100).max(86400000).optional(), maxTokens: z.number().int().nonnegative().optional() }).optional();

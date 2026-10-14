@@ -3865,7 +3865,7 @@ async function main() {
         const results = await Promise.allSettled(tasks.map(task => Promise.resolve().then(task)));
         return results.map(result => {
           if (result.status === "fulfilled") return result.value;
-          __hostLog("parallel task failed: " + String(result.reason));
+          __hostLog(("parallel task failed: " + String(result.reason)).slice(0, 4096));
           return null;
         });
       };
@@ -3881,7 +3881,7 @@ async function main() {
         }));
         return results.map(result => {
           if (result.status === "fulfilled") return result.value;
-          __hostLog("pipeline item failed: " + String(result.reason));
+          __hostLog(("pipeline item failed: " + String(result.reason)).slice(0, 4096));
           return null;
         });
       };

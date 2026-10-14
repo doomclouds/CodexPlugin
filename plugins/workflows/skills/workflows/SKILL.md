@@ -21,6 +21,8 @@ description: 根据用户任务生成、保存并执行 Workflows 动态工作�
 
 实际读取、命令执行和修改由 `agent` 内的真实 Codex worker 完成。worker 通过官方 app-server 使用原生文件读取、命令执行及补丁修改能力，并按授权复用配置的 MCP；JavaScript 只负责动态编排，不需要为每类实际任务增加插件代码或维护步骤。网络开放后，原生命令也可在授权范围内访问网络。桌面专有工具、Image Gen、原生 UI 和父聊天专有 apps 不等于 worker 全量继承。
 
+并行和委派由工作流脚本的 `agent`、`parallel` 和 `pipeline` 管理，受运行预算控制。worker 内部不再创建嵌套子代理；步骤提示应要求它使用可用的原生工具完成当前任务，需要多代理协作时由脚本拆成多个 `agent` 调用。
+
 默认只读。`agent` 写入任务使用 `{ mode: "write" }`，同时预览 `allowWrite: true`；只读任务可并行。`parallel` 接受函数数组，失败项返回 `null` 并记日志；`pipeline` 各输入独立推进，失败或 `null` 停止该输入后续阶段。直接 `await agent` 或 `await operation` 的错误可以捕获。结构化 worker 输出传 JSON `schema`，不要假设文本自动变为 JSON。
 
 ## 网络、工作区与维护
