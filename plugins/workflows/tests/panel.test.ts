@@ -86,7 +86,7 @@ test("lost host connection disables mutations without inventing a stopped state"
   await panel.perform("stop", true);
   assert.equal(calls.some(call => call.name === "workflow_stop"), false);
   fail();
-  await panel.heartbeat();
+  await panel.reconnect();
   await panel.refresh();
   assert.equal(panel.state.connection, "connected");
   assert.equal(panel.state.error, "");

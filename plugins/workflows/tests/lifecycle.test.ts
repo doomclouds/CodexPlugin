@@ -30,7 +30,9 @@ test("closing the panel during the final start save prevents every worker from l
     const run = await engine.preview({ projectPath, script: 'export const meta = { name: "lease-race", description: "Lease shutdown race" }; return await agent("Read the project");' });
     const lease = engine.lease({});
     store.afterRunningSave = () => { engine.lease({ leaseId: lease.leaseId, release: true }); store.afterRunningSave = undefined; };
-    await assert.rejects(engine.start({ id: run.id, revision: run.revision, leaseId: lease.leaseId }), /Panel closed/);
+    assert.equal((await engine.start({ id: run.id, revision: run.revision, leaseId: lease.leaseId })).execution, "preparing");
+    const stopped = await engine.wait(run.id);
+    assert.match(stopped.error ?? "", /Panel closed|interrupted/);
     assert.equal(requests.length, 0);
     assert.equal((await engine.get(run.id)).execution, "stopped");
   } finally { await engine.close(); await rm(root, { recursive: true, force: true }); }

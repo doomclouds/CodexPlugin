@@ -31,7 +31,7 @@ async function repository(directory: string, file: string) {
   await writeFile(path.join(directory, file), "version one\n"); return commit(directory, "Advance fixture history");
 }
 async function fixture(t: TestContext) {
-  const root = await mkdtemp(path.join(tmpdir(), "workflow-submodules-test-"));
+  const root = await realpath(await mkdtemp(path.join(await realpath(tmpdir()), "workflow-submodules-test-")));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   await preparePrivateFixtureDirectory(root);
   const leafRemote = path.join(root, "leaf-remote"), childRemote = path.join(root, "child-remote"), project = path.join(root, "project"), data = path.join(root, "run");

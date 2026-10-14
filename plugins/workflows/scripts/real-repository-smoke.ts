@@ -34,7 +34,7 @@ try{
  ]},script:'export const meta={name:"repository-preparation-smoke",description:"Real repository isolation and read-only toolchain verification"}; return {status:await operation("status"),node:await operation("node-version"),npm:await operation("npm-version")};'})).run;
  await call("workflow_start",{id:preview.id,revision:preview.revision});
  let run;const deadline=Date.now()+300000;
- while(Date.now()<deadline){run=(await call("workflow_get_run",{id:preview.id})).run;if(!["running","stopping"].includes(run.execution))break;await new Promise(r=>setTimeout(r,100));}
+ while(Date.now()<deadline){run=(await call("workflow_get_run",{id:preview.id})).run;if(!["preparing","running","stopping"].includes(run.execution))break;await new Promise(r=>setTimeout(r,100));}
  assert.equal(run.execution,"completed",run.error);assert.equal(run.review,"ready");assert.equal(run.result.status.stdout.trim(),"");
  assert.ok(run.tasks.every((task:any)=>task.status==="completed"));assert.equal(run.application,"none");assert.equal(run.diff.files.length,0);
  assert.equal(await gitAwareContextDigest(project),before,"Original repository and submodule state must remain unchanged");

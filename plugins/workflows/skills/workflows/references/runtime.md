@@ -9,20 +9,48 @@
 | 工具 | 关键输入与结果 |
 | --- | --- |
 | `workflow_get_capabilities` | 返回实际服务版本、执行器、网络与工作区能力 |
+| `workflow_get_projects` | 读取宿主本机项目和真实聊天归属；项目聊天固定当前项目，已有运行保持绑定，全局新预览才选择项目 |
 | `workflow_get_execution_settings` | 可选 `projectPath`；返回默认配置、实际模型目录及其深度选项。无效默认配置保留原因与目录，供用户修正 |
 | `workflow_update_execution_settings` | 当前 `revision`；可选 `model`、`reasoningEffort`；全量替换插件自己的默认设置，省略字段清除对应覆盖 |
 | `workflow_list_templates`、`workflow_get_template` | 列出或读取独立工作流定义 |
 | `workflow_save_template` | `script`；可选 `args`、`allowWrite`、`networkAccess`、`allowedMcpServers`、`allowedMcpTools`、`workspaceMode`、`maintenance`、`limits`；更新已有定义需 `revision` |
-| `workflow_preview` | `projectPath`、`script`；可选输入与执行范围；返回未执行的 `run` |
+| `workflow_preview` | `projectPath`、`script`；可选输入、执行范围、`sourceDefinition: { id, revision }`；服务端校验来源版本与实际脚本，返回未执行的 `run` |
 | `workflow_update` | `id`、当前 `revision`、`script`、`args`；可选执行范围；已有工作区时不能改变范围 |
 | `workflow_start`、`workflow_resume` | `id`、当前 `revision`；已授权聊天调用不传 `leaseId`，面板调用传活跃租约 |
 | `workflow_get_run`、`workflow_list_runs` | 读取实际计划、状态、任务、日志、报告、差异和维护审查；列表可按 `projectPath` 筛选 |
+| `workflow_get_node_process` | `id`；以 `taskId`、`phase` 或 `scope: "workflow" | "unphased"` 选择过程，默认 `detail: "brief"`；开发详情显式传 `"developer"` |
+| `workflow_preview_deletion` | `kind: "run" | "definition"`、`id`、当前 `revision`；定义可传额外 `runIds`；返回 `preview`，含实际范围、`fingerprint`、`canDelete`、大小和 `blocked` |
+| `workflow_delete` | 预览的同一目标字段及最新 `fingerprint`；返回 `deletion.deleted`、`partial`、已删对象和 `remaining`，仅在全部清理完成时报告成功 |
 | `workflow_stop` | `id`；停止派发、中断活跃执行，等待退出并保存 |
 | `workflow_cancel_task` | `id`、`taskId`；按用户请求取消一个任务 |
 | `workflow_apply` | `id`、当前 `revision`；按应用授权处理完成的审查，保留冲突与当前项目改动 |
 | `workflow_open_panel` | 打开实际任务面板，不开始执行 |
 
 `workflow_panel_lease` 仅供面板维护生命周期。聊天启动不需要面板租约，不借用其他面板租约。
+
+项目聊天中的运行固定属于当前项目；已有运行固定绑定 `projectPath`，不能移到其他项目。全局入口的新预览可以从宿主目录选项目。跨项目复用读取定义并创建独立运行。读取定义后传入其实际 `id`、`revision` 和脚本作为来源；改写脚本后先保存新定义版本，再关联。新定义使用随机初始版本，更新递增；删除后重建须重新读取版本，不沿用旧预览。
+
+主界面是工具栏和横向执行图，参数、设置、历史、差异审查及节点过程放在弹窗中。阶段连线展示阶段顺序，不自动还原脚本的条件分支、循环回边或完整依赖图。分支和有限循环仍由 JavaScript 执行。
+
+## 准备与节点过程
+
+启动先进入 `preparing`，`preparation.stages` 记录实际环境核对、项目检查、工作区准备等阶段。执行中的任务尝试记录活动；`progressSequence` 用于过程刷新，不能当作修改操作的 CAS 版本，变更仍用新读取的 `revision`。
+
+`workflow_get_node_process` 的选择器择一使用：`taskId` 看一个实际任务，`phase` 看一个阶段，`scope: "workflow"` 看整个运行及准备过程，`scope: "unphased"` 看未分阶段的任务。默认 `brief` 返回简要动作、状态、耗时和错误，不包含提示词及原始输出。`developer` 增加相关节点的有限已记录日志，不能把缺少日志当作任务没有执行。
+
+面板断线冻结最后一次已读取的记录并暂停操作；重连重建租约、读取服务端实际状态，不自动恢复或重跑。面板租约丢失会停止它启动的运行；用户明确继续时再以当前 revision 恢复。
+
+macOS 桌面项目接口通过宿主动态环境提供。启动器优先选宿主 Node，用 `process.execve` 原地替换，要求初始 Node.js 22.15 或更新版本；Windows 和普通 CLI 沿原启动。不得固定运行时或管道地址、关闭宿主鉴权、读取私有界面数据库或冒用其他聊天身份。安装更新不等于真实 App 聊天已加载新版，应在宿主重载后核对实际服务与项目查询。
+
+## 删除范围与失败重试
+
+删除须有用户授权，并先调用 `workflow_preview_deletion`。`kind: "run"` 删除一个运行；`kind: "definition"` 删除保存的定义及通过来源记录可靠关联的运行，可追加明确选择的旧运行 `runIds`。不按名称推断关联，内置定义不可删除。预览只读取，不停止运行或删除文件。
+
+返回的 `preview.target` 是规范化目标，`runs`、`definition`、`objects`、`totalFiles`、`totalBytes` 说明实际清理范围；`blocked` 说明执行、准备、应用、引用或文件归属等阻碍。`canDelete: true` 后，用同一目标的 `kind`、`id`、`revision`、可选 `runIds` 及 `fingerprint` 调用 `workflow_delete`。范围或文件发生变化时重新预览，不手工绕过阻碍。
+
+完整清理覆盖该范围的定义、运行、日志、结果、隔离工作区、缓存、事务、控制文件及删除元数据，不留下永久墓碑或隐藏运行目录。已交付到原项目的文件与提交、用户全局设置和其他工作流不属于删除范围。原项目的快照临时文件只按自有事务记录、文件身份和摘要核验后删除；旧文件归属不明时阻止删除。
+
+`deletion.deleted: true` 表示全部清理完成。`partial: true` 或非空 `remaining` 需要报告实际剩余对象；相关记录只保留用于重试的只读摘要和 `deletionTarget`，禁止启动、恢复、更新和应用。按摘要中的原目标重新预览，取得新指纹后继续清理；全部完成后摘要和删除元数据也删除。删除不承诺回滚原项目已接受的改动。
 
 `args` 可为任意 JSON 值，默认对象。写入需要 Git 仓库根目录、`allowWrite: true` 和对应任务 `mode: "write"`。`networkAccess` 默认 `false`，`workspaceMode` 默认 `"snapshot"`；`"git-worktree"` 用于需要 Git 元数据的隔离维护，也支持子模块及嵌套模块的提交、初始化状态、独立副本与产物检查点。未初始化模块不会自动下载，初始化须显式计划和授权。快照写入含子模块时提示改用 Git 模式。网络与写入授权相互独立：只读任务可以用 `allowWrite: false`、`networkAccess: true` 进行已授权 native fetch/search，仍不能写文件。联网须有用户授权且预览显式声明。`allowedMcpServers` 默认空数组，仅列出用户已配置且本任务授权的 MCP 服务名称，不包含 Workflows；`allowedMcpTools` 按服务映射到实际工具名称数组，与用户已有配置取交集并保留审批。只读 worker 仅允许明确 readOnlyHint=true 的 MCP 工具，写入按工具授权限制。不继承父聊天专有 apps/连接器。
 

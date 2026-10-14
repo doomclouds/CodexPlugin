@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { WorkflowEngine } from "../src/engine.ts";
 import { RunStore } from "../src/store.ts";
 import type { WorkerAdapter } from "../src/adapter.ts";
+import type { WorkflowRun } from "../src/types.ts";
 
 test("a second MCP instance can stop the owning workflow and acknowledge actual worker exit", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "workflows-owner-control-"));
@@ -41,6 +42,7 @@ test("a second MCP instance can stop the owning workflow and acknowledge actual 
 test("remote stop waits for acknowledgment after the owner releases its lock", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "workflows-control-ack-"));
   const store = new RunStore(root);const id = "wf_" + "a".repeat(24);
+  await store.create({ id, revision: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), meta: { name: "control-ack", description: "Owner exit acknowledgment fixture" }, script: 'export const meta = {name:"control-ack",description:"Owner exit acknowledgment fixture"}; return true;', scriptDigest: "fixture-digest", args: {}, projectPath: root, allowWrite: false, limits: { maxReadWorkers: 1, maxCalls: 1, timeoutMs: 1000, maxTokens: 0 }, execution: "running", review: "unavailable", application: "none", tasks: [], logs: [], controlId: "execution" } satisfies WorkflowRun);
   const release = await store.acquire(id);
   const request = store.requestControl(id, "execution", "stop");
   await new Promise(resolve => setTimeout(resolve, 100));

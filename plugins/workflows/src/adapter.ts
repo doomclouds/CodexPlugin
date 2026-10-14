@@ -5,6 +5,9 @@ import { StringDecoder } from "node:string_decoder";
 import { lstat, mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { parseExecutionEnvironment, resolveExecutionSettings } from "./execution-settings.ts";
 import type { EffectiveExecutionSettings, ExecutionEnvironment } from "./execution-settings.ts";
+import { createHash } from "node:crypto";
+import { commandActivityLabel, itemActivity } from "./activity.ts";
+import type { Activity } from "./types.ts";
 
 export interface WorkerRequest {
   id: string;
@@ -41,6 +44,7 @@ export type WorkerEvent =
   | { type: "process"; state: "started" | "exited"; pid: number }
   | { type: "identity"; threadId: string; turnId?: string }
   | { type: "log"; message: string }
+  | { type: "activity"; activity: Activity }
   | { type: "execution-settings"; settings: EffectiveExecutionSettings }
   | { type: "usage"; inputTokens: number; outputTokens: number; totalTokens: number };
 
@@ -302,6 +306,7 @@ export class CodexAdapter implements WorkerAdapter {
   private readonly options: Required<CodexAdapterOptions>;
   private readonly running = new Map<Promise<unknown>, AbortController>();
   private closed = false;
+  private readonly modelCatalogues = new Map<string, { models: unknown[]; expiresAt: number }>();
 
   constructor(options: CodexAdapterOptions = {}) {
     this.options = {
@@ -343,7 +348,12 @@ export class CodexAdapter implements WorkerAdapter {
     return operation.finally(() => { signal.removeEventListener("abort", relay); this.running.delete(operation); });
   }
 
-  private async modelEnvironment(session: ProtocolSession, config: unknown): Promise<ExecutionEnvironment> {
+  private async modelEnvironment(session: ProtocolSession, config: unknown, cwd: string): Promise<ExecutionEnvironment> {
+    // Re-read configuration on every owned session. Only the catalogue is cached,
+    // scoped to cwd and the entire fresh configuration, never a worker or grant.
+    const key = `${cwd}:${createHash("sha256").update(JSON.stringify(config)).digest("hex")}`;
+    const cached = this.modelCatalogues.get(key);
+    if (cached && cached.expiresAt > Date.now()) return parseExecutionEnvironment(config, cached.models);
     const models: unknown[] = [];
     let cursor: string | undefined;
     const cursors = new Set<string>();
@@ -358,7 +368,10 @@ export class CodexAdapter implements WorkerAdapter {
       if (cursor && cursors.has(cursor)) throw new Error("Codex model catalogue pagination did not advance.");
       if (cursor) cursors.add(cursor);
     } while (cursor);
-    return parseExecutionEnvironment(config, models);
+    const environment = parseExecutionEnvironment(config, models);
+    if (this.modelCatalogues.size >= 32) this.modelCatalogues.delete(this.modelCatalogues.keys().next().value!);
+    this.modelCatalogues.set(key, { models, expiresAt: Date.now() + 60_000 });
+    return environment;
   }
 
   private async inspectExecutionEnvironment(cwd: string, signal: AbortSignal): Promise<ExecutionEnvironment> {
@@ -368,10 +381,10 @@ export class CodexAdapter implements WorkerAdapter {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.2" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config = object(await session.request("config/read", { cwd })).config;
-      return await this.modelEnvironment(session, config);
+      return await this.modelEnvironment(session, config, cwd);
     } finally { clearTimeout(timer); signal.removeEventListener("abort", abort); await session.close(); }
   }
 
@@ -443,6 +456,10 @@ export class CodexAdapter implements WorkerAdapter {
     let executionTimer: ReturnType<typeof setTimeout> | undefined;
     let cancelTimer: ReturnType<typeof setTimeout> | undefined;
     let session!: ProtocolSession;
+    const initialization: Activity = { id: `${processId}:initializing`, kind: "initializing", label: "连接命令执行器", status: "running", startedAt: new Date().toISOString() };
+    let commandActivity: Activity | undefined;
+    const activity = (value: Activity) => { try { onEvent({ type: "activity", activity: { ...value } }); } catch { session?.fail(new Error("Command event handler failed.")); } };
+    activity(initialization);
     const emit = (message: string) => { try { onEvent({ type: "log", message: redact(message).slice(0, 32_768) }); } catch { session.fail(new Error("Command event handler failed.")); } };
     const append = (stream: "stdout" | "stderr", text: string, flush = false) => {
       output[stream] += text;
@@ -471,18 +488,22 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.2" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer); startupTimer = undefined;
       if (canceled || signal.aborted) throw canceled ?? abortError();
+      initialization.status = "completed"; initialization.endedAt = new Date().toISOString(); activity(initialization);
       sent = true;
       executionTimer = setTimeout(() => cancel(timeoutError("Codex command execution timed out.")), timeoutMs);
       const sandboxPolicy = { type: "workspaceWrite", writableRoots: [request.cwd, ...(hasOwnedGit ? [path.join(request.cwd, ".git")] : [])], networkAccess: request.networkAccess === true, excludeTmpdirEnvVar: true, excludeSlashTmp: true };
       emit("Command execution started.");
+      commandActivity = { id: processId, kind: "command", label: commandActivityLabel(request.command), status: "running", startedAt: new Date().toISOString() };
+      activity(commandActivity);
       const response = object(await Promise.race([session.request("command/exec", { command: request.command, cwd: request.cwd, env, processId, sandboxPolicy, timeoutMs, streamStdoutStderr: true, outputBytesCap: maxOutputBytes }, timeoutMs + this.options.interruptTimeoutMs), session.failure.promise]));
       if (canceled) throw canceled;
       if (!Number.isSafeInteger(response.exitCode) || typeof response.stdout !== "string" || typeof response.stderr !== "string") throw new Error("Codex returned an invalid command result.");
       for (const stream of ["stdout", "stderr"] as const) append(stream, decoders[stream].end() + response[stream], true);
+      commandActivity.status = response.exitCode === 0 ? "completed" : "failed"; commandActivity.endedAt = new Date().toISOString(); activity(commandActivity);
       return { exitCode: response.exitCode as number, stdout: redact(output.stdout), stderr: redact(output.stderr), attempts: attempt };
     } catch (error) { if (canceled) throw canceled; throw error; }
     finally {
@@ -491,6 +512,7 @@ export class CodexAdapter implements WorkerAdapter {
       if (executionTimer) clearTimeout(executionTimer);
       if (cancelTimer) clearTimeout(cancelTimer);
       await session.close();
+      for (const unfinished of [initialization, commandActivity]) if (unfinished?.status === "running") { unfinished.status = signal.aborted ? "interrupted" : "failed"; unfinished.endedAt = new Date().toISOString(); activity(unfinished); }
     }
   }
 
@@ -499,6 +521,7 @@ export class CodexAdapter implements WorkerAdapter {
     const operations = [...this.running];
     for (const [, controller] of operations) controller.abort();
     await Promise.allSettled(operations.map(([operation]) => operation));
+    this.modelCatalogues.clear();
   }
 
   private async runWorker(request: WorkerRequest, signal: AbortSignal, onEvent: (event: WorkerEvent) => void): Promise<WorkerResult> {
@@ -513,6 +536,7 @@ export class CodexAdapter implements WorkerAdapter {
     let turnId = "";
     let usage: Usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
     let executionSettings: EffectiveExecutionSettings | undefined;
+    let completedSuccessfully = false;
     let turnSent = false;
     let interruptSent = false;
     let canceled: Error | undefined;
@@ -521,6 +545,26 @@ export class CodexAdapter implements WorkerAdapter {
     let startupTimer: ReturnType<typeof setTimeout> | undefined;
     let session!: ProtocolSession;
     const emit = (event: WorkerEvent) => { try { onEvent(event); } catch { session.fail(new Error("Worker event handler failed.")); } };
+    const activities = new Map<string, Activity>();
+    const initialization: Activity = { id: `${request.id}:initializing`, kind: "initializing", label: "连接代理并核对工具范围", status: "running", startedAt: new Date().toISOString() };
+    activities.set(initialization.id, initialization);
+    const publishActivity = (value: Activity) => {
+      if (!activities.has(value.id) && activities.size >= 200) { const finished = [...activities.values()].find(item => item.status !== "running"); if (finished) activities.delete(finished.id); }
+      if (!activities.has(value.id) && activities.size >= 400) { session.fail(new Error("Worker exceeded the active item limit.")); return; }
+      activities.set(value.id, value); emit({ type: "activity", activity: { ...value } });
+    };
+    const observedItem = (itemValue: unknown, status: Activity["status"]) => {
+      const item = object(itemValue);
+      const old = activities.get(String(item.id));
+      if (old && old.status !== "running") return;
+      const failed = item.status === "failed" || item.type === "commandExecution" && typeof item.exitCode === "number" && item.exitCode !== 0;
+      const activity = itemActivity(item, status === "completed" && failed ? "failed" : status, old?.startedAt);
+      if (activity) {
+        const waiting = activities.get(`${request.id}:waiting`);
+        if (waiting?.status === "running") publishActivity({ ...waiting, status: "completed", endedAt: new Date().toISOString() });
+        publishActivity(activity);
+      }
+    };
     const storeMessage = (id: string, value: { text: string; phase?: string }) => {
       const size = messageBytes - Buffer.byteLength(messages.get(id)?.text ?? "") + Buffer.byteLength(value.text);
       if (size > maxOutputBytes) { session.fail(new Error("Worker output exceeded the size limit.")); return; }
@@ -546,6 +590,7 @@ export class CodexAdapter implements WorkerAdapter {
     };
     const capture = (itemValue: unknown) => {
       const item = object(itemValue);
+      observedItem(item, "completed");
       if (item.type === "commandExecution") { toolsUsed.add("native:commandExecution"); logChunk(`command:${String(item.id)}`, "", true); return; }
       if (item.type === "fileChange") { toolsUsed.add("native:fileChange"); emit({ type: "log", message: `Native file change status: ${String(item.status)}.` }); return; }
       if (item.type === "webSearch") { toolsUsed.add("native:webSearch"); return; }
@@ -585,13 +630,17 @@ export class CodexAdapter implements WorkerAdapter {
         }
       } else if (method === "item/agentMessage/delta" && typeof params.delta === "string") {
         const id = String(params.itemId ?? "message");
+        if (!activities.has(id)) observedItem({ type: "agentMessage", id }, "running");
         const previous = messages.get(id);
         const text = (previous?.text ?? "") + params.delta;
         storeMessage(id, { text, ...(previous?.phase ? { phase: previous.phase } : {}) });
         logChunk(`agent:${id}`, params.delta);
       } else if (method === "item/completed") capture(params.item);
       else if (method === "item/commandExecution/outputDelta" && typeof params.delta === "string") logChunk(`command:${String(params.itemId)}`, params.delta);
-      else if (method === "item/started" && object(params.item).type === "commandExecution") emit({ type: "log", message: "Native command execution started." });
+      else if (method === "item/started") {
+        observedItem(params.item, "running");
+        if (object(params.item).type === "commandExecution") emit({ type: "log", message: "Native command execution started." });
+      }
       else if (method === "thread/tokenUsage/updated") {
         const total = object(object(params.tokenUsage).total);
         usage = { inputTokens: tokenCount(total.inputTokens), outputTokens: tokenCount(total.outputTokens), totalTokens: tokenCount(total.totalTokens) };
@@ -601,6 +650,7 @@ export class CodexAdapter implements WorkerAdapter {
     // Observe the owned native handle before the child can acknowledge the
     // protocol. A timeout may precede all child-produced startup diagnostics.
     const pid = session.child.pid;
+    publishActivity(initialization);
     if (pid !== undefined) {
       emit({ type: "process", state: "started", pid });
       session.child.once("close", () => emit({ type: "process", state: "exited", pid }));
@@ -609,11 +659,11 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.2" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object(object(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== undefined || request.reasoningEffort !== undefined) {
-        const environment = await this.modelEnvironment(session, effective);
+        const environment = await this.modelEnvironment(session, effective, request.cwd);
         executionSettings = { ...resolveExecutionSettings(environment, [{ settings: { ...(request.model ? { model: request.model } : {}), ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}) }, source: request.settingsSource ?? "script" }]), provenance: "requested" };
       }
       const authorizedMcps = new Set(request.mcpServers ?? []);
@@ -704,8 +754,10 @@ export class CodexAdapter implements WorkerAdapter {
       clearTimeout(startupTimer);
       startupTimer = undefined;
       if (canceled || signal.aborted) throw canceled ?? abortError();
+      publishActivity({ ...initialization, status: "completed", endedAt: new Date().toISOString() });
       turnTimer = setTimeout(() => cancel(timeoutError("Codex worker execution timed out.")), request.timeoutMs ?? 30 * 60_000);
       turnSent = true;
+      publishActivity({ id: `${request.id}:waiting`, kind: "waiting", label: "等待代理执行与反馈", status: "running", startedAt: new Date().toISOString() });
       const sandboxPolicy = request.mode === "read" ? { type: "readOnly", networkAccess } : { type: "workspaceWrite", writableRoots: [request.cwd], networkAccess, excludeTmpdirEnvVar: true, excludeSlashTmp: true };
       const turnAck = session.request("turn/start", { threadId, input: [{ type: "text", text: request.prompt }], cwd: request.cwd, approvalPolicy: "never", sandboxPolicy, ...(request.reasoningEffort !== undefined ? { effort: request.reasoningEffort } : {}), ...(request.outputSchema ? { outputSchema: request.outputSchema } : {}) }, request.timeoutMs ?? 30 * 60_000);
       const first = object(await Promise.race([turnAck, completion.promise.then(turn => ({ turn })), session.failure.promise]));
@@ -728,6 +780,7 @@ export class CodexAdapter implements WorkerAdapter {
         try { data = redactData(JSON.parse(rawOutput)); } catch { throw new Error("Codex worker did not return valid structured JSON output."); }
         output = JSON.stringify(data);
       } else output = redact(rawOutput);
+      completedSuccessfully = true;
       return { output, ...(request.outputSchema ? { data } : {}), ...(executionSettings ? { executionSettings } : {}), threadId, turnId, usage, durationMs: Date.now() - started, toolsUsed: [...toolsUsed] };
     } catch (error) {
       if (canceled) throw canceled;
@@ -738,6 +791,7 @@ export class CodexAdapter implements WorkerAdapter {
       if (turnTimer) clearTimeout(turnTimer);
       if (cancelTimer) clearTimeout(cancelTimer);
       await session.close();
+      for (const unfinished of activities.values()) if (unfinished.status === "running") publishActivity({ ...unfinished, status: completedSuccessfully ? "completed" : signal.aborted ? "interrupted" : "failed", endedAt: new Date().toISOString() });
     }
   }
 }

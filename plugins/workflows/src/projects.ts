@@ -16,6 +16,10 @@ export interface ProjectsProvider {
 }
 
 interface CallerContext { threadId: string; callId: string; turnId: string }
+class ProjectQueryError extends Error {
+  readonly transient: boolean;
+  constructor(message: string, transient = false) { super(message); this.transient = transient; }
+}
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -123,9 +127,11 @@ async function query(pipePath: string, caller: CallerContext, tool: "list_projec
         fail(new Error("Codex project discovery was cancelled."));
       };
       socket.once("connect", () => { sent = true; socket.write(request); });
-      socket.on("error", () => fail(new Error("The Codex desktop project pipe is unavailable.")));
-      socket.once("end", () => fail(new Error("The Codex project pipe ended before a complete response.")));
-      socket.once("close", () => fail(new Error("The Codex project pipe closed before a complete response.")));
+      socket.on("error", (error: NodeJS.ErrnoException) => fail(new ProjectQueryError("The Codex desktop project pipe is unavailable.", ["ECONNRESET", "ECONNABORTED", "EPIPE", "ETIMEDOUT"].includes(error.code ?? ""))));
+      // Node delivers buffered data before end. A complete, validated response
+      // settles synchronously in data; EOF may only fail an unfinished frame.
+      socket.once("end", () => fail(new ProjectQueryError("The Codex project pipe ended before a complete response.", true)));
+      socket.once("close", () => fail(new ProjectQueryError("The Codex project pipe closed before a complete response.", true)));
       socket.on("data", (chunk: Buffer) => {
         if (finished) return;
         try {
@@ -151,18 +157,44 @@ async function query(pipePath: string, caller: CallerContext, tool: "list_projec
       });
       timer = setTimeout(() => {
         if (sent && !socket.destroyed) socket.write(frame({ jsonrpc: "2.0", id, method: "tools/cancel" }));
-        fail(new Error("Codex project discovery timed out."));
+        fail(new ProjectQueryError("Codex project discovery timed out.", true));
       }, timeoutMs);
       signal.addEventListener("abort", abort, { once: true });
       if (signal.aborted) abort();
     });
   } catch (error) {
-    throw new Error(`Codex ${tool}: ${error instanceof Error ? error.message : "project query failed"}`);
+    throw new ProjectQueryError(`Codex ${tool}: ${error instanceof Error ? error.message : "project query failed"}`, error instanceof ProjectQueryError && error.transient);
   } finally {
     if (timer) clearTimeout(timer);
     signal.removeEventListener("abort", abort);
     socket.destroy();
     await closed;
+  }
+}
+
+async function queryWithRetry(pipePath: string, caller: CallerContext, tool: "list_projects" | "list_threads", argumentsValue: Record<string, unknown>, signal: AbortSignal, timeoutMs: number): Promise<unknown> {
+  const deadline = Date.now() + timeoutMs;
+  // Both attempts fit inside the existing per-query bound. Never replay a
+  // malformed response, ownership mismatch, native tool failure or cancellation.
+  const firstBudget = Math.max(1, Math.floor(timeoutMs * 0.7));
+  try { return await query(pipePath, caller, tool, argumentsValue, signal, firstBudget); }
+  catch (error) {
+    if (!(error instanceof ProjectQueryError) || !error.transient || signal.aborted) throw error;
+    const delayMs = Math.min(75, Math.floor(timeoutMs * 0.05));
+    if (Date.now() + delayMs >= deadline) throw error;
+    await new Promise<void>((resolve, reject) => {
+      const cancel = () => { clearTimeout(timer); signal.removeEventListener("abort", cancel); reject(new Error("Codex project discovery was cancelled.")); };
+      const timer = setTimeout(() => { signal.removeEventListener("abort", cancel); resolve(); }, delayMs);
+      signal.addEventListener("abort", cancel, { once: true });
+      if (signal.aborted) cancel();
+    });
+    const remaining = deadline - Date.now();
+    if (remaining < 1) throw error;
+    try { return await query(pipePath, caller, tool, argumentsValue, signal, remaining); }
+    catch (retryError) {
+      if (retryError instanceof ProjectQueryError && retryError.transient) throw new ProjectQueryError(`${retryError.message} A read-only retry also failed; refresh after the desktop connection recovers.`);
+      throw retryError;
+    }
   }
 }
 
@@ -179,8 +211,8 @@ export class CodexProjectsProvider implements ProjectsProvider {
       const caller = callerContext(context.meta);
       if (!this.pipePath?.trim()) throw new Error("Codex did not provide CODEX_APP_TOOLS_PIPE_PATH to this MCP connection.");
       if (process.platform === "win32" ? !/^\\\\[.?]\\pipe\\/i.test(this.pipePath) : !path.isAbsolute(this.pipePath)) throw new Error("Codex did not provide a local desktop project pipe.");
-      const projects = await query(this.pipePath, caller, "list_projects", {}, context.signal, this.timeoutMs);
-      const threads = await query(this.pipePath, caller, "list_threads", { limit: 50 }, context.signal, this.timeoutMs);
+      const projects = await queryWithRetry(this.pipePath, caller, "list_projects", {}, context.signal, this.timeoutMs);
+      const threads = await queryWithRetry(this.pipePath, caller, "list_threads", { limit: 50 }, context.signal, this.timeoutMs);
       return mapProjects(projects, threads, caller.threadId);
     } catch (error) { return { available: false, projects: [], reason: error instanceof Error ? error.message : "Codex project discovery is unavailable." }; }
   }

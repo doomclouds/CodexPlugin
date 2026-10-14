@@ -143,17 +143,14 @@ test("closing the panel while preview is pending prevents subsequent worker exec
   assert.equal(panel.state.connection, "closed");
 });
 
-test("changing a draft target project creates a fresh preview and never updates the old project's draft", async () => {
+test("an existing run cannot be moved to a different project through replacement input", async () => {
   const previous = savedRun();
   const { panel, mutations } = fixture(previous);
   await panel.connected();
-  const input = inputFor(previous, { projectPath: "/other-project" });
-  await panel.startWithInput(input);
-  assert.deepEqual(mutations(), [
-    { name: "workflow_preview", args: input },
-    { name: "workflow_start", args: { id: "wf-new-1", revision: 1, leaseId: "lease-test" } },
-  ]);
-  assert.equal(panel.selected?.projectPath, "/other-project");
+  await panel.startWithInput(inputFor(previous, { projectPath: "/other-project" }));
+  assert.deepEqual(mutations(), []);
+  assert.equal(panel.selected?.projectPath, previous.projectPath);
+  assert.match(panel.state.error, /所属项目固定/);
   await panel.teardown();
 });
 

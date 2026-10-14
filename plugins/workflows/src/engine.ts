@@ -7,7 +7,7 @@ import { RunStore } from "./store.ts";
 import { listGitlinks, gitAwareContextDigest } from "./submodules.ts";
 import { applyWorkspace, contextDigest, createWorkspace, workspaceDiff } from "./workspace.ts";
 import { createGitWorkspace, validateMaintenance, reviewMaintenance, applyMaintenance, maintenanceFingerprint, validateGitWorkspace } from "./maintenance.ts";
-import type { Attempt, Limits, Task, WorkflowRun, MaintenancePlan } from "./types.ts";
+import type { Activity, Attempt, Limits, Task, WorkflowRun, MaintenancePlan, Preparation, DefinitionSource } from "./types.ts";
 import { ExecutionSettingsStore, modelSettingsSchema, resolveExecutionSettings, validateExplicitModelSettings, validateNodeSettings } from "./execution-settings.ts";
 import type { EffectiveExecutionSettings, ExecutionEnvironment, ModelSettings, NodeSettings, StoredExecutionSettings } from "./execution-settings.ts";
 
@@ -56,6 +56,7 @@ export class WorkflowEngine {
   private readonly settings: ExecutionSettingsStore;
   private readonly configAbort = new AbortController();
   private readonly configurations = new Set<Promise<unknown>>();
+  private readonly progressTimers = new Map<string, NodeJS.Timeout>();
   constructor(options: { store?: RunStore; adapter?: WorkerAdapter } = {}) {
     this.store = options.store ?? new RunStore();
     this.adapter = options.adapter ?? new CodexAdapter();
@@ -85,22 +86,38 @@ export class WorkflowEngine {
   }
   private async initialize() {
     for (const run of await this.store.list()) {
-      if ((["running", "stopping"].includes(run.execution) || run.application === "applying") && !await this.store.isLocked(run.id)) await this.recover(run.id);
-      this.runs.set(run.id, await this.store.load(run.id));
+      try {
+        if (!run.deletionPending && (["preparing", "running", "stopping"].includes(run.execution) || run.application === "applying") && !await this.store.isLocked(run.id)) await this.recover(run.id);
+        this.runs.set(run.id, await this.store.load(run.id));
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     }
   }
   private async recover(id: string) {
+    const current = await this.store.load(id);
+    if (current.deletionPending) { this.runs.set(id, current); return; }
     let release: (() => Promise<void>);
     try { release = await this.store.acquire(id); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ELOCKED") return; throw error; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ELOCKED") return;
+      // A deletion can freeze or remove this record between inspection and
+      // acquisition. Preserve its cleanup view rather than resurrecting it.
+      try { const latest = await this.store.load(id); if (latest.deletionPending) { this.runs.set(id, latest); return; } }
+      catch (readError) { if ((readError as NodeJS.ErrnoException).code === "ENOENT") return; throw readError; }
+      throw error;
+    }
     try {
       const run = await this.store.load(id);
-      if (["running", "stopping"].includes(run.execution)) {
+      if (run.deletionPending) { this.runs.set(id, run); return; }
+      if (["preparing", "running", "stopping"].includes(run.execution)) {
         run.execution = "stopped";
+        this.finishPreparation(run, "interrupted");
+        run.endedAt = now();
         for (const task of run.tasks) if (["running", "queued", "stopping"].includes(task.status)) {
           task.status = "interrupted";
           const attempt = task.attempts.at(-1);
           if (attempt && ["running", "queued", "stopping"].includes(attempt.status)) { attempt.status = "interrupted"; attempt.endedAt = now(); }
+          for (const activity of attempt?.activities ?? []) if (activity.status === "running") { activity.status = "interrupted"; activity.endedAt = now(); }
+          if (task.currentActivity?.status === "running") { task.currentActivity.status = "interrupted"; task.currentActivity.endedAt = now(); }
         }
         this.log(run, "Previous process ended. Progress retained; resume must be started manually.");
         await this.persist(run);
@@ -113,15 +130,23 @@ export class WorkflowEngine {
       this.runs.set(run.id, run);
     } finally { await release(); }
   }
-  private async persist(run: WorkflowRun) { run.updatedAt = now(); run.revision++; await this.store.save(run); }
+  private clearProgress(id: string) { const timer = this.progressTimers.get(id); if (timer) clearTimeout(timer); this.progressTimers.delete(id); }
+  private async persist(run: WorkflowRun) { this.clearProgress(run.id); run.updatedAt = now(); run.revision++; await this.store.save(run); }
+  private async persistProgress(run: WorkflowRun) { this.clearProgress(run.id); run.updatedAt = now(); run.progressSequence = (run.progressSequence ?? 0) + 1; await this.store.save(run); }
+  private scheduleProgress(run: WorkflowRun) {
+    if (!this.active.has(run.id) || this.progressTimers.has(run.id)) return;
+    const timer = setTimeout(() => { void this.persistProgress(run).catch(error => { const active = this.active.get(run.id); run.error = `Could not save workflow progress: ${message(error)}`; active?.controller.abort(); }); }, 250);
+    timer.unref(); this.progressTimers.set(run.id, timer);
+  }
   private log(run: WorkflowRun, text: string, taskId?: string, level: "info" | "error" = "info") {
     if (run.logs.length >= 5000) run.logs.shift();
     run.logs.push({ at: now(), level, message: text.slice(0, 16000), ...(taskId ? { taskId } : {}) });
+    this.scheduleProgress(run);
   }
   private async load(id: string) {
     await this.initialization;
     let run = this.active.has(id) ? this.runs.get(id)! : await this.store.load(id);
-    if (!this.active.has(id) && (["running", "stopping"].includes(run.execution) || run.application === "applying") && !await this.store.isLocked(id)) { await this.recover(id); run = await this.store.load(id); }
+    if (!run.deletionPending && !this.active.has(id) && (["preparing", "running", "stopping"].includes(run.execution) || run.application === "applying") && !await this.store.isLocked(id)) { await this.recover(id); run = await this.store.load(id); }
     this.runs.set(id, run);
     return run;
   }
@@ -129,7 +154,7 @@ export class WorkflowEngine {
     let run = await this.load(id);
     const active = this.active.get(id);
     // A terminal script result is not ready until review, checkpoint and lock cleanup finish.
-    if (active && !["running", "stopping"].includes(run.execution)) { await active.done; run = await this.load(id); }
+    if (active && !["preparing", "running", "stopping"].includes(run.execution)) { await active.done; run = await this.load(id); }
     return structuredClone(run);
   }
   async list(projectPath?: string) {
@@ -193,7 +218,7 @@ export class WorkflowEngine {
       return this.settingsView(await this.settings.update(settings), environment);
     });
   }
-  async preview(input: { projectPath: string; script: string; args?: unknown; allowWrite?: boolean; networkAccess?: boolean; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; workspaceMode?: "snapshot" | "git-worktree"; maintenance?: MaintenancePlan; limits?: Partial<Limits>; nodeSettings?: NodeSettings }) {
+  async preview(input: { projectPath: string; script: string; args?: unknown; allowWrite?: boolean; networkAccess?: boolean; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; workspaceMode?: "snapshot" | "git-worktree"; maintenance?: MaintenancePlan; limits?: Partial<Limits>; nodeSettings?: NodeSettings; sourceDefinition?: DefinitionSource }) {
     await this.initialization;
     const { meta } = validateScript(input.script);
     validateWorkflowArgs(meta, input.args === undefined ? {} : input.args);
@@ -211,19 +236,23 @@ export class WorkflowEngine {
       id: `wf_${randomBytes(12).toString("hex")}`, revision: 0, createdAt: now(), updatedAt: now(),
       meta, script: input.script, scriptDigest: digest(input.script), args: input.args === undefined ? {} : input.args, projectPath,
       allowWrite: input.allowWrite ?? false, networkAccess: input.networkAccess ?? false, allowedMcpServers: input.allowedMcpServers ?? [], allowedMcpTools: input.allowedMcpTools ?? {}, workspaceMode: input.workspaceMode ?? "snapshot", ...(input.maintenance ? { maintenance: input.maintenance } : {}), ...(input.nodeSettings !== undefined ? { nodeSettings } : {}), limits, execution: "draft", review: "unavailable", application: "none", tasks: [], logs: [],
+      ...(input.sourceDefinition ? { sourceDefinition: { ...input.sourceDefinition } } : {}),
     };
     this.log(run, "Plan saved for preview. No worker has started.");
-    await this.persist(run);
+    run.updatedAt = now(); run.revision++;
+    await this.store.create(run);
     return structuredClone(run);
   }
   async update(input: { id: string; revision: number; script: string; args: unknown; allowWrite?: boolean; networkAccess?: boolean; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; workspaceMode?: "snapshot" | "git-worktree"; maintenance?: MaintenancePlan; nodeSettings?: NodeSettings }) {
     let run = await this.load(input.id);
+    this.assertActionAvailable(run);
     if (this.active.has(run.id)) throw new Error("This workflow is running");
     const release = await this.store.acquire(run.id);
     try {
     run = await this.store.load(input.id);
+    this.assertActionAvailable(run);
     this.assertRevision(run, input.revision);
-    if (this.active.has(run.id) || ["running", "stopping"].includes(run.execution) || run.application !== "none") throw new Error("This workflow cannot be edited while running or after application");
+    if (this.active.has(run.id) || ["preparing", "running", "stopping"].includes(run.execution) || run.application !== "none") throw new Error("This workflow cannot be edited while running or after application");
     const { meta } = validateScript(input.script);
     validateWorkflowArgs(meta, input.args);
     const nodeSettings = validateNodeSettings(input.nodeSettings ?? run.nodeSettings, meta);
@@ -232,6 +261,7 @@ export class WorkflowEngine {
       for (const task of run.tasks) task.status = "interrupted";
       this.log(run, "Overall delegated task changed; saved task results will not be reused.");
     }
+    if (run.script !== input.script) delete run.sourceDefinition;
     run.script = input.script; run.scriptDigest = digest(input.script); run.meta = meta; run.args = input.args;
     if (input.nodeSettings !== undefined || run.nodeSettings !== undefined) run.nodeSettings = nodeSettings;
     const scopes = {
@@ -255,6 +285,7 @@ export class WorkflowEngine {
     Object.assign(run, scopes);
     run.execution = "draft"; run.review = "unavailable";
     delete run.result; delete run.diff; delete run.error;
+    delete run.preparation; delete run.startedAt; delete run.endedAt;
     this.log(run, "Plan changed. Start again from the updated preview; replay validates each cached task.");
     await this.persist(run);
     return structuredClone(run);
@@ -264,6 +295,7 @@ export class WorkflowEngine {
     if (tools && Object.entries(tools).some(([server, names]) => !servers.includes(server) || !Array.isArray(names) || names.some(name => typeof name !== "string" || !/^[a-zA-Z0-9_.:/-]{1,160}$/.test(name)))) throw new Error("MCP tool grants must name tools on explicitly granted servers");
   }
   private assertRevision(run: WorkflowRun, expected: number) { if (run.revision !== expected) throw new Error("Workflow changed; refresh the preview before this action"); }
+  private assertActionAvailable(run: WorkflowRun) { if (run.deletionPending) throw new Error("工作流清理尚未完成，请先继续删除。"); }
   lease(input: { leaseId?: string; release?: boolean }) {
     const id = input.leaseId ?? randomBytes(16).toString("hex");
     if (input.leaseId && !this.leases.has(id)) throw new Error("Panel lease is unknown or expired; reconnect the panel");
@@ -278,13 +310,17 @@ export class WorkflowEngine {
   }
   async start(input: { id: string; revision: number; leaseId?: string }, resume = false) {
     let run = await this.load(input.id);
+    this.assertActionAvailable(run);
     this.assertRevision(run, input.revision);
     if (this.active.has(run.id) || await this.store.isLocked(run.id)) throw new Error("Old workers have not exited; workflow cannot be relaunched");
     if (resume ? !["stopped", "failed"].includes(run.execution) : run.execution !== "draft") throw new Error("Workflow state does not permit this action");
     if (input.leaseId && (this.leases.get(input.leaseId) ?? 0) < Date.now()) throw new Error("Panel lease expired");
     const release = await this.store.acquire(run.id);
+    let active: Active | undefined;
+    let launch: (() => void) | undefined;
     try {
       run = await this.store.load(input.id);
+      this.assertActionAvailable(run);
       this.runs.set(run.id, run);
       this.assertRevision(run, input.revision);
       if (resume ? !["stopped", "failed"].includes(run.execution) : run.execution !== "draft") throw new Error("Workflow state changed before start");
@@ -294,52 +330,98 @@ export class WorkflowEngine {
       run.nodeSettings = validateNodeSettings(run.nodeSettings, meta);
       const settings = await this.settings.get();
       const explicitSettings = settings.model || settings.reasoningEffort || run.executionSettings?.model || run.executionSettings?.reasoningEffort || Object.values(run.nodeSettings).some(settings => settings.model || settings.reasoningEffort);
-      const environment = this.adapter.executionEnvironment && (mayUseAgent || explicitSettings) ? await this.executionEnvironment(run.projectPath) : undefined;
-      const defaultsForRun = run.executionSettings ?? settings;
-      if (!environment && (defaultsForRun.model || defaultsForRun.reasoningEffort || Object.values(run.nodeSettings).some(settings => settings.model || settings.reasoningEffort))) throw new Error("This worker adapter cannot validate configured model settings.");
-      if (!run.executionSettings) {
-        run.executionSettings = environment ? { ...resolveExecutionSettings(environment, [{ settings, source: settings.model || settings.reasoningEffort ? "workflow-settings" : "codex-config" }]), provenance: "requested" } : {};
-      }
-      if (environment) {
-        resolveExecutionSettings(environment, [{ settings: run.executionSettings, source: run.executionSettings.source ?? "workflow-settings" }]);
-        for (const settings of Object.values(run.nodeSettings)) validateExplicitModelSettings(settings, environment);
-      }
-      let context: string;
-      try {
-        const gitlinks = await listGitlinks(run.projectPath);
-        if (gitlinks.length && run.allowWrite && run.workspaceMode !== "git-worktree") throw new Error("Snapshot writing does not copy Git submodules. Create a new preview with workspaceMode: git-worktree to retain their commit and initialization state.");
-        context = gitlinks.length ? await gitAwareContextDigest(run.projectPath) : await contextDigest(run.projectPath);
-      } catch (error) { if (run.allowWrite) throw error; context = randomBytes(16).toString("hex"); }
-      if (run.contextDigest && run.contextDigest !== context) {
-        if (run.workspace) throw new Error("Project changed since the workspace snapshot. Create a new preview to preserve those changes.");
-        for (const task of run.tasks) task.status = "interrupted";
-        this.log(run, "Project changed; saved task results will not be reused.");
-      }
-      run.contextDigest = context;
-      if (run.allowWrite && !run.workspace) { run.workspace = run.workspaceMode === "git-worktree" ? await createGitWorkspace(run.projectPath, this.store.directory(run.id)) : await createWorkspace(run.projectPath, this.store.directory(run.id)); run.workspacePath = run.workspace.root; }
-      if (run.workspace && !(await stat(run.workspace.root)).isDirectory()) throw new Error("Saved workspace is missing; cannot resume");
-      if (run.workspace?.kind === "git-worktree") {
-        await validateGitWorkspace(run.workspace);
-        if (run.workspaceCheckpoint && await maintenanceFingerprint(run.workspace) !== run.workspaceCheckpoint) throw new Error("Saved Git checkout or artifacts changed; cached steps cannot safely replay. Create a new preview.");
-      }
-      if (input.leaseId && (this.leases.get(input.leaseId) ?? 0) < Date.now()) throw new Error("Panel closed while preparing the workspace; workers were not started");
+      if (!this.adapter.executionEnvironment && explicitSettings) throw new Error("This worker adapter cannot validate configured model settings.");
       run.controlId = randomBytes(16).toString("hex");
-      run.execution = "running"; run.review = "unavailable"; run.application = "none";
+      run.execution = "preparing"; run.review = "unavailable"; run.application = "none";
+      run.startedAt = now(); run.preparation = { startedAt: run.startedAt, stages: [] }; delete run.endedAt;
       delete run.error; delete run.diff; delete run.result;
       if (input.leaseId) run.leaseId = input.leaseId; else delete run.leaseId;
-      this.log(run, resume ? "Manual resume: replaying script and validating saved results in launch order." : "User started the previewed workflow.");
-      await this.persist(run);
-      if (input.leaseId && (this.leases.get(input.leaseId) ?? 0) < Date.now()) throw new Error("Panel closed before execution; workers were not started");
-      const controller = new AbortController();
-      const active: Active = { controller, tasks: new Map(), done: Promise.resolve(), ...(environment ? { environment } : {}) };
+      const gate = new Promise<void>(resolve => { launch = resolve; });
+      active = { controller: new AbortController(), tasks: new Map(), done: Promise.resolve() };
       this.active.set(run.id, active);
-      active.done = this.execute(run, active).finally(async () => { try { await release(); } finally { this.active.delete(run.id); } });
-      void active.done.catch(error => console.error("Workflow cleanup failed:", message(error)));
-      return structuredClone(run);
+      const owned = active;
+      owned.done = gate.then(() => this.prepare(run, owned, settings, Boolean(mayUseAgent || explicitSettings), resume)).finally(async () => { this.clearProgress(run.id); try { await release(); } finally { this.active.delete(run.id); } });
+      void owned.done.catch(error => console.error("Workflow cleanup failed:", message(error)));
+      this.log(run, resume ? "Manual resume requested; preparing execution and validating saved results." : "Start requested; preparing execution before launching workers.");
+      await this.persist(run);
+      const accepted = structuredClone(run);
+      launch!();
+      return accepted;
     } catch (error) {
-      try { if (run.execution === "running" && !this.active.has(run.id)) { run.execution = "stopped"; this.log(run, "Start did not launch workers; progress is retained."); await this.persist(run); } }
-      finally { await release(); }
+      if (active) { active.controller.abort(); launch?.(); await active.done.catch(() => {}); }
+      else await release();
       throw error;
+    }
+  }
+  private finishPreparation(run: WorkflowRun, status: "failed" | "interrupted") {
+    if (!run.preparation || run.preparation.endedAt) return;
+    const endedAt = now();
+    for (const stage of run.preparation.stages) if (stage.status === "running") { stage.status = status; stage.endedAt = endedAt; }
+    run.preparation.endedAt = endedAt;
+  }
+  private preparationGuard(run: WorkflowRun, active: Active) {
+    if (active.controller.signal.aborted) throw new Error("Workflow interrupted while preparing execution.");
+    if (run.leaseId && (this.leases.get(run.leaseId) ?? 0) < Date.now()) { active.controller.abort(); throw new Error("Panel closed while preparing the workspace; workers were not started"); }
+  }
+  private async preparationStage<T>(run: WorkflowRun, active: Active, id: Preparation["stages"][number]["id"], label: string, operation: () => Promise<T>): Promise<T> {
+    this.preparationGuard(run, active);
+    const stage: Preparation["stages"][number] = { id, label, status: "running", startedAt: now() };
+    run.preparation!.stages.push(stage);
+    await this.persistProgress(run);
+    this.preparationGuard(run, active);
+    // Non-cancelable local hashing/copying is still owned until its promise settles.
+    const result = await operation();
+    this.preparationGuard(run, active);
+    stage.status = "completed"; stage.endedAt = now();
+    await this.persistProgress(run);
+    return result;
+  }
+  private async prepare(run: WorkflowRun, active: Active, settings: StoredExecutionSettings, needsEnvironment: boolean, resume: boolean) {
+    try {
+      await this.preparationStage(run, active, "settings", "读取执行设置并核对模型", async () => {
+        const environment = this.adapter.executionEnvironment && needsEnvironment ? await this.executionEnvironment(run.projectPath, AbortSignal.any([this.configAbort.signal, active.controller.signal])) : undefined;
+        if (!run.executionSettings) run.executionSettings = environment ? { ...resolveExecutionSettings(environment, [{ settings, source: settings.model || settings.reasoningEffort ? "workflow-settings" : "codex-config" }]), provenance: "requested" } : {};
+        if (environment) {
+          resolveExecutionSettings(environment, [{ settings: run.executionSettings, source: run.executionSettings.source ?? "workflow-settings" }]);
+          for (const choice of Object.values(run.nodeSettings ?? {})) validateExplicitModelSettings(choice, environment);
+          active.environment = environment;
+        }
+      });
+      await this.preparationStage(run, active, "project", "核对项目基线与已有改动", async () => {
+        let context: string;
+        try {
+          const gitlinks = await listGitlinks(run.projectPath);
+          if (gitlinks.length && run.allowWrite && run.workspaceMode !== "git-worktree") throw new Error("Snapshot writing does not copy Git submodules. Create a new preview with workspaceMode: git-worktree to retain their commit and initialization state.");
+          context = gitlinks.length ? await gitAwareContextDigest(run.projectPath) : await contextDigest(run.projectPath);
+        } catch (error) { if (run.allowWrite) throw error; context = randomBytes(16).toString("hex"); }
+        if (run.contextDigest && run.contextDigest !== context) {
+          if (run.workspace) throw new Error("Project changed since the workspace snapshot. Create a new preview to preserve those changes.");
+          for (const task of run.tasks) task.status = "interrupted";
+          this.log(run, "Project changed; saved task results will not be reused.");
+        }
+        run.contextDigest = context;
+      });
+      if (run.allowWrite) await this.preparationStage(run, active, "workspace", run.workspace ? "检查并复用隔离工作区" : "准备隔离工作区", async () => {
+        if (!run.workspace) { run.workspace = run.workspaceMode === "git-worktree" ? await createGitWorkspace(run.projectPath, this.store.directory(run.id)) : await createWorkspace(run.projectPath, this.store.directory(run.id)); run.workspacePath = run.workspace.root; }
+      });
+      await this.preparationStage(run, active, "validation", "验证工作区与执行范围", async () => {
+        if (run.workspace && !(await stat(run.workspace.root)).isDirectory()) throw new Error("Saved workspace is missing; cannot resume");
+        if (run.workspace?.kind === "git-worktree") {
+          await validateGitWorkspace(run.workspace);
+          if (run.workspaceCheckpoint && await maintenanceFingerprint(run.workspace) !== run.workspaceCheckpoint) throw new Error("Saved Git checkout or artifacts changed; cached steps cannot safely replay. Create a new preview.");
+        }
+      });
+      run.preparation!.endedAt = now(); run.execution = "running";
+      this.log(run, resume ? "Manual resume: replaying script and validating saved results in launch order." : "Execution prepared; dispatching workflow tasks.");
+      await this.persist(run);
+      this.preparationGuard(run, active);
+      await this.execute(run, active);
+    } catch (error) {
+      const interrupted = active.controller.signal.aborted;
+      this.finishPreparation(run, interrupted ? "interrupted" : "failed");
+      run.execution = interrupted ? "stopped" : "failed"; run.error = message(error); run.endedAt = now();
+      this.log(run, run.error, undefined, "error");
+      await this.persist(run);
     }
   }
   private async execute(run: WorkflowRun, active: Active) {
@@ -423,12 +505,13 @@ export class WorkflowEngine {
                 try {
                 if (run.limits.maxTokens > 0 && totalTokens >= run.limits.maxTokens) throw new Error("Workflow token budget exhausted before worker dispatch");
                 task.status = "running"; attempt.status = "running"; attempt.startedAt = now();
+                this.activity(run, task, attempt, { id: `${attempt.id}:dispatch`, kind: "waiting", label: mode === "write" ? "等待执行器开始任务" : "等待代理开始检查", status: "running", startedAt: attempt.startedAt });
                 this.log(run, `Worker started (${mode}).`, task.id);
                 await this.persist(run);
                 if (operationId) {
                   const step = run.maintenance!.steps.find(step => step.id === operationId)!;
                   if (!this.adapter.command) throw new Error("This adapter cannot execute approved operations");
-                  const report = await this.adapter.command({ id: attempt.id, command: step.command, cwd: run.workspacePath!, networkAccess: step.networkAccess ?? false, timeoutMs: Math.min(step.timeoutMs ?? run.limits.timeoutMs, run.limits.timeoutMs), retries: step.retries ?? 0 }, controller.signal, event => { if (event.type === "log") this.log(run, event.message, task.id); });
+                  const report = await this.adapter.command({ id: attempt.id, command: step.command, cwd: run.workspacePath!, networkAccess: step.networkAccess ?? false, timeoutMs: Math.min(step.timeoutMs ?? run.limits.timeoutMs, run.limits.timeoutMs), retries: step.retries ?? 0 }, controller.signal, event => { if (event.type === "log") this.log(run, event.message, task.id); else if (event.type === "activity") this.activity(run, task, attempt, event.activity); });
                   task.output = report;
                   attempt.outcome = "confirmed";
                   if (report.exitCode !== 0) throw new Error(`Operation ${operationId} failed (exit ${report.exitCode}): ${report.stderr.slice(-1000)}`);
@@ -448,6 +531,7 @@ export class WorkflowEngine {
                   if (event.type === "identity") { attempt.threadId = event.threadId; if (event.turnId) attempt.turnId = event.turnId; }
                   else if (event.type === "execution-settings") { task.executionSettings = event.settings; attempt.executionSettings = event.settings; }
                   else if (event.type === "log") this.log(run, event.message, task.id);
+                  else if (event.type === "activity") this.activity(run, task, attempt, event.activity);
                   else if (event.type === "usage") {
                     attempt.usage = { inputTokens: event.inputTokens, outputTokens: event.outputTokens, totalTokens: event.totalTokens };
                     totalTokens += Math.max(0, event.totalTokens - accountedTokens);
@@ -474,6 +558,8 @@ export class WorkflowEngine {
               throw error;
             } finally {
               attempt.endedAt = now(); active.tasks.delete(task.id);
+              for (const activity of attempt.activities ?? []) if (activity.status === "running") { activity.status = attempt.status === "completed" ? "completed" : attempt.status === "interrupted" ? "interrupted" : "failed"; activity.endedAt = attempt.endedAt; }
+              if (task.currentActivity?.status === "running") { task.currentActivity.status = attempt.status === "completed" ? "completed" : attempt.status === "interrupted" ? "interrupted" : "failed"; task.currentActivity.endedAt = attempt.endedAt; }
               active.controller.signal.removeEventListener("abort", abort); scriptSignal?.removeEventListener("abort", abort);
               await this.persist(run);
             }
@@ -512,8 +598,26 @@ export class WorkflowEngine {
         try { run.workspaceCheckpoint = await maintenanceFingerprint(run.workspace); }
         catch (error) { run.execution = run.execution === "completed" ? "failed" : run.execution; run.error = `Could not checkpoint isolated checkout: ${message(error)}`; this.log(run, run.error, undefined, "error"); }
       }
+      run.endedAt = now();
       await this.persist(run);
     }
+  }
+  private activity(run: WorkflowRun, task: Task, attempt: Attempt, value: Activity) {
+    const activities = attempt.activities ??= [];
+    const previous = activities.findIndex(activity => activity.id === value.id);
+    // Only adapter-produced categorical labels enter this timeline. Diagnostic
+    // payloads stay in their separate log channel and are never activity details.
+    const activity: Activity = { id: value.id, kind: value.kind, label: value.label.slice(0, 200), status: value.status, startedAt: value.startedAt, ...(value.endedAt ? { endedAt: value.endedAt } : {}) };
+    if (previous >= 0) activities[previous] = activity;
+    else { if (activities.length >= 200) { const finished = activities.findIndex(item => item.status !== "running"); activities.splice(finished < 0 ? 0 : finished, 1); } activities.push(activity); }
+    if (value.status === "running") {
+      const waiting = activities.find(item => item.id === `${attempt.id}:dispatch` && item.status === "running");
+      if (waiting && waiting.id !== value.id) { waiting.status = "completed"; waiting.endedAt = value.startedAt; }
+      task.currentActivity = { ...activity };
+    } else if (task.currentActivity?.id === value.id) {
+      task.currentActivity = { ...([...activities].reverse().find(item => item.status === "running") ?? activity) };
+    }
+    this.scheduleProgress(run);
   }
   private agentOptions(options: Record<string, unknown>) {
     const allowed = new Set(["label", "phase", "mode", "model", "reasoningEffort", "schema", "isolation"]);
@@ -528,15 +632,19 @@ export class WorkflowEngine {
   }
   async stop(id: string) {
     const run = await this.load(id);
+    this.assertActionAvailable(run);
     const active = this.active.get(id);
     if (!active) {
-      if (["running", "stopping"].includes(run.execution)) {
+      if (["preparing", "running", "stopping"].includes(run.execution)) {
         if (!run.controlId) throw new Error("Workflow owner does not support remote control; update the owner server");
         await this.store.requestControl(id, run.controlId, "stop");
         return this.get(id);
       }
       return structuredClone(run);
     }
+    // Completion can precede final review/checkpoint/lock cleanup. Stopping at
+    // that boundary waits for cleanup without reverting a terminal outcome.
+    if (!["preparing", "running", "stopping"].includes(run.execution)) { await active.done; return structuredClone(run); }
     if (run.execution !== "stopping") {
       run.execution = "stopping";
       for (const task of run.tasks) if (task.status === "running") { task.status = "stopping"; const attempt = task.attempts.at(-1); if (attempt) attempt.status = "stopping"; }
@@ -549,9 +657,10 @@ export class WorkflowEngine {
   }
   async cancelTask(id: string, taskId: string) {
     const run = await this.load(id);
+    this.assertActionAvailable(run);
     const controller = this.active.get(id)?.tasks.get(taskId);
     if (!controller) {
-      if (["running", "stopping"].includes(run.execution) && !this.active.has(id) && run.controlId) {
+      if (["preparing", "running", "stopping"].includes(run.execution) && !this.active.has(id) && run.controlId) {
         await this.store.requestControl(id, run.controlId, "cancel", taskId);
         return this.get(id);
       }
@@ -564,6 +673,7 @@ export class WorkflowEngine {
   }
   async apply(id: string, revision: number) {
     let run = await this.load(id);
+    this.assertActionAvailable(run);
     this.assertRevision(run, revision);
     if (run.execution !== "completed" || !run.workspace || !run.diff || run.application === "applied" || this.active.has(id)) throw new Error("No completed, reviewed changes are available to apply");
     const release = await this.store.acquire(id);
@@ -571,6 +681,7 @@ export class WorkflowEngine {
     let applicationStarted = false;
     try {
       run = await this.store.load(id);
+      this.assertActionAvailable(run);
       this.assertRevision(run, revision);
       if (run.execution !== "completed" || !run.workspace || !run.diff || run.application === "applied") throw new Error("Workflow changed before application");
       releaseProject = await this.store.acquireNamed(`apply_${digest(run.projectPath)}`);
@@ -594,6 +705,7 @@ export class WorkflowEngine {
     return structuredClone(run);
   }
   async wait(id: string) { await this.active.get(id)?.done; return this.get(id); }
+  forgetDeletedRuns(ids: string[]) { for (const id of ids) { if (this.active.has(id)) throw new Error("Cannot forget an active workflow; wait for its workers to exit."); this.clearProgress(id); this.runs.delete(id); } }
   async close() {
     clearInterval(this.watchdog);
     this.configAbort.abort();

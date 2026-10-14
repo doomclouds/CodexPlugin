@@ -10,6 +10,10 @@ import { TemplateStore } from "./templates.ts";
 import { modelSettingsSchema, nodeModelSettingsSchema } from "./execution-settings.ts";
 import { CodexProjectsProvider } from "./projects.ts";
 import type { ProjectsProvider } from "./projects.ts";
+import { DeletionService } from "./deletion.ts";
+import type { DeleteInput } from "./deletion.ts";
+import { readDeletionConfig } from "./deletion-config.ts";
+import { nodeProcess } from "./node-process.ts";
 
 function result(data: Record<string, unknown>): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
@@ -50,11 +54,12 @@ function registerPanelToolWithIcons(server: McpServer, register: () => void) {
   finally { protocol.setRequestHandler = original; }
 }
 
-export function createServer(engine: WorkflowEngine, options: { projects?: ProjectsProvider } = {}) {
-  const serverInfo = { name: "workflows", version: "0.4.2", icons: panelIcons };
+export function createServer(engine: WorkflowEngine, options: { projects?: ProjectsProvider; readDeletionConfig?: (projectPaths: string[]) => Promise<Record<string, unknown>> } = {}) {
+  const serverInfo = { name: "workflows", version: "0.5.0", icons: panelIcons };
   const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server = new McpServer(serverInfo);
   const templates = new TemplateStore(engine.store);
+  const deletion = new DeletionService(engine.store, templates, { readEffectiveConfig: options.readDeletionConfig ?? readDeletionConfig });
   const projects = options.projects ?? new CodexProjectsProvider();
 
   registerPanelToolWithIcons(server, () => registerAppTool(server, "workflow_open_panel", {
@@ -109,6 +114,22 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
 
   const id = z.string().regex(/^wf_[a-f0-9]{24}$/);
   const revision = z.number().int().nonnegative();
+  const sourceDefinition = z.object({ id: z.string().regex(/^(?:(?:saved|builtin):)?[a-z][a-z0-9-]{0,63}$/), revision }).optional();
+  const deletionInput = z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("run"), id, revision }),
+    z.object({ kind: z.literal("definition"), id: z.string().regex(/^(?:saved|builtin):[a-z][a-z0-9-]{0,63}$/), revision, runIds: z.array(id).max(1000).optional() }),
+  ]);
+  const deletionFields = { kind: z.enum(["run", "definition"]), id: z.string().min(1).max(80), revision, runIds: z.array(id).max(1000).optional() };
+  const parsedDeletion = (value: unknown): DeleteInput => {
+    const target = deletionInput.parse(value);
+    return target.kind === "run" ? target : { kind: target.kind, id: target.id, revision: target.revision, ...(target.runIds ? { runIds: target.runIds } : {}) };
+  };
+  const verifiedDefinition = async (source: { id: string; revision: number } | undefined, script: string) => {
+    if (!source) return undefined;
+    const template = source.id.startsWith("saved:") ? await templates.get(source.id) : await getTemplate(source.id.replace(/^builtin:/, ""));
+    if (!template || ("revision" in template ? template.revision : 0) !== source.revision || template.script !== script) throw new Error("Workflow definition changed or does not match the planned script; reload it before creating a run.");
+    return { id: template.id, revision: source.revision };
+  };
   const nodeSettings = z.record(z.string().min(1).max(256), nodeModelSettingsSchema).optional();
   const limits = z.object({ maxReadWorkers: z.number().int().min(1).max(16).optional(), maxCalls: z.number().int().min(1).max(1000).optional(), timeoutMs: z.number().int().min(100).max(86400000).optional(), maxTokens: z.number().int().nonnegative().optional() }).optional();
   const maintenance = z.object({
@@ -155,9 +176,9 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
   }, async input => safe(async () => ({ template: await templates.save({ ...scopedInput(input), script: input.script, ...(input.args !== undefined ? { args: input.args } : {}), ...(input.allowWrite !== undefined ? { allowWrite: input.allowWrite } : {}), ...(input.revision !== undefined ? { revision: input.revision } : {}), ...(input.limits ? { limits: Object.fromEntries(Object.entries(input.limits).filter(([, value]) => value !== undefined)) } : {}) }) })));
   server.registerTool("workflow_preview", {
     description: "Validate and save a dynamic JavaScript workflow plan. Does not execute. projectPath must be explicit; networkAccess defaults false and is independent of allowWrite: read-only workers may use authorized network access without file writes. workspaceMode defaults snapshot. Declare any optional maintenance argv steps and activation before starting; maintenance operations require an isolated git-worktree and allowWrite; steps default non-idempotent, and unknown started-command outcomes cannot be replayed unless explicitly declared idempotent; allowedMcpServers is an explicit configured-server allowlist, default none, and cannot include Workflows. allowedMcpTools maps server names to granted configured tool names; grants do not bypass tool approvals.",
-    inputSchema: { projectPath: z.string().min(1), script: z.string().min(1), args: z.unknown().optional(), allowWrite: z.boolean().optional(), limits, ...scope },
+    inputSchema: { projectPath: z.string().min(1), script: z.string().min(1), args: z.unknown().optional(), allowWrite: z.boolean().optional(), sourceDefinition, limits, ...scope },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  }, async input => safe(async () => ({ run: await engine.preview({ ...scopedInput({ ...input, networkAccess: input.networkAccess ?? false, allowedMcpServers: input.allowedMcpServers ?? [], allowedMcpTools: input.allowedMcpTools ?? {}, workspaceMode: input.workspaceMode ?? "snapshot" }), projectPath: input.projectPath, script: input.script, ...(input.args !== undefined ? { args: input.args } : {}), ...(input.allowWrite !== undefined ? { allowWrite: input.allowWrite } : {}), ...(input.limits ? { limits: Object.fromEntries(Object.entries(input.limits).filter(([, value]) => value !== undefined)) } : {}) }) })));
+  }, async input => safe(async () => { const source = await verifiedDefinition(input.sourceDefinition, input.script); return { run: await engine.preview({ ...scopedInput({ ...input, networkAccess: input.networkAccess ?? false, allowedMcpServers: input.allowedMcpServers ?? [], allowedMcpTools: input.allowedMcpTools ?? {}, workspaceMode: input.workspaceMode ?? "snapshot" }), projectPath: input.projectPath, script: input.script, ...(source ? { sourceDefinition: source } : {}), ...(input.args !== undefined ? { args: input.args } : {}), ...(input.allowWrite !== undefined ? { allowWrite: input.allowWrite } : {}), ...(input.limits ? { limits: Object.fromEntries(Object.entries(input.limits).filter(([, value]) => value !== undefined)) } : {}) }) }; }));
   server.registerTool("workflow_update", {
     description: "Save an updated script and input for a stopped or draft workflow. Requires a fresh preview revision and another user start.",
     inputSchema: { id, revision, script: z.string().min(1), args: z.unknown(), allowWrite: z.boolean().optional(), ...scope },
@@ -165,6 +186,21 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
   }, async input => safe(async () => ({ run: await engine.update({ ...scopedInput(input), id: input.id, revision: input.revision, script: input.script, args: input.args, ...(input.allowWrite !== undefined ? { allowWrite: input.allowWrite } : {}) }) })));
   server.registerTool("workflow_list_runs", { description: "List saved workflow runs without starting or resuming them.", inputSchema: { projectPath: z.string().optional() }, annotations }, async input => safe(async () => ({ runs: await engine.list(input.projectPath) })));
   server.registerTool("workflow_get_run", { description: "Read a workflow plan, real tasks, reports, final diff, and logs.", inputSchema: { id }, annotations }, async input => safe(async () => ({ run: await engine.get(input.id) })));
+  server.registerTool("workflow_get_node_process", {
+    title: "查看节点过程",
+    description: "Read concise node or phase activities and errors. Brief view excludes task prompts and raw diagnostics; developer detail explicitly adds bounded node logs. Does not execute a workflow.",
+    inputSchema: { id, taskId: z.string().min(1).max(128).optional(), phase: z.string().min(1).max(256).optional(), scope: z.enum(["workflow", "unphased"]).optional(), detail: z.enum(["brief", "developer"]).optional() }, annotations, _meta: { ui: { visibility: ["model", "app"] } },
+  }, async input => safe(async () => ({ process: nodeProcess(await engine.get(input.id), { ...(input.taskId ? { taskId: input.taskId } : {}), ...(input.phase ? { phase: input.phase } : {}), ...(input.scope ? { scope: input.scope } : {}), ...(input.detail ? { detail: input.detail } : {}) }) })));
+  server.registerTool("workflow_preview_deletion", {
+    title: "预览工作流彻底清理",
+    description: "Inspect complete owned-data deletion of one run, or a saved definition and its reliably associated runs. Explicit runIds may select legacy records; names never establish association. Returns exact scope, bytes and blockers, without deleting or stopping anything.",
+    inputSchema: deletionFields, annotations, _meta: { ui: { visibility: ["model", "app"] } },
+  }, async input => safe(async () => ({ preview: await deletion.preview(parsedDeletion(input)) })));
+  server.registerTool("workflow_delete", {
+    title: "彻底清理工作流",
+    description: "Delete the exact confirmed owned-data scope using its fresh preview fingerprint. Requires user authorization, stopped workers and released references. Preserves delivered project changes. Cleanup failure reports remaining objects; it never hides leftover data as success.",
+    inputSchema: { ...deletionFields, fingerprint: z.string().regex(/^[a-f0-9]{64}$/) }, annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }, _meta: { ui: { visibility: ["model", "app"] } },
+  }, async input => safe(async () => { const value = await deletion.execute({ ...parsedDeletion(input), fingerprint: input.fingerprint }); if (value.deletedRunIds.length) engine.forgetDeletedRuns(value.deletedRunIds); return { deletion: value }; }));
   server.registerTool("workflow_stop", { description: "Stop dispatch, interrupt all active workers, wait for their exit, and save progress.", inputSchema: { id }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async input => safe(async () => ({ run: await engine.stop(input.id) })));
   const appOnly = { ui: { visibility: ["app"] } };
   server.registerTool("workflow_panel_lease", { description: "Maintain the task panel lifecycle lease; losing the lease stops its active workflows.", inputSchema: { leaseId: z.string().optional(), release: z.boolean().optional() }, _meta: appOnly, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async input => safe(() => engine.lease({ ...(input.leaseId ? { leaseId: input.leaseId } : {}), ...(input.release !== undefined ? { release: input.release } : {}) })));

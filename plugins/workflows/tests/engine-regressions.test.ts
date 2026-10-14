@@ -126,14 +126,16 @@ test("restarting a draft after snapshot preparation failed does not retain delet
   const run = await engine.preview({ projectPath: project, allowWrite: true, script: script('return "No worker edits";') });
   // Fail deterministically after the first source file is copied, rather than relying on fs.watch timing.
   await writeFile(path.join(project, "z-too-large.bin"), Buffer.alloc(17 * 1024 * 1024));
-  await assert.rejects(engine.start({ id: run.id, revision: run.revision }), /exceeds 16 MiB/);
+  assert.equal((await engine.start({ id: run.id, revision: run.revision })).execution, "preparing");
+  const failed = await engine.wait(run.id);
+  assert.match(failed.error ?? "", /exceeds 16 MiB/);
   const draft = await engine.get(run.id);
-  assert.equal(draft.execution, "draft");
+  assert.equal(draft.execution, "failed");
   assert.equal(draft.workspace, undefined);
   await rm(path.join(project, "z-too-large.bin"));
   await rm(path.join(project, "source.txt"));
   await execute("git", ["add", "--all"], { cwd: project });
-  await engine.start({ id: draft.id, revision: draft.revision });
+  await engine.start({ id: draft.id, revision: draft.revision }, true);
   const complete = await engine.wait(run.id);
   assert.equal(complete.execution, "completed", complete.error);
   assert.equal(adapter.calls, 0);

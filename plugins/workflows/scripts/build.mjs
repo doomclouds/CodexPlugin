@@ -40,7 +40,9 @@ const uiBuild = await build({
   write: false,
   metafile: true,
 });
-const panelFragment = (await readFile(path.join(pluginRoot, "prototypes", "workflow-panel.html"), "utf8")).replaceAll("\r\n", "\n");
+await writeFile(path.join(pluginRoot, "runtime", "launcher.mjs"), await readFile(path.join(pluginRoot, "src", "launcher.mjs")));
+const canvasTexture = await readFile(path.join(pluginRoot, "assets", "workflow-canvas.png"));
+const panelFragment = (await readFile(path.join(pluginRoot, "prototypes", "workflow-panel.html"), "utf8")).replaceAll("\r\n", "\n").replaceAll("../assets/workflow-canvas.png", `data:image/png;base64,${canvasTexture.toString("base64")}`);
 const iconSource = (await readFile(path.join(pluginRoot, "prototypes", "icons.css"), "utf8")).replaceAll("\r\n", "\n");
 const iconPaths = [...new Set([...iconSource.matchAll(/\.\.\/assets\/icons\/([a-z0-9-]+\.svg)/g)].map(match => match[1]))];
 let iconStyles = iconSource;

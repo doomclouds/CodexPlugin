@@ -5,6 +5,8 @@ import { copyFile, lstat, mkdir, readFile, readlink, realpath, rename, rm, symli
 import path from "node:path";
 import type { Diff, FileRecord, Workspace } from "./types.ts";
 import { listGitlinks } from "./submodules.ts";
+import { constants } from "node:fs";
+import { trackProjectTemporary } from "./project-temps.ts";
 
 const exec = promisify(execFile);
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
@@ -46,16 +48,23 @@ async function copyEntry(source: string, destination: string, name: string, entr
   if (entry.kind === "link") await symlink(await readlink(resolveFile(source, name)), target);
   else { await copyFile(resolveFile(source, name), target); await chmod(target, entry.mode); }
 }
-async function replaceEntry(source: string, destination: string, name: string, entry: FileRecord) {
+async function replaceEntry(source: string, destination: string, name: string, entry: FileRecord, transaction: string) {
   await safeParents(source, name, false);
   await safeParents(destination, name);
   const target = resolveFile(destination, name);
   const temporary = `${target}.wf-${randomBytes(8).toString("hex")}.tmp`;
+  const descriptor = { path: path.relative(destination, temporary), target: name, expected: entry };
+  await trackProjectTemporary(transaction, destination, descriptor);
+  let identity: { dev: number; ino: number } | undefined;
   try {
     if (entry.kind === "link") await symlink(await readlink(resolveFile(source, name)), temporary);
-    else { await copyFile(resolveFile(source, name), temporary); await chmod(temporary, entry.mode); }
+    else { await copyFile(resolveFile(source, name), temporary, constants.COPYFILE_EXCL); await chmod(temporary, entry.mode); }
+    const stat = await lstat(temporary); identity = { dev: stat.dev, ino: stat.ino };
+    await trackProjectTemporary(transaction, destination, { ...descriptor, ...identity });
     await rename(temporary, target);
-  } finally { await rm(temporary, { force: true }); }
+  } finally {
+    if (identity) { try { const stat = await lstat(temporary); if (stat.dev !== identity.dev || stat.ino !== identity.ino) throw new Error("Project temporary ownership changed during application"); await rm(temporary); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; } }
+  }
 }
 export async function projectFiles(project: string) {
   const { stdout } = await exec("git", ["ls-files", "-co", "--exclude-standard", "-z"], { cwd: project, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
@@ -148,7 +157,7 @@ export async function applyWorkspace(workspace: Workspace, reviewed: Diff) {
       if (equal(before, after)) continue;
       if (!equal(workspace.baseline[file.path], before)) throw new Error(`Project changed during application: ${file.path}`);
       changed.push(file.path);
-      if (after) await replaceEntry(staged, workspace.original, file.path, after);
+      if (after) await replaceEntry(staged, workspace.original, file.path, after, transaction);
       else await rm(resolveFile(workspace.original, file.path));
     }
     await writeFile(path.join(transaction, "journal.json"), JSON.stringify({ files: current.files, state: "completed" }), { mode: 0o600 });
@@ -159,7 +168,7 @@ export async function applyWorkspace(workspace: Workspace, reviewed: Diff) {
       const before = workspace.baseline[name];
       // Never roll back a file changed by someone else after our write.
       if (!equal(await record(workspace.original, name), targets.get(name))) continue;
-      if (before) await replaceEntry(base, workspace.original, name, before);
+      if (before) await replaceEntry(base, workspace.original, name, before, transaction);
       else await rm(resolveFile(workspace.original, name), { force: true });
     }
     throw error;

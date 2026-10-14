@@ -65,6 +65,38 @@ test("execution settings discovery reads real protocol config and catalogue with
   } finally { await context.cleanup(); }
 });
 
+test("catalogue reuse keeps fresh config reads and separate worker processes without repeated model/list", async () => {
+  const context = await setup("complete");
+  try {
+    await context.adapter.executionEnvironment(context.request.cwd, context.controller.signal);
+    for (let index = 0; index < 2; index++) await context.adapter.run({ ...context.request, id: `cached-${index}`, model: "explicit-test-model", reasoningEffort: "high" }, context.controller.signal, event => context.events.push(event));
+    const transcript = await context.transcript();
+    assert.equal(transcript.filter(message => message.method === "model/list").length, 1);
+    assert.equal(transcript.filter(message => message.method === "config/read").length, 3);
+    assert.equal(transcript.filter(message => message.method === "initialize").length, 3);
+    assert.equal(transcript.filter(message => message.method === "thread/start").length, 2);
+    const starts = context.events.filter(event => event.type === "process" && event.state === "started");
+    assert.equal(new Set(starts.map(event => event.type === "process" ? event.pid : undefined)).size, 2);
+    const other = path.join(context.request.cwd, "other"); await mkdir(other);
+    await context.adapter.executionEnvironment(other, context.controller.signal);
+    assert.equal((await context.transcript()).filter(message => message.method === "model/list").length, 2);
+  } finally { await context.cleanup(); }
+});
+
+test("native item notifications produce safe live actions followed by terminal activity", async () => {
+  const context = await setup("native-items");
+  try {
+    await context.adapter.run(context.request, context.controller.signal, event => context.events.push(event));
+    const activities = context.events.filter(event => event.type === "activity").map(event => event.type === "activity" ? event.activity : undefined)!;
+    assert.ok(activities.some(activity => activity?.kind === "initializing" && activity.status === "running"));
+    assert.ok(activities.some(activity => activity?.id === "native-command" && activity.status === "running"));
+    assert.ok(activities.some(activity => activity?.id === "native-command" && activity.status === "completed" && activity.endedAt));
+    assert.ok(activities.some(activity => activity?.kind === "files"));
+    assert.ok(activities.some(activity => activity?.kind === "search"));
+    assert.equal(JSON.stringify(activities).includes("working commentary"), false);
+  } finally { await context.cleanup(); }
+});
+
 test("model and effort overrides are catalogue-validated and observed configured settings are reported", async () => {
   const context = await setup("complete");
   try {

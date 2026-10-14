@@ -18,7 +18,8 @@ test("draft graph shows declared phases without fabricating future worker nodes"
   assert.equal(graph.taskCount, 0);
   const html = renderWorkflowGraph(run());
   assert.equal(html.includes("data-task="), false);
-  assert.match(html, /任务将在实际派发后显示/);
+  assert.equal((html.match(/>待派发</g) ?? []).length, 2);
+  assert.doesNotMatch(html, /等待上一步|任务将在实际派发后显示/);
   assert.match(html, /连线表示阶段展示顺序/);
   assert.match(renderWorkflowGraph(), /选择工作流并保存预览/);
 });
@@ -101,11 +102,12 @@ test("settings affordances use declared phase or stable task index keys without 
   assert.match(html, /data-node-settings="phase:审查"/);
   assert.match(html, /data-node-settings="phase:汇总"/);
   assert.equal(html.includes('data-node-settings="phase:动态阶段"'), false);
-  assert.match(html, /data-node-settings="task:0"/);
+  assert.equal(html.includes('data-node-settings="task:0"'), false);
   assert.match(html, /data-node-settings="task:1"/);
   assert.match(html, /data-task="task-1"/);
   assert.match(html, /<\/button><button type="button" class="wf-node-settings-icon"/);
-  assert.equal(/<button\b[^>]*>[\s\S]*?<button\b/.test(html.slice(html.indexOf('data-task="task-1"'), html.indexOf('data-node-settings="task:0"'))), false);
+  const primary = html.slice(html.indexOf('data-task="task-1"'), html.indexOf('</button>', html.indexOf('data-task="task-1"')));
+  assert.equal(primary.includes('data-node-settings'), false);
   assert.match(html, /data-icon="settings"/);
 });
 
@@ -118,7 +120,7 @@ test("node settings keys escape phase names and cannot change running or stoppin
   for (const execution of ["running", "stopping"] as const) {
     const active = renderWorkflowGraph({ ...current, execution });
     const buttons = active.match(/<button[^>]*data-node-settings=[^>]*>/g) ?? [];
-    assert.equal(buttons.length, 2);
+    assert.equal(buttons.length, 1);
     assert.ok(buttons.every(button => button.includes(" disabled")));
     assert.match(active, /data-task="task-1"/);
   }
@@ -174,9 +176,36 @@ test("fixed command tasks expose their status and details without advertising un
   const html = renderWorkflowGraph(current);
   const command = html.slice(html.indexOf('data-task="task-1"'), html.indexOf('</button>', html.indexOf('data-task="task-1"')));
   assert.match(command, /固定命令/);
-  assert.match(command, /data-icon="settings"/);
+  assert.match(command, /data-icon="circle-check"/);
   assert.equal(command.includes("wf-graph-node-model"), false);
   assert.equal(command.includes("workflow-model"), false);
   assert.equal(html.includes('data-node-settings="task:0"'), false);
   assert.match(command, /data-status="completed"/);
+});
+
+
+test("single-task phases keep one status row and action without repeating mode or task settings in the main card", () => {
+  const html = renderWorkflowGraph(run({ execution: "running", tasks: [task("task-1", { label: "正在构建", status: "running", attempts: [{ id: "one", status: "running", startedAt: at(0) }] })] }));
+  assert.equal((html.match(/data-node-settings="phase:审查"/g) ?? []).length, 1);
+  assert.doesNotMatch(html, /wf-graph-node-detail|本阶段任务已完成/);
+  assert.match(html, /wf-node-view-process/);
+  const card = html.slice(html.indexOf('data-task="task-1"'), html.indexOf('</button>', html.indexOf('data-task="task-1"')));
+  assert.match(card, /data-compact="true"/);
+  assert.doesNotMatch(card, /wf-graph-node-status/);
+});
+
+test("multi-task phases fold actual remaining tasks without duplicating task identities or losing concurrency facts", () => {
+  const tasks = [task("task-1", { status: "completed", attempts: [{ id: "a", status: "completed", startedAt: at(0), endedAt: at(10) }] }), task("task-2", { status: "running", attempts: [{ id: "b", status: "running", startedAt: at(5) }] }), task("task-3")];
+  const html = renderWorkflowGraph(run({ execution: "running", tasks }));
+  assert.match(html, /data-graph-detail="审查"/);
+  assert.match(html, /3 个实际任务/);
+  for (const task of tasks) assert.equal((html.match(new RegExp(`data-task="${task.id}"`, "g")) ?? []).length, 1);
+  assert.match(html, /并行任务组 · 2 个任务/);
+});
+
+test("disconnected graphs label cached execution as a previous record rather than claiming current live progress", () => {
+  const html = renderWorkflowGraph({ ...run({ execution: "running", tasks: [task("task-1", { status: "running" })] }), stale: true });
+  assert.match(html, /上次记录 · 运行中/);
+  assert.match(html, /连接恢复后核对实际进度/);
+  assert.match(html, /data-status="running"/);
 });

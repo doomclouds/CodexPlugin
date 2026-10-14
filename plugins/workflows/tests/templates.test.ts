@@ -37,13 +37,13 @@ test("saved definitions require the current revision before overwriting", async 
   const { templates } = await fixture(t);
   const initial = await templates.save({ script: script("reusable"), args: [null, "initial"], allowWrite: true });
   assert.equal(initial.id, "saved:reusable");
-  assert.equal(initial.revision, 1);
+  assert.ok(Number.isSafeInteger(initial.revision) && initial.revision > 0);
   await assert.rejects(templates.save({ script: script("reusable", "return 2;") }), /already exists or changed/);
   await assert.rejects(templates.save({ script: script("reusable", "return 2;"), revision: 0 }), /already exists or changed/);
   assert.deepEqual(await templates.get(initial.id), initial);
 
   const updated = await templates.save({ script: script("reusable", "return args;", "Updated saved definition"), args: { version: 2 }, allowWrite: false, revision: initial.revision, limits: { maxReadWorkers: 2 } });
-  assert.equal(updated.revision, 2);
+  assert.equal(updated.revision, initial.revision + 1);
   assert.deepEqual(updated.args, { version: 2 });
   assert.equal(updated.allowWrite, false);
   assert.deepEqual(updated.limits, { maxReadWorkers: 2 });
@@ -79,7 +79,7 @@ test("concurrent saved-definition updates cannot both overwrite one revision", a
   assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
   assert.equal(results.filter(result => result.status === "rejected").length, 1);
   const retained = await templates.get(initial.id);
-  assert.equal(retained?.revision, 2);
+  assert.equal(retained?.revision, initial.revision + 1);
   assert.ok([1, 2].includes((retained?.args as { value: number }).value));
 });
 

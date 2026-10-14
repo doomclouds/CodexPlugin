@@ -20,7 +20,7 @@ async function git(cwd: string, ...args: string[]) {
   return stdout.trim();
 }
 async function fixture(t: TestContext) {
-  const root = await mkdtemp(path.join(tmpdir(), "workflow-maintenance-test-"));
+  const root = await realpath(await mkdtemp(path.join(await realpath(tmpdir()), "workflow-maintenance-test-")));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   await preparePrivateFixtureDirectory(root);
   const project = path.join(root, "project"), remote = path.join(root, "origin.git"), data = path.join(root, "run");

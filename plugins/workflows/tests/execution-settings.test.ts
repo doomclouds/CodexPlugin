@@ -165,7 +165,10 @@ test("known invalid node selections fail before any declared operation or worksp
   const source = 'export const meta={name:"preflight-node",description:"Before side effects",phases:[{title:"Review"}]}; await operation("change"); return await agent("inspect",{phase:"Review"});';
   for (const settings of [{ model: "invented", reasoningEffort: "high" }, { model: "model-b", reasoningEffort: "low" }]) {
     const draft = await engine.preview({ projectPath, script: source, allowWrite: true, workspaceMode: "git-worktree", maintenance: { steps: [{ id: "change", command: ["fixture-change"] }] }, nodeSettings: { "phase:Review": settings } });
-    await assert.rejects(engine.start({ id: draft.id, revision: draft.revision }), /unavailable|unsupported/);
+    await engine.start({ id: draft.id, revision: draft.revision });
+    const failed = await engine.wait(draft.id);
+    assert.equal(failed.execution, "failed");
+    assert.match(failed.error ?? "", /unavailable|unsupported/);
     assert.equal((await engine.get(draft.id)).workspace, undefined);
   }
   assert.equal(commands, 0);

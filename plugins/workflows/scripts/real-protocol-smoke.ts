@@ -29,7 +29,7 @@ async function finish(id: string) {
   const deadline = Date.now() + 300000;
   while (Date.now() < deadline) {
     const { run } = await call("workflow_get_run", { id });
-    if (!["running", "stopping"].includes(run.execution)) return run;
+    if (!["preparing", "running", "stopping"].includes(run.execution)) return run;
     await new Promise(resolve => setTimeout(resolve, 500));
   }
   throw new Error("Real workflow timed out");

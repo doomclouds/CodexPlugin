@@ -39,6 +39,7 @@ try {
     "workflow_get_capabilities", "workflow_get_template", "workflow_list_templates", "workflow_open_panel",
     "workflow_get_execution_settings", "workflow_update_execution_settings",
     "workflow_get_projects",
+    "workflow_get_node_process", "workflow_preview_deletion", "workflow_delete",
     "workflow_save_template", "workflow_preview", "workflow_update", "workflow_list_runs", "workflow_get_run", "workflow_stop", "workflow_panel_lease", "workflow_start", "workflow_resume", "workflow_cancel_task", "workflow_apply",
   ].sort());
   const panelTool = tools.find(tool => tool.name === "workflow_open_panel");
@@ -95,7 +96,7 @@ try {
   for (let index = 0; index < 100; index++) {
     const current = await client.callTool({ name: "workflow_get_run", arguments: { id: runId } });
     finished = current.structuredContent.run;
-    if (finished.execution !== "running") break;
+    if (!["preparing", "running", "stopping"].includes(finished.execution)) break;
     await new Promise(resolve => setTimeout(resolve, 20));
   }
   assert.equal(finished.execution, "completed", finished.error);

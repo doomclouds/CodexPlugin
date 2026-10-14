@@ -2,12 +2,26 @@ import type { WorkflowMeta } from "./script.ts";
 import type { EffectiveExecutionSettings, NodeSettings } from "./execution-settings.ts";
 
 export type TaskStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stopping";
+export interface Activity {
+  id: string;
+  kind: "initializing" | "command" | "files" | "search" | "mcp" | "message" | "waiting";
+  label: string;
+  status: "running" | "completed" | "failed" | "interrupted";
+  startedAt: string; endedAt?: string; detail?: string;
+}
+export interface Preparation {
+  startedAt: string; endedAt?: string;
+  stages: Array<{ id: "settings" | "project" | "workspace" | "validation"; label: string;
+    status: "running" | "completed" | "failed" | "interrupted"; startedAt: string; endedAt?: string }>;
+}
+export interface DefinitionSource { id: string; revision: number }
 export interface Attempt {
   id: string; status: TaskStatus; startedAt?: string; endedAt?: string;
   threadId?: string; turnId?: string; output?: unknown; error?: string;
   toolsUsed?: string[];
   executionSettings?: EffectiveExecutionSettings;
   outcome?: "confirmed" | "unknown";
+  activities?: Activity[];
   usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
 }
 export interface Task {
@@ -16,6 +30,7 @@ export interface Task {
   status: TaskStatus; cached: boolean; attempts: Attempt[]; output?: unknown; error?: string;
   executionSettings?: EffectiveExecutionSettings;
   configurationTarget?: string;
+  currentActivity?: Activity;
 }
 export interface Limits { maxReadWorkers: number; maxCalls: number; timeoutMs: number; maxTokens: number }
 export interface FileRecord { hash: string; mode: number; kind: "file" | "link" }
@@ -47,7 +62,7 @@ export interface WorkflowRun {
   id: string; revision: number; createdAt: string; updatedAt: string;
   meta: WorkflowMeta;
   script: string; args: unknown; projectPath: string; allowWrite: boolean; limits: Limits;
-  execution: "draft" | "running" | "stopping" | "stopped" | "completed" | "failed";
+  execution: "draft" | "preparing" | "running" | "stopping" | "stopped" | "completed" | "failed";
   review: "unavailable" | "pending" | "ready";
   application: "none" | "applying" | "applied" | "partial" | "conflict" | "failed";
   tasks: Task[]; logs: Array<{ at: string; level: "info" | "error"; message: string; taskId?: string }>;
@@ -59,4 +74,9 @@ export interface WorkflowRun {
   allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>;
   nodeSettings?: NodeSettings;
   executionSettings?: Partial<EffectiveExecutionSettings>;
+  preparation?: Preparation; startedAt?: string; endedAt?: string;
+  progressSequence?: number;
+  sourceDefinition?: DefinitionSource;
+  deletionPending?: boolean;
+  deletionTarget?: { kind: "run" | "definition"; id: string; revision: number; runIds?: string[]; includeAssociatedRuns?: true };
 }

@@ -132,7 +132,7 @@ test("oversized frame is rejected before payload allocation and releases its own
   await waitFor(() => fixture.closedConnections() === 1);
 });
 
-test("cancellation and timeout wait for owned socket cleanup without querying more tools", async t => {
+test("cancellation never retries and timeout retries at most once inside the existing bound", async t => {
   const fixture = await pipeFixture(t, () => {});
   const controller = new AbortController();
   const pending = new CodexProjectsProvider({ pipePath: fixture.pipePath }).getProjects({ meta: { threadId: "current-thread" }, signal: controller.signal });
@@ -145,8 +145,9 @@ test("cancellation and timeout wait for owned socket cleanup without querying mo
   const timedOut = await new CodexProjectsProvider({ pipePath: fixture.pipePath, timeoutMs: 50 }).getProjects(context());
   assert.equal(timedOut.available, false);
   if (!timedOut.available) assert.match(timedOut.reason, /timed out/);
-  await waitFor(() => fixture.closedConnections() === 2);
-  assert.equal(fixture.requests.filter(request => request.method === "tools/call").length, 2);
+  await waitFor(() => fixture.closedConnections() === 3);
+  assert.equal(fixture.requests.filter(request => request.method === "tools/call").length, 3);
+  assert.ok(fixture.requests.filter(request => request.method === "tools/call").every(request => request.params?.tool === "list_projects"));
 });
 
 test("invalid schema and wrong response identity return explicit unavailable status", async t => {
@@ -154,7 +155,66 @@ test("invalid schema and wrong response identity return explicit unavailable sta
   const result = await new CodexProjectsProvider({ pipePath: fixture.pipePath }).getProjects(context());
   assert.equal(result.available, false);
   if (!result.available) assert.match(result.reason, /did not match/);
+  assert.equal(fixture.connections(), 1, "Protocol identity failures must not be retried");
   assert.throws(() => mapProjects({ schemaVersion: 2, projects: [{ projectId: "bad" }] }, roster, "current-thread"));
+});
+
+test("a complete frame followed immediately by EOF remains a successful response", async t => {
+  let root = "";
+  const fixture = await pipeFixture(t, (request, socket) => {
+    if (request.method === "tools/call") socket.end(response(request, request.params!.tool === "list_projects" ? inventory(root) : roster));
+  });
+  root = fixture.root;
+  const result = await new CodexProjectsProvider({ pipePath: fixture.pipePath }).getProjects(context());
+  assert.equal(result.available, true);
+  if (result.available) assert.equal(result.currentProjectId, "project-a");
+  assert.equal(fixture.requests.filter(request => request.method === "tools/call").length, 2);
+  await waitFor(() => fixture.closedConnections() === 2);
+});
+
+test("an interrupted frame is retried once with fresh call identity and real ownership retained", async t => {
+  let root = "", projectCalls = 0;
+  const fixture = await pipeFixture(t, (request, socket) => {
+    if (request.method !== "tools/call") return;
+    if (request.params!.tool === "list_projects" && ++projectCalls === 1) {
+      const bytes = response(request, inventory(root)); socket.end(bytes.subarray(0, 7)); return;
+    }
+    socket.end(response(request, request.params!.tool === "list_projects" ? inventory(root) : roster));
+  });
+  root = fixture.root;
+  const result = await new CodexProjectsProvider({ pipePath: fixture.pipePath, timeoutMs: 1000 }).getProjects(context());
+  assert.equal(result.available, true);
+  if (result.available) assert.equal(result.currentProjectId, "project-a");
+  assert.deepEqual(fixture.requests.filter(request => request.method === "tools/call").map(request => request.params!.tool), ["list_projects", "list_projects", "list_threads"]);
+  assert.equal(new Set(fixture.requests.filter(request => request.method === "tools/call").map(request => request.params!.callId)).size, 3);
+  assert.ok(fixture.requests.every(request => request.params?.threadId === "current-thread"));
+  await waitFor(() => fixture.closedConnections() === 3);
+});
+
+test("repeated EOF stops after one retry without querying threads or substituting a project", async t => {
+  const fixture = await pipeFixture(t, (_request, socket) => socket.end());
+  const result = await new CodexProjectsProvider({ pipePath: fixture.pipePath, timeoutMs: 1000 }).getProjects(context());
+  assert.equal(result.available, false);
+  if (!result.available) assert.match(result.reason, /read-only retry also failed/);
+  assert.equal(fixture.connections(), 2);
+  assert.ok(fixture.requests.every(request => request.params?.tool === "list_projects"));
+  await waitFor(() => fixture.closedConnections() === 2);
+});
+
+test("a temporary timeout can recover with a new bounded read-only request", async t => {
+  let root = "", projects = 0;
+  const fixture = await pipeFixture(t, (request, socket) => {
+    if (request.method !== "tools/call") return;
+    if (request.params!.tool === "list_projects" && ++projects === 1) return;
+    socket.end(response(request, request.params!.tool === "list_projects" ? inventory(root) : roster));
+  });
+  root = fixture.root;
+  const startedAt = Date.now();
+  const result = await new CodexProjectsProvider({ pipePath: fixture.pipePath, timeoutMs: 200 }).getProjects(context());
+  assert.equal(result.available, true);
+  assert.equal(projects, 2);
+  assert.ok(fixture.requests.some(request => request.method === "tools/cancel"));
+  assert.ok(Date.now() - startedAt < 350, "Retry must not repeat the entire timeout budget");
 });
 
 test("native tool failure retains its real reason and never invents a project list", async t => {

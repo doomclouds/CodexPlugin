@@ -14,7 +14,7 @@ const projectIds = [
 
 function catalogue(currentProjectId?: string, revision = "initial"): ProjectsResponse {
   return {
-    available: true,
+    available: true, contextSource: currentProjectId ? "thread" : "global-or-unassigned",
     projects: projectIds.map((projectId, index) => ({
       projectId, label: `Repository ${index + 1}`, hostId: "local",
       path: path.join(tmpdir(), "workflows-panel-project-fixture", revision, `repository-${index + 1}`),
@@ -86,8 +86,8 @@ test("a global entry keeps four real catalogue choices without choosing a projec
   assert.equal(calls.some(call => ["workflow_preview", "workflow_start", "workflow_resume"].includes(call.name)), false);
 });
 
-test("changing projects retains the selected reusable definition and queries the new scope", async t => {
-  const projects = catalogue(projectIds[0]);
+test("a global new run can reuse a definition in a separately selected project", async t => {
+  const projects = catalogue();
   const { panel, calls } = fixture({ structuredContent: projects });
   t.after(() => panel.teardown());
   await panel.connected();
@@ -120,8 +120,8 @@ test("running and stopping runs refuse project changes without querying another 
   }
 });
 
-test("a slow poll from another project cannot block the new query or overwrite its selected run", async t => {
-  const projects = catalogue(projectIds[0]);
+test("a global definition selection allows a new project while a prior history poll is pending", async t => {
+  const projects = catalogue();
   const oldPath = projects.projects[0]!.path, newPath = projects.projects[1]!.path;
   const { panel, calls, runs, intercept } = fixture({ structuredContent: projects });
   t.after(() => panel.teardown());
@@ -130,6 +130,8 @@ test("a slow poll from another project cannot block the new query or overwrite i
   runs.set(oldPath, [oldRun]);
   runs.set(newPath, [newRun]);
   await panel.connected();
+  await panel.selectProject(projectIds[0]!);
+  panel.selectTemplate(definition.id);
   let reply!: (response: ToolResponse) => void;
   let requested!: () => void;
   const started = new Promise<void>(resolve => { requested = resolve; });
@@ -174,15 +176,15 @@ test("unavailable and failed discovery can recover the current project without i
 });
 
 test("refreshing host projects preserves a user's selection and uses its fresh root path", async t => {
-  const { panel, setProjects, calls } = fixture({ structuredContent: catalogue(projectIds[0]) });
+  const { panel, setProjects, calls } = fixture({ structuredContent: catalogue() });
   t.after(() => panel.teardown());
   await panel.connected();
   await panel.selectProject(projectIds[2]!);
-  const moved = catalogue(projectIds[1], "host-relocated-root");
+  const moved = catalogue(undefined, "host-relocated-root");
   setProjects({ structuredContent: moved });
   await panel.refreshProjects();
   await panel.refresh();
-  assert.equal(panel.state.currentProjectId, projectIds[1]);
+  assert.equal(panel.state.currentProjectId, undefined);
   assert.equal(panel.state.selectedProjectId, projectIds[2]);
   assert.equal(panel.state.projectPath, moved.projects[2]!.path);
   assert.equal(panel.state.projects[2]!.path, moved.projects[2]!.path);
@@ -202,11 +204,12 @@ test("malformed, duplicate and foreign current-project identities are rejected a
   ]) assert.throws(() => projectsPayload(invalid), /项目/);
 });
 
-test("an unknown project choice does not change scope or send a query, and a valid choice remains recoverable", async t => {
-  const projects = catalogue(projectIds[0]);
+test("an unknown global project choice does not change scope and a valid choice is recoverable", async t => {
+  const projects = catalogue();
   const { panel, calls } = fixture({ structuredContent: projects });
   t.after(() => panel.teardown());
   await panel.connected();
+  await panel.selectProject(projectIds[0]!);
   const before = structuredClone(calls);
   await panel.selectProject("deleted-project");
   assert.match(panel.state.projectsError, /不在 Codex 项目列表/);
@@ -217,4 +220,34 @@ test("an unknown project choice does not change scope or send a query, and a val
   await panel.selectProject(projectIds[1]!);
   assert.equal(panel.state.projectsError, "");
   assert.equal(panel.state.selectedProjectId, projectIds[1]);
+});
+
+
+test("thread-owned workflows cannot switch project at any execution state", async t => {
+  for (const execution of ["draft", "preparing", "running", "stopping", "stopped", "failed", "completed"] as const) {
+    const projects = catalogue(projectIds[0]);
+    const { panel, calls, runs } = fixture({ structuredContent: projects });
+    t.after(() => panel.teardown());
+    runs.set(projects.projects[0]!.path, [savedRun(projects.projects[0]!.path, { execution })]);
+    await panel.connected();
+    const before = structuredClone(calls);
+    await panel.selectProject(projectIds[1]!);
+    assert.deepEqual(calls, before);
+    assert.equal(panel.state.projectPath, projects.projects[0]!.path);
+    assert.match(panel.state.projectsError, /目录固定/);
+  }
+});
+
+test("a selected historical run stays fixed in a global panel even when its name matches a library definition", async t => {
+  const projects = catalogue();
+  const { panel, calls, runs } = fixture({ structuredContent: projects });
+  t.after(() => panel.teardown());
+  runs.set("", [savedRun(projects.projects[0]!.path)]);
+  await panel.connected();
+  const before = structuredClone(calls);
+  await panel.selectProject(projectIds[2]!);
+  assert.deepEqual(calls, before);
+  assert.equal(panel.selected?.projectPath, projects.projects[0]!.path);
+  assert.equal(panel.state.definition, undefined);
+  assert.match(panel.state.projectsError, /目录固定/);
 });

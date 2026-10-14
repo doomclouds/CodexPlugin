@@ -9,6 +9,8 @@ import { promisify } from "node:util";
 import { WorkflowEngine } from "../src/engine.ts";
 import { RunStore } from "../src/store.ts";
 import type { WorkerAdapter, WorkerRequest, WorkerResult, WorkerEvent } from "../src/adapter.ts";
+import type { ExecutionEnvironment } from "../src/execution-settings.ts";
+import type { WorkflowRun } from "../src/types.ts";
 
 const exec = promisify(execFile);
 const script = (body: string): string => `export const meta = { name: "engine-test", description: "Exercise orchestration with an explicit test adapter" };\n${body}`;
@@ -63,6 +65,158 @@ test("preview persists the plan without starting an adapter or creating a worksp
   assert.equal(run.workspace, undefined);
   assert.equal(adapter.calls.length, 0);
   assert.equal((await engine.get(run.id)).script, run.script);
+});
+
+test("start acknowledges preparing before slow model discovery and stop waits its owned promise", async t => {
+  const discovery = deferred<void>(), interrupted = deferred<void>(), exit = deferred<void>();
+  const adapter = new TestAdapter();
+  const environment: ExecutionEnvironment = { defaults: { model: "fixture-model", reasoningEffort: "low" }, models: [{ id: "fixture-model", displayName: "Fixture", supportedReasoningEfforts: ["low"], defaultReasoningEffort: "low" }] };
+  (adapter as TestAdapter & WorkerAdapter).executionEnvironment = async (_cwd, signal) => {
+    discovery.resolve(); signal.addEventListener("abort", () => interrupted.resolve(), { once: true });
+    await exit.promise;
+    if (signal.aborted) throw new Error("Owned discovery process exited after cancellation");
+    return environment;
+  };
+  const { engine, project, storage, engines } = await fixture(t, adapter);
+  const viewer = new WorkflowEngine({ store: new RunStore(storage), adapter: new TestAdapter() }); engines.push(viewer);
+  const draft = await engine.preview({ projectPath: project, script: script('return await agent("inspect");') });
+  const accepted = await engine.start({ id: draft.id, revision: draft.revision });
+  assert.equal(accepted.execution, "preparing");
+  await discovery.promise;
+  const observed = await viewer.get(draft.id);
+  assert.equal(observed.execution, "preparing");
+  assert.equal(observed.preparation?.stages[0]?.id, "settings");
+  assert.equal(observed.preparation?.stages[0]?.status, "running");
+  assert.ok(observed.preparation?.stages[0]?.startedAt);
+  assert.equal(observed.revision, accepted.revision, "Telemetry must not churn action revisions");
+  assert.ok((observed.progressSequence ?? 0) > 0);
+  let settled = false;
+  const stopped = engine.stop(draft.id).then(run => { settled = true; return run; });
+  await interrupted.promise;
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(settled, false);
+  assert.equal((await viewer.get(draft.id)).execution, "stopping");
+  assert.equal(await engine.store.isLocked(draft.id), true);
+  exit.resolve();
+  const final = await stopped;
+  assert.equal(final.execution, "stopped");
+  assert.equal(final.preparation?.stages[0]?.status, "interrupted");
+  assert.ok(final.preparation?.endedAt);
+  assert.equal(await engine.store.isLocked(draft.id), false);
+  assert.deepEqual(adapter.calls, []);
+});
+
+test("live node activity and streamed logs become visible to another engine before completion", async t => {
+  const begun = deferred<void>(), exit = deferred<void>();
+  const adapter = new TestAdapter();
+  adapter.run = async (request, _signal, onEvent) => {
+    onEvent({ type: "activity", activity: { id: "inspect-files", kind: "command", label: "读取项目文件", status: "running", startedAt: new Date().toISOString(), detail: "token=private-test-secret" } });
+    onEvent({ type: "log", message: "Inspecting project files." });
+    begun.resolve(); await exit.promise;
+    onEvent({ type: "activity", activity: { id: "inspect-files", kind: "command", label: "读取项目文件", status: "completed", startedAt: new Date().toISOString(), endedAt: new Date().toISOString() } });
+    return { output: "Actual fixture result", threadId: request.id, turnId: "turn", durationMs: 1, usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } };
+  };
+  const { engine, project, storage, engines } = await fixture(t, adapter);
+  const viewer = new WorkflowEngine({ store: new RunStore(storage), adapter: new TestAdapter() }); engines.push(viewer);
+  const draft = await engine.preview({ projectPath: project, script: script('phase("Inspect"); return await agent("inspect",{label:"Inspect files"});') });
+  await engine.start({ id: draft.id, revision: draft.revision }); await begun.promise;
+  const before = await engine.get(draft.id);
+  await eventually(async () => (await viewer.get(draft.id)).logs.some(log => log.message === "Inspecting project files."));
+  const observed = await viewer.get(draft.id);
+  assert.equal(observed.execution, "running");
+  assert.equal(observed.tasks[0]?.currentActivity?.label, "读取项目文件");
+  assert.equal(observed.tasks[0]?.currentActivity?.status, "running");
+  assert.equal(observed.tasks[0]?.currentActivity?.detail, undefined);
+  assert.equal(observed.tasks[0]?.phase, "Inspect");
+  assert.equal(observed.revision, before.revision);
+  exit.resolve(); const final = await engine.wait(draft.id);
+  assert.equal(final.execution, "completed");
+  assert.ok(final.startedAt && final.endedAt);
+  assert.ok(final.preparation?.stages.every(stage => stage.status === "completed" && stage.endedAt));
+  assert.equal(final.tasks[0]?.currentActivity?.status, "completed");
+  assert.ok(final.tasks[0]?.attempts[0]?.activities?.some(activity => activity.id === "inspect-files" && activity.endedAt));
+});
+
+test("unowned preparing records recover without restarting any discovery or worker", async t => {
+  const { engine, project, storage, engines } = await fixture(t);
+  const draft = await engine.preview({ projectPath: project, script: script('return await agent("inspect");') });
+  await engine.store.save({ ...draft, execution: "preparing", startedAt: new Date().toISOString(), preparation: { startedAt: new Date().toISOString(), stages: [{ id: "workspace", label: "准备隔离工作区", status: "running", startedAt: new Date().toISOString() }] } });
+  const adapter = new TestAdapter(); const recovered = new WorkflowEngine({ store: new RunStore(storage), adapter }); engines.push(recovered);
+  const run = await recovered.get(draft.id);
+  assert.equal(run.execution, "stopped");
+  assert.equal(run.preparation?.stages[0]?.status, "interrupted");
+  assert.ok(run.endedAt && run.preparation?.endedAt);
+  assert.deepEqual(adapter.calls, []);
+});
+
+test("pending deletion views are read-only and never recover or persist cleared execution data", async t => {
+  const { engine, project, storage, engines } = await fixture(t);
+  const draft = await engine.preview({ projectPath: project, script: script('return await agent("inspect");') });
+  class PendingStore extends RunStore {
+    writes = 0; acquisitions = 0;
+    override async load(id: string) { const run = await super.load(id); return { ...run, script: "", tasks: [], logs: [], execution: "running" as const, application: "applying" as const, deletionPending: true, deletionTarget: { kind: "run" as const, id: run.id, revision: run.revision } }; }
+    override async save(run: WorkflowRun) { this.writes++; await super.save(run); }
+    override async acquire(id: string) { this.acquisitions++; return super.acquire(id); }
+  }
+  const store = new PendingStore(storage); const adapter = new TestAdapter();
+  const viewer = new WorkflowEngine({ store, adapter }); engines.push(viewer);
+  const pending = await viewer.get(draft.id);
+  assert.equal(pending.deletionPending, true);
+  assert.equal(pending.execution, "running", "Read-only cleanup view must not masquerade as recovered execution");
+  assert.equal((await viewer.list())[0]?.deletionPending, true);
+  const error = /清理尚未完成.*继续删除/;
+  await assert.rejects(viewer.start({ id: draft.id, revision: draft.revision }), error);
+  await assert.rejects(viewer.start({ id: draft.id, revision: draft.revision }, true), error);
+  await assert.rejects(viewer.update({ id: draft.id, revision: draft.revision, script: "", args: {} }), error);
+  await assert.rejects(viewer.stop(draft.id), error);
+  await assert.rejects(viewer.cancelTask(draft.id, "task_1"), error);
+  await assert.rejects(viewer.apply(draft.id, draft.revision), error);
+  assert.equal(store.writes, 0);
+  assert.equal(store.acquisitions, 0);
+  assert.deepEqual(adapter.calls, []);
+});
+
+test("a partially removed run exposes only its pending deletion summary across engine restart", async t => {
+  const { engine, project, storage, engines } = await fixture(t);
+  const draft = await engine.preview({ projectPath: project, script: script('return await agent("private task");') });
+  await engine.store.withMutation(async () => {
+    await engine.store.markDeleted(draft.id, "fixture-delete", draft.revision, { name: draft.meta.name, createdAt: draft.createdAt, projectPath: draft.projectPath }, { kind: "run", id: draft.id, revision: draft.revision });
+    await rm(path.join(engine.store.directory(draft.id), "run.json"));
+  });
+  const adapter = new TestAdapter(); const restarted = new WorkflowEngine({ store: new RunStore(storage), adapter }); engines.push(restarted);
+  const pending = await restarted.get(draft.id);
+  assert.equal(pending.deletionPending, true);
+  assert.equal(pending.meta.name, draft.meta.name);
+  assert.equal(pending.script, "");
+  assert.deepEqual(pending.tasks, []);
+  assert.deepEqual(pending.logs, []);
+  assert.equal(pending.result, undefined);
+  assert.deepEqual(pending.deletionTarget, { kind: "run", id: draft.id, revision: draft.revision });
+  assert.equal((await restarted.list())[0]?.deletionPending, true);
+  await assert.rejects(restarted.start({ id: draft.id, revision: draft.revision }), /清理尚未完成.*继续删除/);
+  assert.deepEqual(adapter.calls, []);
+});
+
+test("stop during terminal checkpoint save waits lock cleanup and preserves completion", async t => {
+  const { engine, project, storage, engines } = await fixture(t);
+  const draft = await engine.preview({ projectPath: project, script: script('return "actual result";') });
+  const checkpoint = deferred<void>(), releaseSave = deferred<void>();
+  class CheckpointStore extends RunStore {
+    override async save(run: WorkflowRun) { if (run.execution === "completed") { checkpoint.resolve(); await releaseSave.promise; } await super.save(run); }
+  }
+  const store = new CheckpointStore(storage);
+  const owner = new WorkflowEngine({ store, adapter: new TestAdapter() }); engines.push(owner);
+  await owner.start({ id: draft.id, revision: draft.revision }); await checkpoint.promise;
+  let settled = false;
+  const stopped = owner.stop(draft.id).then(run => { settled = true; return run; });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(settled, false);
+  assert.equal(await store.isLocked(draft.id), true);
+  releaseSave.resolve();
+  const final = await stopped;
+  assert.equal(final.execution, "completed");
+  assert.equal(final.result, "actual result");
+  assert.equal(await store.isLocked(draft.id), false);
 });
 
 test("selected workflow parameters survive preview and reach workers only after start", async t => {

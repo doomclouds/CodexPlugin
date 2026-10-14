@@ -16,8 +16,61 @@ const exec = promisify(execFile);
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 const root = await mkdtemp(path.join(tmpdir(), "workflows-native-loader-"));
 const sentinel = "workflows-native-loader-env-sentinel";
+const realProjects = process.argv.includes("--real-projects");
+const nativeTransport = realProjects || process.argv.includes("--native-transport");
+if (nativeTransport) assert.ok(process.env.CODEX_APP_TOOLS_PIPE_PATH?.trim(), "Real project verification requires the running desktop's supplied project pipe");
 const startedAt = Date.now();
 const records = [];
+
+// This development-only MCP fixture calls tools/list, which needs no App chat
+// identity. It proves the actual native transport separately from whether the
+// desktop recognizes a genuine ephemeral SDK thread as an App tool caller.
+const transportProbeSource = String.raw`
+import net from "node:net";
+import { createInterface } from "node:readline";
+async function catalog() {
+  return await new Promise((resolve, reject) => {
+    const socket = net.createConnection({ path: process.env.CODEX_APP_TOOLS_PIPE_PATH });
+    let done = false, buffer = Buffer.alloc(0);
+    const finish = (error, value) => { if (done) return; done = true; clearTimeout(timer); socket.destroy(); error ? reject(error) : resolve(value); };
+    const timer = setTimeout(() => finish(new Error("Native transport did not respond")), 10000);
+    socket.once("connect", () => {
+      const body = Buffer.from(JSON.stringify({ id: 1, jsonrpc: "2.0", method: "tools/list", params: { threadStartKind: "all" } }));
+      const frame = Buffer.alloc(4 + body.length); frame.writeUInt32LE(body.length); body.copy(frame, 4); socket.write(frame);
+    });
+    socket.on("data", chunk => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length < 4) return;
+      const length = buffer.readUInt32LE(0);
+      if (length > 8 * 1024 * 1024) return finish(new Error("Native response exceeded its frame bound"));
+      if (buffer.length < 4 + length) return;
+      try {
+        const response = JSON.parse(buffer.subarray(4, 4 + length).toString());
+        if (response.id !== 1 || response.error || !Array.isArray(response.result?.tools)) return finish(new Error("Native transport rejected the catalog request"));
+        const tools = response.result.tools;
+        finish(null, { toolCount: tools.length, hasProjects: tools.some(tool => tool.namespace === "codex_app" && tool.name === "list_projects"), hasThreads: tools.some(tool => tool.namespace === "codex_app" && tool.name === "list_threads") });
+      } catch { finish(new Error("Native response was malformed")); }
+    });
+    socket.on("error", () => finish(new Error("Native transport socket failed")));
+    socket.once("end", () => finish(new Error("Native transport ended before a response")));
+    socket.once("close", () => finish(new Error("Native transport closed before a response")));
+  });
+}
+createInterface({ input: process.stdin }).on("line", async line => {
+  let request;
+  try { request = JSON.parse(line); } catch { return; }
+  if (request.id === undefined) return;
+  let result;
+  try {
+    if (request.method === "initialize") result = { protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "desktop-transport-probe", version: "1" } };
+    else if (request.method === "tools/list") result = { tools: [{ name: "readonly_desktop_catalog", description: "Read native desktop tool directory without an App thread", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } }] };
+    else if (request.method === "tools/call" && request.params.name === "readonly_desktop_catalog") {
+      const facts = await catalog(); result = { content: [{ type: "text", text: JSON.stringify(facts) }], structuredContent: facts };
+    } else throw new Error("Unsupported probe request");
+    console.log(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }));
+  } catch (error) { console.log(JSON.stringify({ jsonrpc: "2.0", id: request.id, error: { code: -32000, message: error.message } })); }
+});
+`;
 
 class HostClient {
   constructor(cwd, env) {
@@ -71,8 +124,15 @@ async function variant(name, mutation) {
   await writeFile(path.join(plugin, "mcp.json"), JSON.stringify(mcp));
   await mkdir(path.join(marketplace, ".agents", "plugins"), { recursive: true });
   await writeFile(path.join(marketplace, ".agents", "plugins", "marketplace.json"), JSON.stringify({ name: "native-loader-fixture", plugins: [{ name: "workflows", source: { source: "local", path: "./plugins/workflows" }, policy: { installation: "AVAILABLE", authentication: "ON_USE" }, category: "Productivity" }] }));
-  await writeFile(path.join(home, "config.toml"), '[features]\nplugins = true\napps = false\nremote_plugin = false\n');
-  const env = { ...process.env, CODEX_HOME: home, WORKFLOWS_DATA_DIR: path.join(directory, "workflow-state"), CODEX_APP_TOOLS_PIPE_PATH: sentinel };
+  const liveProjectProbe = name === "real-desktop-projects";
+  const env = { ...process.env, CODEX_HOME: home, WORKFLOWS_DATA_DIR: path.join(directory, "workflow-state"), CODEX_APP_TOOLS_PIPE_PATH: liveProjectProbe ? process.env.CODEX_APP_TOOLS_PIPE_PATH : sentinel };
+  let config = '[features]\nplugins = true\napps = false\nremote_plugin = false\n';
+  if (liveProjectProbe) {
+    const probe = path.join(directory, "native-transport-probe.mjs");
+    await writeFile(probe, transportProbeSource);
+    config += `\n[mcp_servers.desktop_transport_probe]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(probe)}]\n[mcp_servers.desktop_transport_probe.env]\nCODEX_APP_TOOLS_PIPE_PATH = ${JSON.stringify(process.env.CODEX_APP_TOOLS_PIPE_PATH)}\n`;
+  }
+  await writeFile(path.join(home, "config.toml"), config);
   await exec(cli, ["plugin", "marketplace", "add", marketplace, "--json"], { cwd: directory, env, windowsHide: true, timeout: 30_000 });
   await exec(cli, ["plugin", "add", "workflows@native-loader-fixture", "--json"], { cwd: directory, env, windowsHide: true, timeout: 30_000 });
   const host = new HostClient(directory, env);
@@ -95,14 +155,34 @@ async function variant(name, mutation) {
     assert.equal(server.runtimeStatus, "connected", server.toolsError ?? "Native plugin MCP did not connect");
     assert.equal(server.toolsError, null);
     const tools = Object.values(server.tools);
-    assert.equal(tools.length, 18);
+    assert.equal(tools.length, 21);
     const entrypoint = tools.find(tool => tool.name === "workflow_open_panel");
     assert.ok(entrypoint, "Actual host discovers the Workflows entrypoint tool");
     assert.deepEqual(entrypoint._meta["openai/ui"].entrypoints, [{ type: "thread" }, { type: "global" }]);
+    if (liveProjectProbe) {
+      const probe = inventory.data.find(server => server.name === "desktop_transport_probe");
+      assert.equal(probe?.runtimeStatus, "connected", probe?.toolsError ?? "Read-only native transport fixture is unavailable");
+      const result = await host.request("mcpServer/tool/call", { threadId: thread.thread.id, server: probe.name, tool: "readonly_desktop_catalog", arguments: {} });
+      assert.notEqual(result.isError, true);
+      assert.equal(result.structuredContent?.hasProjects, true);
+      assert.equal(result.structuredContent?.hasThreads, true);
+      records.push({ variant: "native-desktop-transport", desktopCatalogAvailable: true, projectsToolPresent: true, threadsToolPresent: true, nativeToolCount: result.structuredContent.toolCount });
+      if (!realProjects) return;
+    }
     const projectsResponse = await host.request("mcpServer/tool/call", { threadId: thread.thread.id, server: server.name, tool: "workflow_get_projects", arguments: {}, _meta: { threadId: thread.thread.id, thread_id: thread.thread.id } });
     assert.notEqual(projectsResponse.isError, true);
     const projects = projectsResponse.structuredContent;
     assert.ok(projects, "Actual production project tool returns structured facts");
+    if (liveProjectProbe) {
+      if (!projects.available) records.push({ variant: name, tools: tools.length, entrypointDiscovered: true, projectsAvailable: false, desktopTransportResponded: /Codex project tool request failed/.test(projects.reason ?? ""), reason: projects.reason });
+      assert.equal(projects.available, true, projects.reason ?? "Desktop project discovery did not return a usable inventory");
+      assert.ok(Array.isArray(projects.projects));
+      assert.equal(projects.currentProjectId, undefined, "This genuine ephemeral CLI thread does not belong to a saved desktop project");
+      assert.equal(projects.contextSource, "global-or-unassigned");
+      assert.equal(host.methods.includes("turn/start"), false);
+      records.push({ variant: name, tools: tools.length, entrypointDiscovered: true, projectsAvailable: true, localProjectCount: projects.projects.length, ephemeralThreadUnassigned: true });
+      return;
+    }
     assert.equal(projects.available, false, "The sentinel deliberately is not a desktop pipe");
     assert.deepEqual(projects.projects, []);
     const pipeForwarded = name === "good-overlay";
@@ -118,5 +198,9 @@ try {
   await variant("bad-root-env-vars", async (mcp, plugin) => { mcp.mcpServers.workflows.env_vars = ["CODEX_APP_TOOLS_PIPE_PATH"]; await rm(path.join(plugin, ".codex-plugin"), { recursive: true, force: true }); });
   await variant("good-root", async (_mcp, plugin) => { await rm(path.join(plugin, ".codex-plugin"), { recursive: true, force: true }); });
   await variant("good-overlay", async () => {});
+  if (nativeTransport) await variant("real-desktop-projects", async () => {});
   console.log(JSON.stringify({ cliVersion: version, elapsedMs: Date.now() - startedAt, variants: records, modelTurns: 0, isolatedHome: true, userConfigurationChanged: false }, null, 2));
+} catch (error) {
+  console.log(JSON.stringify({ elapsedMs: Date.now() - startedAt, variants: records, modelTurns: 0, isolatedHome: true, userConfigurationChanged: false, success: false }, null, 2));
+  throw error;
 } finally { await rm(root, { recursive: true, force: true }); }

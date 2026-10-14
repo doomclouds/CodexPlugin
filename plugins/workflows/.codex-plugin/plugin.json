@@ -3,7 +3,7 @@
   "mcpServers": {
     "workflows": {
       "command": "node",
-      "env_vars": ["CODEX_APP_TOOLS_PIPE_PATH"]
+      "env_vars": ["CODEX_APP_TOOLS_PIPE_PATH", "CODEX_MCP_NODE_PATH", "CODEX_BROWSER_USE_NODE_PATH", "CODEX_ELECTRON_RESOURCES_PATH", "CODEX_CLI_PATH"]
     }
   }
 }

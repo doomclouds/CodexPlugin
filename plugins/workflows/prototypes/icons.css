@@ -16,3 +16,15 @@
 .wf-state-legend [data-status="running"] .wf-state-mark{--wf-icon:url("../assets/icons/loader-2.svg")}
 .wf-state-legend [data-status="queued"] .wf-state-mark{--wf-icon:url("../assets/icons/circle.svg")}
 .wf-state-legend [data-status="failed"] .wf-state-mark{--wf-icon:url("../assets/icons/alert-circle.svg")}
+
+.wf-icon[data-icon="folder"]{--wf-icon:url("../assets/icons/folder.svg")}
+.wf-icon[data-icon="adjustments-horizontal"]{--wf-icon:url("../assets/icons/adjustments-horizontal.svg")}
+.wf-icon[data-icon="history"]{--wf-icon:url("../assets/icons/history.svg")}
+.wf-icon[data-icon="dots"]{--wf-icon:url("../assets/icons/dots.svg")}
+.wf-icon[data-icon="x"]{--wf-icon:url("../assets/icons/x.svg")}
+.wf-icon[data-icon="chevron-right"]{--wf-icon:url("../assets/icons/chevron-right.svg")}
+.wf-icon[data-icon="arrows-maximize"]{--wf-icon:url("../assets/icons/arrows-maximize.svg")}
+.wf-icon[data-icon="plus"]{--wf-icon:url("../assets/icons/plus.svg")}
+.wf-icon[data-icon="minus"]{--wf-icon:url("../assets/icons/minus.svg")}
+.wf-icon[data-icon="trash"]{--wf-icon:url("../assets/icons/trash.svg")}
+.wf-icon[data-icon="refresh"]{--wf-icon:url("../assets/icons/refresh.svg")}

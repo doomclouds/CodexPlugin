@@ -13,6 +13,8 @@ export type WorkflowGraphInput = Pick<WorkflowRun, "meta" | "execution" | "logs"
   tasks: GraphTask[];
   executionSettings?: GraphExecutionSettings;
   nodeSettings?: Record<string, GraphExecutionSettings>;
+  deletionPending?: boolean;
+  stale?: boolean;
 };
 export type GraphStatus = WorkflowTask["status"] | "planned" | "skipped" | "stopped" | "unknown";
 export interface WorkflowGraphGroup {
@@ -107,7 +109,7 @@ export function buildWorkflowGraph(run?: WorkflowGraphInput): WorkflowGraph {
   });
   if (unphased.length || !phases.length) {
     const workflowOnly = !titles.length && !unphased.length;
-    const status: GraphStatus = workflowOnly ? run.execution === "draft" ? "planned" : workflowStatuses.has(run.execution) ? run.execution : "unknown" : phaseStatus(unphased, run);
+    const status: GraphStatus = workflowOnly ? run.execution === "draft" ? "planned" : run.execution === "preparing" ? "running" : workflowStatuses.has(run.execution) ? run.execution : "unknown" : phaseStatus(unphased, run);
     phases.push({ title: workflowOnly ? run.meta.name : unphasedTitle, status, kind: workflowOnly ? "workflow" : "phase", declared: false, groups: groupTasks(unphased), placeholder: run.execution === "draft" ? "启动后展示动态任务" : run.execution === "running" ? "等待脚本派发任务" : "本次尚未派发任务" });
   }
   return { name: run.meta.name, phases, taskCount: run.tasks.length };
@@ -118,7 +120,7 @@ function statusIcon(status: GraphStatus): string {
 }
 
 function settingsButton(key: string, label: string, run: WorkflowGraphInput): string {
-  const disabled = run.execution === "running" || run.execution === "stopping";
+  const disabled = !!run.deletionPending || ["preparing", "running", "stopping"].includes(run.execution);
   return `<button type="button" class="wf-node-settings-icon" data-node-settings="${escape(key)}" aria-label="${escape(`配置 ${label} 的模型与思考深度`)}" title="${disabled ? "运行期间不能修改当前节点配置" : "配置模型与思考深度"}"${disabled ? " disabled" : ""}><span class="wf-icon" data-icon="settings" aria-hidden="true"></span></button>`;
 }
 
@@ -150,23 +152,41 @@ function taskConfiguration(task: GraphTask, run: WorkflowGraphInput): string {
   return configurationLabel(mergeSettings(run.executionSettings, script, task.phase ? run.nodeSettings?.[`phase:${task.phase}`] : undefined, run.nodeSettings?.[`task:${task.index}`]));
 }
 
-function renderTask(task: GraphTask, run: WorkflowGraphInput, selectedTaskId?: string): string {
-  const title = (task.label?.trim() || task.prompt.split("\n")[0]?.trim() || `任务 ${task.index + 1}`).slice(0, 120);
-  const state = taskStatus(task);
-  const status = statusLabels[state];
-  const fixedCommand = Object.hasOwn(task.options, "operation");
-  const detail = `${fixedCommand ? "固定命令" : task.mode === "write" ? "写入任务" : "只读任务"}${task.cached ? " · 已复用结果" : task.attempts.length > 1 ? ` · 第 ${task.attempts.length} 次尝试` : ""}`;
-  return `<div class="wf-graph-node-shell"><button type="button" class="wf-graph-node${selectedTaskId === task.id ? " is-selected" : ""}${task.cached ? " is-cached" : ""}" data-task="${escape(task.id)}" data-status="${state}" aria-pressed="${selectedTaskId === task.id}" aria-label="${escape(`${title}，${status}，${detail}`)}"><span class="wf-graph-node-icon wf-icon" data-icon="${fixedCommand ? "settings" : task.mode === "write" ? "pencil" : "search"}" aria-hidden="true"></span><span class="wf-graph-node-content"><span class="wf-graph-node-title">${escape(title)}</span><span class="wf-graph-node-status"><span class="wf-graph-status-icon wf-icon" data-icon="${statusIcon(state)}" aria-hidden="true"></span>${status}</span><span class="wf-graph-node-detail">${escape(detail)}</span>${fixedCommand ? "" : `<span class="wf-graph-node-model">${escape(taskConfiguration(task, run))}</span>`}</span></button>${fixedCommand ? "" : settingsButton(`task:${task.index}`, title, run)}</div>`;
+export function elapsedLabel(startedAt?: string, endedAt?: string, now = Date.now()): string {
+  if (!startedAt || !Number.isFinite(Date.parse(startedAt))) return "";
+  const end = endedAt && Number.isFinite(Date.parse(endedAt)) ? Date.parse(endedAt) : now;
+  const seconds = Math.max(0, Math.floor((end - Date.parse(startedAt)) / 1000));
+  const minutes = Math.floor(seconds / 60);
+  return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
-
-export function renderWorkflowGraph(run?: WorkflowGraphInput, selectedTaskId?: string): string {
+function icon(status: GraphStatus, extra = ""): string {
+  return `<span class="wf-icon${status === "running" ? " is-spinning" : ""}${extra}" data-icon="${statusIcon(status)}" aria-hidden="true"></span>`;
+}
+function renderTask(task: GraphTask, run: WorkflowGraphInput, selectedTaskId?: string, now = Date.now(), compact = false, allowSettings = true): string {
+  const title = (task.label?.trim() || `任务 ${task.index + 1}`).slice(0, 120);
+  const state = taskStatus(task), fixedCommand = Object.hasOwn(task.options, "operation");
+  const latest = task.attempts.at(-1);
+  const detail = `${fixedCommand ? "固定命令" : task.mode === "write" ? "写入任务" : "只读任务"}${task.cached ? " · 已复用结果" : task.attempts.length > 1 ? ` · 第 ${task.attempts.length} 次尝试` : ""}`;
+  const label = state === "running" && task.currentActivity?.label ? task.currentActivity.label : title;
+  return `<div class="wf-graph-node-shell"><button type="button" class="wf-graph-node${selectedTaskId === task.id ? " is-selected" : ""}${task.cached ? " is-cached" : ""}" data-task="${escape(task.id)}" data-status="${state}" data-compact="${compact}" aria-pressed="${selectedTaskId === task.id}" aria-label="${escape(`${title}，${statusLabels[state]}，${detail}`)}">${compact && state === "running" ? "" : icon(state, " wf-graph-node-icon")}<span class="wf-graph-node-content"><span class="wf-graph-node-title">${escape(label)}</span>${compact ? "" : `<span class="wf-graph-node-status">${escape(statusLabels[state])}${latest?.startedAt ? ` · ${elapsedLabel(latest.startedAt, latest.endedAt, now)}` : ""}</span>`}${fixedCommand ? "" : `<span class="wf-graph-node-model">${escape(taskConfiguration(task, run))}</span>`}</span></button>${allowSettings && !fixedCommand ? settingsButton(`task:${task.index}`, title, run) : ""}</div>`;
+}
+export function renderWorkflowGraph(run?: WorkflowGraphInput, selectedTaskId?: string, now = Date.now()): string {
   const graph = buildWorkflowGraph(run);
   if (!run) return '<div class="wf-graph wf-graph-empty"><p class="wf-graph-placeholder">选择工作流并保存预览后，执行图将在这里显示。</p></div>';
-  const connector = '<div class="wf-graph-connector" aria-label="阶段展示顺序"><svg viewBox="0 0 48 40" aria-hidden="true"><path d="M0 20H40m-7-7 7 7-7 7"/></svg><span class="wf-graph-connector-label">阶段顺序</span></div>';
-  const phases = graph.phases.map((phase, index) => {
-    const phaseSettings = configurationLabel(mergeSettings(run.executionSettings, phase.declared ? run.nodeSettings?.[`phase:${phase.title}`] : undefined));
-    const placeholder = `<div class="wf-graph-node wf-graph-placeholder-node" data-status="${phase.status}"><span class="wf-graph-node-icon wf-icon" data-icon="file-text" aria-hidden="true"></span><span class="wf-graph-node-content"><span class="wf-graph-node-title">${escape(phase.title)}</span><span class="wf-graph-node-status"><span class="wf-graph-status-icon wf-icon" data-icon="${statusIcon(phase.status)}" aria-hidden="true"></span>${phase.kind === "workflow" && phase.status === "planned" ? "待开始" : statusLabels[phase.status]}</span><span class="wf-graph-node-detail wf-graph-placeholder">${escape(phase.placeholder)}</span><span class="wf-graph-node-model">${escape(phaseSettings)}</span></span></div>`;
-    return `<section class="wf-graph-phase" data-status="${phase.status}" data-kind="${phase.kind}">${phase.kind === "phase" ? `<header class="wf-graph-phase-heading"><span class="wf-graph-phase-number">${index + 1}</span><span class="wf-graph-phase-title">${escape(phase.title)}</span><span class="wf-graph-status">${statusLabels[phase.status]}</span>${phase.declared ? settingsButton(`phase:${phase.title}`, phase.title, run) : ""}</header>` : ""}<div class="wf-graph-groups">${phase.groups.length ? phase.groups.map(group => `<div class="wf-graph-group" data-concurrent="${group.concurrent}">${group.concurrent ? `<div class="wf-graph-group-label">${group.live ? "并行任务组" : "曾有并行"} · ${group.tasks.length} 个任务</div>` : ""}<div class="wf-graph-nodes">${group.tasks.map(task => renderTask(task, run, selectedTaskId)).join("")}</div></div>`).join("") : placeholder}</div></section>`;
+  const connector = '<div class="wf-graph-connector" aria-label="阶段展示顺序"><span class="wf-icon" data-icon="chevron-right" aria-hidden="true"></span></div>';
+  const phases = graph.phases.map(phase => {
+    const tasks = phase.groups.flatMap(group => group.tasks);
+    const active = tasks.find(task => task.status === "running" || task.status === "stopping") ?? [...tasks].reverse().find(task => task.status === "failed");
+    const primary = active ?? tasks.at(-1), latest = primary?.attempts.at(-1);
+    const label = phase.status === "planned" ? phase.kind === "workflow" ? "待开始" : "待派发" : statusLabels[phase.status];
+    const identity = phase.kind === "workflow" ? 'data-process-scope="workflow"' : !phase.declared && tasks.length && tasks.every(task => !task.phase) ? 'data-process-scope="unphased"' : `data-phase="${escape(phase.title)}"`;
+    const containerIdentity = identity.startsWith("data-phase=") ? `data-phase-container="${escape(phase.title)}"` : identity;
+    const settings = configurationLabel(mergeSettings(run.executionSettings, phase.declared ? run.nodeSettings?.[`phase:${phase.title}`] : undefined));
+    const single = tasks.length === 1;
+    const nodeSettings = phase.declared ? settingsButton(`phase:${phase.title}`, phase.title, run) : single && !Object.hasOwn(primary!.options, "operation") ? settingsButton(`task:${primary!.index}`, phase.title, run) : "";
+    const completedActivity = primary?.status === "running" ? [...(latest?.activities ?? [])].reverse().find(activity => activity.status === "completed" && ["command", "files", "search", "mcp"].includes(activity.kind)) : undefined;
+    const taskList = tasks.length > 1 ? `<details class="wf-graph-task-list" data-graph-detail="${escape(phase.title)}"><summary>${tasks.length} 个实际任务 · 查看明细</summary><div class="wf-graph-groups">${phase.groups.map(group => `<div class="wf-graph-group" data-concurrent="${group.concurrent}">${group.concurrent ? `<div class="wf-graph-group-label">${group.live ? "并行任务组" : "曾有并行"} · ${group.tasks.length} 个任务</div>` : ""}<div class="wf-graph-nodes">${group.tasks.filter(task => task.id !== primary?.id).map(task => renderTask(task, run, selectedTaskId, now)).join("")}</div></div>`).join("")}</div></details>` : "";
+    return `<section class="wf-graph-phase" data-status="${phase.status}" data-kind="${phase.kind}" ${containerIdentity}><header class="wf-graph-phase-heading">${icon(phase.status)}<span class="wf-graph-phase-title">${escape(phase.title)}</span><button type="button" class="wf-node-process-icon" ${phase.kind === "workflow" ? 'id="wf-whole-workflow-process"' : identity.includes("unphased") ? 'id="wf-unphased-process"' : ""} ${identity} aria-label="${escape(`查看 ${phase.title} 的过程与错误`)}"><span class="wf-icon" data-icon="file-text" aria-hidden="true"></span></button>${nodeSettings}</header><div class="wf-graph-phase-state" data-tone="${phase.status === "running" ? "blue" : phase.status === "failed" ? "red" : phase.status === "completed" ? "green" : "neutral"}">${run.stale ? "上次记录 · " : ""}${escape(label)}${latest?.startedAt ? ` · ${elapsedLabel(latest.startedAt, latest.endedAt, now)}` : ""}</div>${primary ? renderTask(primary, run, selectedTaskId, now, true, false) : phase.kind === "workflow" && phase.status === "planned" ? '<p class="wf-graph-node-model">启动后展示动态任务</p>' : ""}${completedActivity ? `<p class="wf-graph-completed-activity"><span class="wf-icon" data-icon="circle-check" aria-hidden="true"></span>${escape(completedActivity.label)}</p>` : ""}${taskList}${["running", "failed", "stopping", "interrupted"].includes(phase.status) ? `<button type="button" class="wf-node-view-process" ${identity}>${phase.status === "failed" ? "查看错误" : "查看过程"}<span class="wf-icon" data-icon="chevron-right" aria-hidden="true"></span></button>` : ""}<span class="wf-graph-node-model">${escape(settings)}</span></section>`;
   }).join(connector);
-  return `<div class="wf-graph" role="region" aria-label="${escape(`${graph.name} 工作流执行图`)}"><div class="wf-graph-scroll"><div class="wf-graph-track">${phases}</div></div><p class="wf-graph-caption">连线表示阶段展示顺序；节点展示实际派发任务，并行分组依据尝试时间重叠。</p></div>`;
+  return `<div class="wf-graph" role="region" aria-label="${escape(`${graph.name} 工作流执行图`)}"><div class="wf-graph-scroll"><div class="wf-graph-track">${phases}</div></div><p class="wf-graph-caption">连线表示阶段展示顺序，动态分支与循环以实际派发节点为准。${run.stale ? "连接恢复后核对实际进度。" : ""}</p></div>`;
 }

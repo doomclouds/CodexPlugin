@@ -9,6 +9,7 @@ import { createServer } from "../src/server.ts";
 import { RunStore } from "../src/store.ts";
 import type { WorkflowEngine } from "../src/engine.ts";
 import type { ProjectsProvider } from "../src/projects.ts";
+import type { WorkflowRun } from "../src/types.ts";
 
 // This protocol test records routing only; it never launches a worker or executes maintenance.
 async function fixture(projects?: ProjectsProvider) {
@@ -17,6 +18,8 @@ async function fixture(projects?: ProjectsProvider) {
   const record = (action: string, input: unknown) => { calls.push({ action, input }); return { id: "wf_0123456789abcdef01234567", revision: 1 }; };
   const engine = {
     store: new RunStore(directory),
+    get: async (id: string) => engine.store.load(id),
+    forgetDeletedRuns: (ids: string[]) => { record("forget-deleted", ids); },
     preview: async (input: unknown) => record("preview", input),
     getExecutionSettings: async (projectPath: unknown) => record("get-settings", { projectPath }),
     updateExecutionSettings: async (input: unknown) => record("update-settings", input),
@@ -25,15 +28,58 @@ async function fixture(projects?: ProjectsProvider) {
     cancelTask: async (id: string, taskId: string) => record("cancel", { id, taskId }),
     apply: async (id: string, revision: number) => record("apply", { id, revision }),
   } as unknown as WorkflowEngine;
-  const server = createServer(engine, projects ? { projects } : {});
+  const server = createServer(engine, { ...(projects ? { projects } : {}), readDeletionConfig: async () => ({ mcp_servers: {} }) });
   const client = new Client({ name: "workflow-contract-test", version: "1" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
-  return { client, calls, close: async () => { await client.close(); await server.close(); await rm(directory, { recursive: true, force: true }); } };
+  return { client, calls, store: engine.store, close: async () => { await client.close(); await server.close(); await rm(directory, { recursive: true, force: true }); } };
 }
 
 const id = "wf_0123456789abcdef01234567";
+
+test("MCP node process and complete deletion route real owned records with explicit confirmation", async () => {
+  const { client, store, calls, close } = await fixture();
+  try {
+    const run = { id, revision: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), meta: { name: "protocol-cleanup", description: "Protocol cleanup fixture" }, script: 'export const meta={name:"protocol-cleanup",description:"Protocol cleanup fixture"}; return 1;', scriptDigest: "fixture", args: {}, projectPath: store.root, allowWrite: false, limits: { maxReadWorkers: 1, maxCalls: 1, maxTokens: 0, timeoutMs: 1000 }, execution: "completed", application: "none", review: "ready", tasks: [{ id: "task_1", index: 0, label: "检查", prompt: "PRIVATE PROMPT", options: {}, mode: "read", status: "completed", cached: false, attempts: [] }], logs: [{ at: new Date().toISOString(), level: "info", taskId: "task_1", message: "token=private-token" }] } as WorkflowRun;
+    await store.create(run);
+    const tools = (await client.listTools()).tools;
+    for (const name of ["workflow_get_node_process", "workflow_preview_deletion", "workflow_delete"]) assert.deepEqual(tools.find(tool => tool.name === name)?._meta?.ui, { visibility: ["model", "app"] });
+    assert.equal(tools.find(tool => tool.name === "workflow_preview_deletion")?.annotations?.readOnlyHint, true);
+    assert.equal(tools.find(tool => tool.name === "workflow_delete")?.annotations?.destructiveHint, true);
+    const process = await client.callTool({ name: "workflow_get_node_process", arguments: { id, taskId: "task_1" } });
+    assert.equal(process.isError, undefined);
+    assert.ok(!JSON.stringify(process.structuredContent).includes("PRIVATE PROMPT"));
+    assert.ok(!JSON.stringify(process.structuredContent).includes("private-token"));
+    const preview = await client.callTool({ name: "workflow_preview_deletion", arguments: { kind: "run", id, revision: 1 } });
+    assert.equal(preview.isError, undefined);
+    const value = preview.structuredContent?.preview as { canDelete: boolean; fingerprint: string };
+    assert.equal(value.canDelete, true);
+    assert.equal((await client.callTool({ name: "workflow_delete", arguments: { kind: "run", id, revision: 1 } })).isError, true);
+    assert.equal((await store.list()).length, 1);
+    const deleted = await client.callTool({ name: "workflow_delete", arguments: { kind: "run", id, revision: 1, fingerprint: value.fingerprint } });
+    assert.equal(deleted.isError, undefined);
+    assert.equal((deleted.structuredContent?.deletion as { deleted: boolean }).deleted, true);
+    assert.deepEqual(await store.list(), []);
+    assert.deepEqual(calls.at(-1), { action: "forget-deleted", input: [id] });
+  } finally { await close(); }
+});
+
+test("MCP preview verifies a real definition revision and script before recording provenance", async () => {
+  const { client, calls, close } = await fixture();
+  try {
+    const script = 'export const meta={name:"definition-source",description:"Definition source"}; return args;';
+    const saved = await client.callTool({ name: "workflow_save_template", arguments: { script } });
+    const definition = saved.structuredContent?.template as { id: string; revision: number };
+    const args = { script, projectPath: tmpdir(), sourceDefinition: { id: definition.id, revision: definition.revision } };
+    assert.equal((await client.callTool({ name: "workflow_preview", arguments: args })).isError, undefined);
+    assert.deepEqual((calls.at(-1)?.input as { sourceDefinition: unknown }).sourceDefinition, args.sourceDefinition);
+    const count = calls.length;
+    assert.equal((await client.callTool({ name: "workflow_preview", arguments: { ...args, sourceDefinition: { ...args.sourceDefinition, revision: definition.revision + 1 } } })).isError, true);
+    assert.equal((await client.callTool({ name: "workflow_preview", arguments: { ...args, script: script.replace("return args", "return 1") } })).isError, true);
+    assert.equal(calls.length, count);
+  } finally { await close(); }
+});
 
 test("MCP server and panel resource advertise the compact packaged brand icon", async () => {
   const { client, calls, close } = await fixture();
