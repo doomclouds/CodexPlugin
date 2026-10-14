@@ -6,6 +6,17 @@ export interface WorkflowMeta {
   name: string;
   description: string;
   phases?: Array<{ title: string; detail?: string }>;
+  parameters?: WorkflowParameter[];
+}
+
+export interface WorkflowParameter {
+  name: string;
+  label: string;
+  type: "string" | "number" | "boolean" | "string[]";
+  required?: boolean;
+  description?: string;
+  placeholder?: string;
+  multiline?: boolean;
 }
 
 export interface ScriptHooks {
@@ -81,7 +92,7 @@ function textField(value: unknown, label: string, maximum: number): string {
   return value;
 }
 
-export function validateScript(source: string): { meta: WorkflowMeta; body: string } {
+export function validateScript(source: string): { meta: WorkflowMeta; body: string; mayUseAgent: boolean } {
   if (typeof source !== "string" || !source.trim()) invalid("source is empty");
   if (Buffer.byteLength(source, "utf8") > 256 * 1024) invalid("source exceeds 256 KiB");
   let program: AstNode;
@@ -99,7 +110,7 @@ export function validateScript(source: string): { meta: WorkflowMeta; body: stri
     invalid("the first statement must be export const meta = { ... }");
   }
   const rawMeta = record(literal(definition?.init as AstNode), "meta");
-  for (const key of Object.keys(rawMeta)) if (!["name", "description", "phases"].includes(key)) invalid(`unknown metadata key: ${key}`);
+  for (const key of Object.keys(rawMeta)) if (!["name", "description", "phases", "parameters"].includes(key)) invalid(`unknown metadata key: ${key}`);
   const name = textField(rawMeta.name, "meta.name", 64);
   if (!/^[a-z][a-z0-9-]*$/.test(name)) invalid("meta.name must use lowercase letters, digits and hyphens");
   const meta: WorkflowMeta = { name, description: textField(rawMeta.description, "meta.description", 2048) };
@@ -116,7 +127,41 @@ export function validateScript(source: string): { meta: WorkflowMeta; body: stri
       return result;
     });
   }
+  if (rawMeta.parameters !== undefined) {
+    if (!Array.isArray(rawMeta.parameters) || rawMeta.parameters.length > 64) invalid("meta.parameters must be an array of at most 64 parameters");
+    const names = new Set<string>();
+    meta.parameters = rawMeta.parameters.map(item => {
+      const parameter = record(item, "parameter");
+      for (const key of Object.keys(parameter)) if (!["name", "label", "type", "required", "description", "placeholder", "multiline"].includes(key)) invalid(`unknown parameter key: ${key}`);
+      const name = textField(parameter.name, "parameter.name", 64);
+      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name) || ["__proto__", "constructor", "prototype"].includes(name)) invalid("parameter.name must be a safe named args field");
+      if (names.has(name)) invalid(`duplicate parameter name: ${name}`);
+      names.add(name);
+      if (typeof parameter.type !== "string" || !["string", "number", "boolean", "string[]"].includes(parameter.type)) invalid("parameter.type must be string, number, boolean or string[]");
+      const result: WorkflowParameter = { name, label: textField(parameter.label, "parameter.label", 128), type: parameter.type as WorkflowParameter["type"] };
+      for (const key of ["required", "multiline"] as const) {
+        if (parameter[key] !== undefined) {
+          if (typeof parameter[key] !== "boolean") invalid(`parameter.${key} must be boolean`);
+          result[key] = parameter[key];
+        }
+      }
+      if (result.multiline && !["string", "string[]"].includes(result.type)) invalid("multiline applies only to string parameters");
+      if (parameter.description !== undefined) result.description = textField(parameter.description, "parameter.description", 4096);
+      if (parameter.placeholder !== undefined) result.placeholder = textField(parameter.placeholder, "parameter.placeholder", 4096);
+      return result;
+    });
+  }
+  let mayUseAgent = false;
+  const orchestrationCalls = new Set(["phase", "log", "operation", "parallel", "pipeline"]);
   const walk = (node: AstNode, parent?: AstNode, key?: string): void => {
+    // This is a conservative capability observation, not an execution proof.
+    // Aliases retain the agent identifier; unknown/dynamic calls may reach it.
+    if (node.type === "Identifier" && ["agent", "eval", "Function", "globalThis"].includes(String(node.name))) mayUseAgent = true;
+    if (["ThisExpression", "NewExpression", "TaggedTemplateExpression"].includes(node.type)) mayUseAgent = true;
+    if (node.type === "CallExpression") {
+      const callee = node.callee as AstNode;
+      if (callee.type !== "Identifier" || !orchestrationCalls.has(String(callee.name))) mayUseAgent = true;
+    }
     if (["ImportDeclaration", "ImportExpression", "ExportDefaultDeclaration", "ExportAllDeclaration"].includes(node.type) || (node.type === "ExportNamedDeclaration" && node !== first)) invalid("imports and additional exports are not supported");
     if (node.type === "Identifier" && forbiddenNames.has(String(node.name))) {
       const propertyName = parent && ((parent.type === "Property" && key === "key" && !parent.computed && !parent.shorthand) || (parent.type === "MemberExpression" && key === "property" && !parent.computed));
@@ -132,7 +177,28 @@ export function validateScript(source: string): { meta: WorkflowMeta; body: stri
     }
   };
   walk(program);
-  return { meta, body: source.slice(first.end) };
+  return { meta, body: source.slice(first.end), mayUseAgent };
+}
+
+// Declarations constrain their named values only. Additional fields are kept,
+// and scripts without declarations retain the existing arbitrary JSON contract.
+export function validateWorkflowArgs(meta: WorkflowMeta, args: unknown): void {
+  if (!meta.parameters?.length) return;
+  if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("Workflow parameters require an args object");
+  const values = args as Record<string, unknown>;
+  for (const parameter of meta.parameters) {
+    const value = Object.hasOwn(values, parameter.name) ? values[parameter.name] : undefined;
+    if (value === undefined) {
+      if (parameter.required) throw new Error(`Missing required workflow parameter: ${parameter.name} (${parameter.label})`);
+      continue;
+    }
+    const valid = parameter.type === "string" ? typeof value === "string"
+      : parameter.type === "number" ? typeof value === "number" && Number.isFinite(value)
+      : parameter.type === "boolean" ? typeof value === "boolean"
+      : Array.isArray(value) && Array.from(value).every(item => typeof item === "string");
+    if (!valid) throw new Error(`Workflow parameter ${parameter.name} must be ${parameter.type}`);
+    if (parameter.required && (typeof value === "string" && !value.trim() || Array.isArray(value) && value.length === 0)) throw new Error(`Missing required workflow parameter: ${parameter.name} (${parameter.label})`);
+  }
 }
 
 function limit(value: number | undefined, fallback: number, maximum: number, label: string): number {
@@ -157,7 +223,8 @@ function abortError(reason: unknown): Error {
 }
 
 export async function executeScript(source: string, args: unknown, hooks: ScriptHooks, signal: AbortSignal, limits: ScriptLimits = {}): Promise<unknown> {
-  const { body } = validateScript(source);
+  const { meta, body } = validateScript(source);
+  validateWorkflowArgs(meta, args);
   if (signal.aborted) throw abortError(signal.reason);
   if (limits.maxTokens !== undefined) throw new Error("maxTokens must be enforced by the agent adapter, not the script sandbox");
   const resolvedLimits = {

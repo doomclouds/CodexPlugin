@@ -9,6 +9,8 @@
 | 工具 | 关键输入与结果 |
 | --- | --- |
 | `workflow_get_capabilities` | 返回实际服务版本、执行器、网络与工作区能力 |
+| `workflow_get_execution_settings` | 可选 `projectPath`；返回默认配置、实际模型目录及其深度选项。无效默认配置保留原因与目录，供用户修正 |
+| `workflow_update_execution_settings` | 当前 `revision`；可选 `model`、`reasoningEffort`；全量替换插件自己的默认设置，省略字段清除对应覆盖 |
 | `workflow_list_templates`、`workflow_get_template` | 列出或读取独立工作流定义 |
 | `workflow_save_template` | `script`；可选 `args`、`allowWrite`、`networkAccess`、`allowedMcpServers`、`allowedMcpTools`、`workspaceMode`、`maintenance`、`limits`；更新已有定义需 `revision` |
 | `workflow_preview` | `projectPath`、`script`；可选输入与执行范围；返回未执行的 `run` |
@@ -28,7 +30,23 @@
 
 ## 编排脚本
 
-首条语句是纯字面量 `export const meta`，包含小写短横线 `name`、非空 `description` 和可选 `phases`；阶段有 `title` 和可选 `detail`。主体为普通 JavaScript，允许顶层 `await`、`return`、分支和有限循环。
+首条语句是纯字面量 `export const meta`，包含小写短横线 `name`、非空 `description` 和可选 `phases`、`parameters`；阶段有 `title` 和可选 `detail`。主体为普通 JavaScript，允许顶层 `await`、`return`、分支和有限循环。
+
+`parameters` 声明面板输入项：`name` 对应 `args` 字段，`label` 是显示名称，`type` 为 `string`、`number`、`boolean` 或 `string[]`，可选 `required`、`description`、`placeholder`、`multiline`。字符串编号和链接保持原值；参数不会触发流程选择或生成。未声明参数的旧工作流继续接受原有 JSON 输入。
+
+```javascript
+export const meta = {
+  name: "review-bug",
+  description: "分析指定 Bug",
+  parameters: [
+    { name: "bug", label: "Bug 号或链接", type: "string", required: true },
+    { name: "description", label: "补充描述", type: "string", multiline: true },
+  ],
+  phases: [{ title: "分析" }],
+};
+phase("分析");
+return await agent(`分析 Bug：${args.bug}\n补充描述：${args.description ?? ""}`);
+```
 
 ```javascript
 export const meta = {
@@ -56,7 +74,9 @@ return await agent(`核实并汇总：${JSON.stringify(reports.filter(Boolean))}
 | `phase(title)`、`log(message)` | 设置默认阶段或写入实际运行日志 |
 | `return value` | 返回最终 JSON 值或文本 |
 
-`agent` 选项包含 `label`、`phase`、`mode`、`model`、`schema`、`isolation`。默认只读；模型按用户选项或可用默认配置处理。只接受 JSON schema，不接受可执行函数。脚本自身不能直接访问文件、shell、网络、模块、时钟、随机数或定时器；没有未列出的 Claude API。
+`agent` 选项包含 `label`、`phase`、`mode`、`model`、`reasoningEffort`、`schema`、`isolation`。默认只读；模型按用户选项或可用默认配置处理。只接受 JSON schema，不接受可执行函数。脚本自身不能直接访问文件、shell、网络、模块、时钟、随机数或定时器；没有未列出的 Claude API。
+
+预览、更新和定义保存可传 `nodeSettings`，值为 `{ model?, reasoningEffort? }`，键为 `phase:<已声明阶段标题>` 或 `task:<实际任务的零起始 index>`。节点设置优先于脚本设置，未设置则使用本次运行默认快照；首次启动解析插件默认或 Codex CLI 配置。模型和深度按实际目录校验，不自行替换为其他模型。运行期间不要修改节点配置，改变已停止运行的节点配置时创建新预览。主对话模型目前不由标准面板自动提供。
 
 ## 原生工具与可选维护计划
 

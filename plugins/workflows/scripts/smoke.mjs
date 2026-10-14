@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,10 @@ assert.equal(path.dirname(isolatedRoot), path.resolve(tmpdir()));
 await cp(path.join(pluginRoot, "runtime"), path.join(isolatedRoot, "runtime"), { recursive: true });
 await cp(path.join(pluginRoot, "workflows"), path.join(isolatedRoot, "workflows"), { recursive: true });
 await cp(path.join(pluginRoot, "package.json"), path.join(isolatedRoot, "package.json"));
+await mkdir(path.join(isolatedRoot, "assets"));
+await cp(path.join(pluginRoot, "assets", "workflows-sidebar-icon.png"), path.join(isolatedRoot, "assets", "workflows-sidebar-icon.png"));
+const iconBytes = await readFile(path.join(isolatedRoot, "assets", "workflows-sidebar-icon.png"));
+const expectedIcons = [{ src: `data:image/png;base64,${iconBytes.toString("base64")}`, mimeType: "image/png", sizes: ["128x128"] }];
 const config = JSON.parse(await readFile(new URL("../mcp.json", import.meta.url), "utf8"));
 const manifest = JSON.parse(await readFile(new URL("../plugin.json", import.meta.url), "utf8"));
 const entry = config.mcpServers.workflows;
@@ -29,15 +33,18 @@ transport.stderr?.on("data", chunk => { stderr += chunk.toString(); });
 try {
   await client.connect(transport);
   assert.equal(client.getServerVersion()?.version, manifest.version);
+  assert.deepEqual(client.getServerVersion()?.icons, expectedIcons);
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map(tool => tool.name).sort(), [
     "workflow_get_capabilities", "workflow_get_template", "workflow_list_templates", "workflow_open_panel",
+    "workflow_get_execution_settings", "workflow_update_execution_settings",
     "workflow_save_template", "workflow_preview", "workflow_update", "workflow_list_runs", "workflow_get_run", "workflow_stop", "workflow_panel_lease", "workflow_start", "workflow_resume", "workflow_cancel_task", "workflow_apply",
   ].sort());
   const panelTool = tools.find(tool => tool.name === "workflow_open_panel");
   assert.equal(panelTool._meta.ui.resourceUri, "ui://workflows/panel.html");
   assert.equal(panelTool._meta["ui/resourceUri"], "ui://workflows/panel.html");
   assert.deepEqual(panelTool._meta["openai/ui"].entrypoints, [{ type: "thread" }, { type: "global" }]);
+  assert.deepEqual(panelTool.icons, expectedIcons);
   const panelResult = await client.callTool({ name: "workflow_open_panel", arguments: {} });
   assert.equal(panelResult.structuredContent.version, manifest.version);
   assert.equal(panelResult.structuredContent.prototype, false);
@@ -46,13 +53,16 @@ try {
   await rm(path.join(isolatedRoot, "runtime", "panel.html"));
   await rm(path.join(isolatedRoot, "runtime", "script-worker.js"));
   await rm(path.join(isolatedRoot, "workflows", "review-changes.workflow.js"));
+  await rm(path.join(isolatedRoot, "assets", "workflows-sidebar-icon.png"));
   const panelResource = await client.readResource({ uri: panelTool._meta.ui.resourceUri });
   assert.equal(panelResource.contents[0].mimeType, "text/html;profile=mcp-app");
   assert.match(panelResource.contents[0].text, /workflow-panel/);
   const aliases = ["ui://workflows/prototype/0.1.4.html", "ui://workflows/panel/0.2.0.html", "ui://workflows/panel/0.2.1.html"];
   const { resources } = await client.listResources();
+  assert.deepEqual((await client.listTools()).tools.find(tool => tool.name === "workflow_open_panel").icons, expectedIcons);
   for (const uri of [panelTool._meta.ui.resourceUri, ...aliases]) {
     assert.ok(resources.some(resource => resource.uri === uri), `Missing panel resource: ${uri}`);
+    assert.deepEqual(resources.find(resource => resource.uri === uri).icons, expectedIcons);
     const resource = await client.readResource({ uri });
     assert.equal(resource.contents[0].uri, uri);
     assert.equal(resource.contents[0].mimeType, panelResource.contents[0].mimeType);

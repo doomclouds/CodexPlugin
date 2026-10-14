@@ -254,9 +254,17 @@ export function formatPortabilityIssue(issue) {
   return `${issue.file}:${issue.line}:${issue.column} ${issue.code}`;
 }
 
+function normalizeLocalRoot(value) {
+  // These are source identities used for text matching, not paths to open on
+  // this host. A supplied foreign absolute path must keep its original flavor.
+  if (path.posix.isAbsolute(value) && !value.startsWith("//")) return path.posix.normalize(value);
+  if (path.win32.isAbsolute(value) && path.win32.parse(value).root.length > 1) return path.win32.normalize(value);
+  return path.resolve(value);
+}
+
 export async function checkPluginPortability(pluginRoot, options = {}) {
   const root = await realpath(pluginRoot);
-  const localRoots = [options.authorHome ?? homedir(), options.authorCwd ?? process.cwd(), options.temporaryDirectory ?? tmpdir(), options.repositoryRoot].filter(Boolean).map(value => path.resolve(value));
+  const localRoots = [options.authorHome ?? homedir(), options.authorCwd ?? process.cwd(), options.temporaryDirectory ?? tmpdir(), options.repositoryRoot].filter(Boolean).map(normalizeLocalRoot);
   const issues = [];
   const warnings = [];
   const files = [];

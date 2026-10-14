@@ -1,11 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { readFileSync } from "node:fs";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Icon, ListToolsResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { getCapabilities, getTemplate, listTemplates } from "./catalog.ts";
 import type { WorkflowEngine } from "./engine.ts";
 import { TemplateStore } from "./templates.ts";
+import { modelSettingsSchema, nodeModelSettingsSchema } from "./execution-settings.ts";
 
 function result(data: Record<string, unknown>): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
@@ -13,6 +15,13 @@ function result(data: Record<string, unknown>): CallToolResult {
 
 const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const panelResourceUri = "ui://workflows/panel.html";
+// A compact package asset is cached with the server so upgraded/deleted install
+// directories cannot invalidate icon descriptors on the existing connection.
+const panelIcons: Icon[] = [{
+  src: `data:image/png;base64,${readFileSync(new URL("../assets/workflows-sidebar-icon.png", import.meta.url)).toString("base64")}`,
+  mimeType: "image/png",
+  sizes: ["128x128"],
+}];
 const panelResourceUris = [
   panelResourceUri,
   "ui://workflows/prototype/0.1.4.html",
@@ -20,13 +29,32 @@ const panelResourceUris = [
   "ui://workflows/panel/0.2.1.html",
 ];
 
+function registerPanelToolWithIcons(server: McpServer, register: () => void) {
+  // MCP SDK 1.32.1 validates tool.icons but registerTool drops that property.
+  // Decorate its public tools/list handler once, keeping SDK schema conversion,
+  // registration, ordering and calls intact; no private registry is accessed.
+  const protocol = server.server;
+  const original = protocol.setRequestHandler;
+  const setHandler = original.bind(protocol);
+  protocol.setRequestHandler = (schema, handler) => {
+    if (!Object.is(schema, ListToolsRequestSchema)) return setHandler(schema, handler);
+    setHandler(schema, async (request, extra) => {
+      const value = await handler(request, extra);
+      const catalog = value as ListToolsResult;
+      return { ...catalog, tools: catalog.tools.map(tool => tool.name === "workflow_open_panel" ? { ...tool, icons: panelIcons } : tool) };
+    });
+  };
+  try { register(); }
+  finally { protocol.setRequestHandler = original; }
+}
+
 export function createServer(engine: WorkflowEngine) {
-  const serverInfo = { name: "workflows", version: "0.3.1" };
+  const serverInfo = { name: "workflows", version: "0.4.0", icons: panelIcons };
   const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server = new McpServer(serverInfo);
   const templates = new TemplateStore(engine.store);
 
-  registerAppTool(server, "workflow_open_panel", {
+  registerPanelToolWithIcons(server, () => registerAppTool(server, "workflow_open_panel", {
     title: "Workflows",
     description: "Open the Workflows task panel. Preview, execution, and reviewed changes follow the user-authorized tool workflow; the panel shows progress and also provides controls.",
     inputSchema: {},
@@ -35,11 +63,11 @@ export function createServer(engine: WorkflowEngine) {
       ui: { resourceUri: panelResourceUri },
       "openai/ui": { entrypoints: [{ type: "thread" }, { type: "global" }] },
     },
-  }, async () => result({ version: serverInfo.version, prototype: false, executionAvailable: true, description: "动态工作流任务面板：查看代理生成的计划、执行进度和改动审查。" }));
+  }, async () => result({ version: serverInfo.version, prototype: false, executionAvailable: true, description: "动态工作流任务面板：查看代理生成的计划、执行进度和改动审查。" })));
 
   // Versioned aliases preserve saved entrypoints after the host reconnects.
   for (const uri of panelResourceUris) {
-    registerAppResource(server, uri === panelResourceUri ? "Workflows task panel" : `Workflows task panel compatibility (${uri})`, uri, { mimeType: RESOURCE_MIME_TYPE }, async () => ({
+    registerAppResource(server, uri === panelResourceUri ? "Workflows task panel" : `Workflows task panel compatibility (${uri})`, uri, { mimeType: RESOURCE_MIME_TYPE, icons: panelIcons }, async () => ({
       contents: [{
         uri,
         mimeType: RESOURCE_MIME_TYPE,
@@ -61,7 +89,7 @@ export function createServer(engine: WorkflowEngine) {
     description: "List bundled workflow scripts. Listing does not start execution.",
     inputSchema: {},
     annotations,
-  }, async () => result({ templates: [...listTemplates(), ...(await templates.list()).map(({ id, name, description, source, revision }) => ({ id, name, description, source, revision }))] }));
+  }, async () => result({ templates: [...listTemplates(), ...(await templates.list()).map(({ id, name, description, source, revision, meta }) => ({ id, name, description, source, revision, meta }))] }));
 
   server.registerTool("workflow_get_template", {
     title: "读取工作流示例",
@@ -78,6 +106,7 @@ export function createServer(engine: WorkflowEngine) {
 
   const id = z.string().regex(/^wf_[a-f0-9]{24}$/);
   const revision = z.number().int().nonnegative();
+  const nodeSettings = z.record(z.string().min(1).max(256), nodeModelSettingsSchema).optional();
   const limits = z.object({ maxReadWorkers: z.number().int().min(1).max(16).optional(), maxCalls: z.number().int().min(1).max(1000).optional(), timeoutMs: z.number().int().min(100).max(86400000).optional(), maxTokens: z.number().int().nonnegative().optional() }).optional();
   const maintenance = z.object({
     steps: z.array(z.object({
@@ -90,15 +119,27 @@ export function createServer(engine: WorkflowEngine) {
     }).refine(step => !(step.retries && step.retries > 0) || step.idempotent === true, "Command retries require an explicitly idempotent step")).min(1).max(64),
     activation: z.object({ serverName: z.string().min(1).max(128), command: z.string().min(1), args: z.array(z.string()) }).optional(),
   }).optional();
-  const scope = { networkAccess: z.boolean().optional(), allowedMcpTools: z.record(z.string().min(1).max(128).refine(name => !["__proto__", "constructor", "prototype"].includes(name), "Invalid MCP server key"), z.array(z.string().min(1).max(256)).max(256)).optional(), allowedMcpServers: z.array(z.string().min(1).max(128).refine(name => name.toLowerCase() !== "workflows" && !name.toLowerCase().startsWith("plugin_workflows"), "The Workflows server cannot be used recursively")).max(100).optional(), workspaceMode: z.enum(["snapshot", "git-worktree"]).optional(), maintenance };
-  const scopedInput = (input: { networkAccess?: boolean | undefined; allowedMcpServers?: string[] | undefined; allowedMcpTools?: Record<string, string[]> | undefined; workspaceMode?: "snapshot" | "git-worktree" | undefined; maintenance?: unknown }): Record<string, unknown> => ({
+  const scope = { networkAccess: z.boolean().optional(), allowedMcpTools: z.record(z.string().min(1).max(128).refine(name => !["__proto__", "constructor", "prototype"].includes(name), "Invalid MCP server key"), z.array(z.string().min(1).max(256)).max(256)).optional(), allowedMcpServers: z.array(z.string().min(1).max(128).refine(name => name.toLowerCase() !== "workflows" && !name.toLowerCase().startsWith("plugin_workflows"), "The Workflows server cannot be used recursively")).max(100).optional(), workspaceMode: z.enum(["snapshot", "git-worktree"]).optional(), maintenance, nodeSettings };
+  const scopedInput = (input: { networkAccess?: boolean | undefined; allowedMcpServers?: string[] | undefined; allowedMcpTools?: Record<string, string[]> | undefined; workspaceMode?: "snapshot" | "git-worktree" | undefined; maintenance?: unknown; nodeSettings?: unknown }): Record<string, unknown> => ({
     ...(input.networkAccess !== undefined ? { networkAccess: input.networkAccess } : {}),
     ...(input.allowedMcpServers !== undefined ? { allowedMcpServers: input.allowedMcpServers } : {}),
     ...(input.allowedMcpTools !== undefined ? { allowedMcpTools: input.allowedMcpTools } : {}),
     ...(input.workspaceMode !== undefined ? { workspaceMode: input.workspaceMode } : {}),
     ...(input.maintenance !== undefined ? { maintenance: input.maintenance } : {}),
+    ...(input.nodeSettings !== undefined ? { nodeSettings: input.nodeSettings } : {}),
   });
   const safe = (operation: () => Promise<Record<string, unknown>> | Record<string, unknown>): Promise<CallToolResult> => Promise.resolve().then(operation).then(result).catch(error => ({ isError: true, content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }] }));
+  server.registerTool("workflow_get_execution_settings", {
+    title: "读取工作流默认模型",
+    description: "Read Workflows' own default model/effort and the real Codex model catalogue without starting a turn. Main desktop dialogue settings are unavailable. Unset Workflows defaults use effective Codex CLI configuration, never claim main-dialogue inheritance.",
+    inputSchema: { projectPath: z.string().min(1).optional() }, annotations,
+  }, async input => safe(() => engine.getExecutionSettings(input.projectPath)));
+  server.registerTool("workflow_update_execution_settings", {
+    title: "保存工作流默认模型",
+    description: "Replace Workflows' own default model/effort with revision compare-and-swap. Omitted model/effort clears that override and falls back to effective Codex CLI configuration. Validates against the actual model catalogue; does not edit Codex config, run a turn, or change existing run snapshots.",
+    inputSchema: { revision, model: modelSettingsSchema.shape.model, reasoningEffort: modelSettingsSchema.shape.reasoningEffort, projectPath: z.string().min(1).optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  }, async input => safe(() => engine.updateExecutionSettings({ revision: input.revision, ...(input.model !== undefined ? { model: input.model } : {}), ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}), ...(input.projectPath ? { projectPath: input.projectPath } : {}) })));
   server.registerTool("workflow_save_template", {
     description: "Save a reusable workflow definition in the user's library. Includes script and default input, without a project, run results, or workspace. Load the saved revision to update an existing definition.",
     inputSchema: { script: z.string().min(1), args: z.unknown().optional(), allowWrite: z.boolean().optional(), revision: revision.optional(), limits, ...scope },

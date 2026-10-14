@@ -40,9 +40,16 @@ const uiBuild = await build({
   write: false,
   metafile: true,
 });
-const panelFragment = await readFile(path.join(pluginRoot, "prototypes", "workflow-panel.html"), "utf8");
+const panelFragment = (await readFile(path.join(pluginRoot, "prototypes", "workflow-panel.html"), "utf8")).replaceAll("\r\n", "\n");
+const iconSource = (await readFile(path.join(pluginRoot, "prototypes", "icons.css"), "utf8")).replaceAll("\r\n", "\n");
+const iconPaths = [...new Set([...iconSource.matchAll(/\.\.\/assets\/icons\/([a-z0-9-]+\.svg)/g)].map(match => match[1]))];
+let iconStyles = iconSource;
+for (const filename of iconPaths) {
+  const bytes = await readFile(path.join(pluginRoot, "assets", "icons", filename));
+  iconStyles = iconStyles.replaceAll(`../assets/icons/${filename}`, `data:image/svg+xml;base64,${bytes.toString("base64")}`);
+}
 const bridge = uiBuild.outputFiles[0].text.replaceAll("</script", "<\\/script");
-await writeFile(path.join(pluginRoot, "runtime", "panel.html"), `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workflows</title><style>:root{color-scheme:light dark}body{margin:0}</style></head><body>${panelFragment}<script>${bridge}</script></body></html>`);
+await writeFile(path.join(pluginRoot, "runtime", "panel.html"), `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workflows</title><style>:root{color-scheme:light dark}body{margin:0}</style></head><body>${panelFragment}<style>${iconStyles}</style><script>${bridge}</script></body></html>`);
 
 const packageDirectories = new Set();
 for (const input of [...Object.keys(built.metafile.inputs), ...Object.keys(scriptBuild.metafile.inputs), ...Object.keys(uiBuild.metafile.inputs)]) {
@@ -61,7 +68,7 @@ for (const directory of [...packageDirectories].sort()) {
   for (const filename of ["LICENSE", "LICENSE.md", "LICENSE.txt", "license", "license.md"]) {
     try {
       const license = await readFile(path.join(directory, filename), "utf8");
-      notices.push(`${pkg.name}@${pkg.version}\n${license.trim()}`);
+      notices.push(`${pkg.name}@${pkg.version}\n${license.trim().replaceAll("\r\n", "\n")}`);
       break;
     } catch (error) {
       if (error.code !== "ENOENT") throw error;

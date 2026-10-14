@@ -1,0 +1,18 @@
+.wf-icon,.wf-state-mark{display:inline-block;width:20px;height:20px;flex:none;background:currentColor;mask:var(--wf-icon) center/contain no-repeat;-webkit-mask:var(--wf-icon) center/contain no-repeat;vertical-align:middle}
+.wf-icon[data-icon="file-text"]{--wf-icon:url("../assets/icons/file-text.svg")}
+.wf-icon[data-icon="code"]{--wf-icon:url("../assets/icons/code.svg")}
+.wf-icon[data-icon="search"]{--wf-icon:url("../assets/icons/search.svg")}
+.wf-icon[data-icon="settings"]{--wf-icon:url("../assets/icons/settings.svg")}
+.wf-icon[data-icon="player-play"]{--wf-icon:url("../assets/icons/player-play.svg")}
+.wf-icon[data-icon="player-stop"]{--wf-icon:url("../assets/icons/player-stop.svg")}
+.wf-icon[data-icon="check"]{--wf-icon:url("../assets/icons/check.svg")}
+.wf-icon[data-icon="circle"]{--wf-icon:url("../assets/icons/circle.svg")}
+.wf-icon[data-icon="circle-check"]{--wf-icon:url("../assets/icons/circle-check.svg")}
+.wf-icon[data-icon="loader-2"]{--wf-icon:url("../assets/icons/loader-2.svg")}
+.wf-icon[data-icon="alert-circle"]{--wf-icon:url("../assets/icons/alert-circle.svg")}
+.wf-icon[data-icon="pencil"]{--wf-icon:url("../assets/icons/pencil.svg")}
+#workflow-panel-prototype .wf-state-mark{border:0;border-radius:0;background:currentColor}
+.wf-state-legend [data-status="completed"] .wf-state-mark{--wf-icon:url("../assets/icons/circle-check.svg")}
+.wf-state-legend [data-status="running"] .wf-state-mark{--wf-icon:url("../assets/icons/loader-2.svg")}
+.wf-state-legend [data-status="queued"] .wf-state-mark{--wf-icon:url("../assets/icons/circle.svg")}
+.wf-state-legend [data-status="failed"] .wf-state-mark{--wf-icon:url("../assets/icons/alert-circle.svg")}

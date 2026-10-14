@@ -11,6 +11,7 @@ import { ProtocolSession } from "../src/adapter.ts";
 import { activateMcpServer, applyMaintenance, createGitWorkspace, maintenanceFingerprint, reviewMaintenance, validateGitWorkspace, validateMaintenance } from "../src/maintenance.ts";
 import type { ActivationSessionFactory } from "../src/maintenance.ts";
 import type { MaintenancePlan } from "../src/types.ts";
+import { assertPrivateFixtureFile, preparePrivateFixtureDirectory } from "./fixtures/private-file.ts";
 
 const exec = promisify(execFile);
 const plan: MaintenancePlan = { steps: [{ id: "check", command: ["node", "--version"] }] };
@@ -20,10 +21,13 @@ async function git(cwd: string, ...args: string[]) {
 }
 async function fixture(t: TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), "workflow-maintenance-test-"));
+  t.after(async () => { await rm(root, { recursive: true, force: true }); });
+  await preparePrivateFixtureDirectory(root);
   const project = path.join(root, "project"), remote = path.join(root, "origin.git"), data = path.join(root, "run");
   await mkdir(project);
   await git(root, "init", "--bare", "--quiet", remote);
   await git(project, "init", "--quiet", "--initial-branch=main");
+  await writeFile(path.join(project, ".gitattributes"), "* text eol=lf\n");
   await writeFile(path.join(project, ".gitignore"), "dist/\nnode_modules/\n");
   await writeFile(path.join(project, "source.mjs"), "export const version = 1;\n");
   await mkdir(path.join(project, "nested"));
@@ -33,7 +37,6 @@ async function fixture(t: TestContext) {
   await git(project, "add", "--all"); await git(project, "commit", "--quiet", "-m", "Add fixture history");
   await git(project, "remote", "add", "origin", remote); await git(project, "push", "--quiet", "--set-upstream", "origin", "main");
   const base = await git(project, "rev-parse", "HEAD");
-  t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const advance = async () => {
     const publisher = path.join(root, "publisher");
     await git(root, "clone", "--quiet", "--branch", "main", remote, publisher);
@@ -169,13 +172,13 @@ test("artifact hashing rejects external leaves and tracked files under a replace
   const external = path.join(root, "external"); await mkdir(external);
   await writeFile(path.join(external, "source.txt"), "external fixture\n");
   await rm(path.join(workspace.root, "nested"), { recursive: true });
-  await symlink(external, path.join(workspace.root, "nested"));
+  await symlink(external, path.join(workspace.root, "nested"), process.platform === "win32" ? "junction" : "dir");
   await writeFile(path.join(workspace.root, ".gitignore"), "nested\ndist\n");
   await assert.rejects(maintenanceFingerprint(workspace), /unsafe parent|external.*symlink/i);
   await rm(path.join(workspace.root, "nested")); await git(workspace.root, "restore", "nested", ".gitignore");
-  await symlink(external, path.join(workspace.root, "dist"));
+  await symlink(external, path.join(workspace.root, "dist"), process.platform === "win32" ? "junction" : "dir");
   await writeFile(path.join(workspace.root, ".gitignore"), "dist\n");
-  await assert.rejects(maintenanceFingerprint(workspace), /external.*symlink/i);
+  await assert.rejects(maintenanceFingerprint(workspace), /unsafe parent|external.*symlink/i);
 });
 
 async function configFixture(t: TestContext) {
@@ -189,7 +192,10 @@ async function configFixture(t: TestContext) {
   let writes = 0;
   const factory: ActivationSessionFactory = cwd => {
     const session = new ProtocolSession(process.execPath, [wrapper, settingsRoot], cwd, 15000, 5000, () => {});
-    return { request: async (method, params) => { const result = await session.request(method, params); if (method === "config/batchWrite") writes++; return result; }, send: message => session.send(message), close: () => session.close() };
+    return { request: async (method, params) => { const result = await session.request(method, params); if (method === "config/batchWrite") writes++; return result; }, send: message => session.send(message), close: async () => {
+      try { await session.request("fixture/shutdown", {}, 7000); }
+      finally { await session.close(); }
+    } };
   };
   const activation = { serverName: "sample", command: "node", args: ["${WORKSPACE}/dist/server.mjs"] };
   const readConfig = async () => {
@@ -212,15 +218,15 @@ test("real owned app-server updates one server, preserves its settings and retur
   const after = await setup.readConfig();
   const servers = after.mcp_servers as Record<string, Record<string, unknown>>;
   assert.equal(servers.sample!.command, "node");
-  assert.deepEqual(servers.sample!.args, [path.join(setup.workspace.root, "dist", "server.mjs")]);
+  assert.deepEqual(servers.sample!.args, setup.activation.args.map(argument => argument.replaceAll("${WORKSPACE}", setup.workspace.root)));
   assert.equal(servers.sample!.startup_timeout_sec, 37); assert.equal(servers.sample!.tool_timeout_sec, 91);
   assert.deepEqual(servers.sample!.env, { APP_SETTING: "fixture-value" });
   assert.deepEqual(servers.other, (before.mcp_servers as Record<string, unknown>).other);
   assert.equal(after.model, before.model);
   assert.equal(await readFile(result.backupPath!, "utf8"), setup.content);
   assert.match(await readFile(setup.configFile, "utf8"), /Keep this comment/);
-  assert.equal((await lstat(result.backupPath!)).mode & 0o777, 0o600);
-  assert.equal((await lstat(path.join(setup.data, "activation-journal.json"))).mode & 0o777, 0o600);
+  await assertPrivateFixtureFile(result.backupPath!);
+  await assertPrivateFixtureFile(path.join(setup.data, "activation-journal.json"));
 });
 
 test("activation recovery recognizes an already committed target without rewriting its true preimage", async t => {

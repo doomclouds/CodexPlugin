@@ -1,10 +1,50 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
 import { checkPluginPortability, formatPortabilityIssue } from "../check-plugin-portability.mjs";
+
+const exec = promisify(execFile);
+
+async function skillValidatorFixture(t) {
+  const root = await mkdtemp(path.join(tmpdir(), "plugin-skill-metadata-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const put = async (name, content) => { const filename = path.join(root, name); await mkdir(path.dirname(filename), { recursive: true }); await writeFile(filename, content); };
+  await put(".agents/plugins/marketplace.json", JSON.stringify({ plugins: [{ name: "demo", source: { source: "local", path: "./plugins/demo" }, policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" }, category: "Productivity" }] }));
+  await put("plugins/demo/plugin.json", JSON.stringify({ $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", name: "demo", version: "1.0.0" }));
+  await put("scripts/check-plugin-portability.mjs", `export { checkPluginPortability, formatPortabilityIssue } from ${JSON.stringify(new URL("../check-plugin-portability.mjs", import.meta.url).href)};\n`);
+  const validator = path.join(root, "scripts", "validate-plugins.mjs");
+  await copyFile(new URL("../validate-plugins.mjs", import.meta.url), validator);
+  return {
+    writeSkill: content => put("plugins/demo/skills/demo/SKILL.md", content),
+    validate: () => exec(process.execPath, [validator], { cwd: root, timeout: 10000, windowsHide: true }),
+  };
+}
+
+for (const [format, newline] of [["LF", "\n"], ["CRLF", "\r\n"]]) {
+  test(`plugin validation accepts ${format} skill metadata`, async t => {
+    const { writeSkill, validate } = await skillValidatorFixture(t);
+    await writeSkill(["---", "name: demo", "description: A reusable fixture skill.", "---", "# Demo", ""].join(newline));
+    assert.match((await validate()).stdout, /Validated demo:/);
+  });
+
+  test(`plugin validation rejects malformed ${format} skill metadata`, async t => {
+    const { writeSkill, validate } = await skillValidatorFixture(t);
+    for (const metadata of [
+      ["name: demo", "description: Fixture skill.", "---"],
+      ["---", "name: wrong", "description: Fixture skill.", "---"],
+      ["---", "description: Fixture skill.", "---"],
+      ["---", "name: demo", "---"],
+    ]) {
+      await writeSkill([...metadata, "# Demo", ""].join(newline));
+      await assert.rejects(validate(), error => error.code === 1 && /AssertionError/.test(error.stderr));
+    }
+  });
+}
 
 async function fixture(t) {
   const outer = await mkdtemp(path.join(tmpdir(), "plugin-portability-"));
@@ -61,12 +101,17 @@ test("plugin README cannot reference parent engineering files", async t => {
   assert.ok((await check()).issues.some(issue => issue.code === "file-reference-escapes-plugin"));
 });
 
-test("a symlink cannot make an outside file a contained skill asset", async t => {
+test(`a ${process.platform === "win32" ? "directory junction" : "file symlink"} cannot make an outside file a contained skill asset`, async t => {
   const { root, outer, put, check } = await fixture(t);
-  await writeFile(path.join(outer, "outside.md"), "Outside\n");
-  await put("skills/demo/SKILL.md", "[Linked](references/linked.md)\n");
+  const windows = process.platform === "win32";
+  const outside = path.join(outer, windows ? "outside" : "outside.md");
+  if (windows) {
+    await mkdir(outside);
+    await writeFile(path.join(outside, "asset.md"), "Outside\n");
+  } else await writeFile(outside, "Outside\n");
+  await put("skills/demo/SKILL.md", `[Linked](references/${windows ? "linked/asset.md" : "linked.md"})\n`);
   await mkdir(path.join(root, "skills/demo/references"));
-  await symlink(path.join(outer, "outside.md"), path.join(root, "skills/demo/references/linked.md"));
+  await symlink(outside, path.join(root, "skills/demo/references", windows ? "linked" : "linked.md"), windows ? "junction" : "file");
   const result = await check();
   assert.ok(result.issues.some(issue => issue.code === "symbolic-link-escapes-plugin"));
   assert.ok(result.issues.some(issue => issue.code === "file-reference-escapes-skill"));
@@ -136,6 +181,10 @@ test("Emscripten virtual HOME is allowed only in the exact published vendor cont
   assert.ok((await check()).issues.length > 0);
   await put("runtime/script-worker.js", context);
   assert.ok((await checkPluginPortability(root, { ...options, authorHome: "/home/web_user" })).issues.some(issue => /current-machine-path/.test(issue.code)));
+  for (const authorCwd of ["/srv/portable-fixture", String.raw`Z:\portable-fixture`]) {
+    await put("src/source-root.js", `export const source = ${JSON.stringify(authorCwd + "/source.js")};\n`);
+    assert.ok((await checkPluginPortability(root, { ...options, authorCwd })).issues.some(issue => issue.file === "src/source-root.js" && /current-machine-path/.test(issue.code)));
+  }
 });
 
 test("unknown or malformed source maps are reported rather than claimed as fully parsed", async t => {

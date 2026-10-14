@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -17,6 +17,8 @@ async function fixture() {
   const engine = {
     store: new RunStore(directory),
     preview: async (input: unknown) => record("preview", input),
+    getExecutionSettings: async (projectPath: unknown) => record("get-settings", { projectPath }),
+    updateExecutionSettings: async (input: unknown) => record("update-settings", input),
     update: async (input: unknown) => record("update", input),
     start: async (input: unknown, resume: boolean) => record(resume ? "resume" : "start", input),
     cancelTask: async (id: string, taskId: string) => record("cancel", { id, taskId }),
@@ -31,6 +33,32 @@ async function fixture() {
 }
 
 const id = "wf_0123456789abcdef01234567";
+
+test("MCP server and panel resource advertise the compact packaged brand icon", async () => {
+  const { client, calls, close } = await fixture();
+  try {
+    const bytes = await readFile(new URL("../assets/workflows-sidebar-icon.png", import.meta.url));
+    assert.equal(bytes.readUInt32BE(16), 128);
+    assert.equal(bytes.readUInt32BE(20), 128);
+    const expected = [{ src: `data:image/png;base64,${bytes.toString("base64")}`, mimeType: "image/png", sizes: ["128x128"] }];
+    assert.deepEqual(client.getServerVersion()?.icons, expected);
+    assert.ok(bytes.length < 16 * 1024, "MCP descriptors should use the compact sidebar PNG");
+    const resources = (await client.listResources()).resources;
+    assert.ok(resources.length > 0);
+    for (const resource of resources) assert.deepEqual(resource.icons, expected);
+    const tools = (await client.listTools()).tools;
+    const panelTool = tools.find(tool => tool.name === "workflow_open_panel");
+    assert.deepEqual(panelTool?.icons, expected);
+    assert.deepEqual(panelTool?.inputSchema, { type: "object", properties: {}, "$schema": "http://json-schema.org/draft-07/schema#" });
+    assert.ok(tools.filter(tool => tool.name !== "workflow_open_panel").every(tool => tool.icons === undefined));
+    assert.deepEqual((panelTool?._meta?.["openai/ui"] as Record<string, unknown>).entrypoints, [{ type: "thread" }, { type: "global" }]);
+    const opened = await client.callTool({ name: "workflow_open_panel", arguments: {} });
+    assert.equal(opened.structuredContent?.executionAvailable, true);
+    assert.equal((await client.callTool({ name: "workflow_start", arguments: { id, revision: 1 } })).isError, undefined);
+    assert.deepEqual(calls, [{ action: "start", input: { id, revision: 1 } }]);
+    assert.deepEqual((await client.listTools()).tools.find(tool => tool.name === "workflow_open_panel")?.icons, expected);
+  } finally { await close(); }
+});
 
 test("agent mutations are model-visible and chat starts do not require a UI lease", async () => {
   const { client, calls, close } = await fixture();
@@ -51,6 +79,27 @@ test("agent mutations are model-visible and chat starts do not require a UI leas
   } finally { await close(); }
 });
 
+test("template tools expose authoritative phase and parameter metadata without planning or starting", async () => {
+  const { client, calls, close } = await fixture();
+  try {
+    const tools = (await client.listTools()).tools;
+    assert.equal(tools.some(tool => tool.name === "workflow_plan"), false);
+    const builtin = await client.callTool({ name: "workflow_get_template", arguments: { id: "review-changes" } });
+    const meta = builtin.structuredContent?.meta as Record<string, unknown>;
+    assert.deepEqual(meta.phases, [{ title: "审查" }, { title: "核实" }, { title: "汇总" }]);
+    assert.equal((meta.parameters as Array<Record<string, unknown>>)[0]?.name, "files");
+    const script = 'export const meta={name:"bug-args",description:"Variable workflow input",phases:[{title:"读取 Bug"}],parameters:[{name:"bug",label:"Bug 编号或 URL",type:"string",required:true}]}; return await agent(args.bug);';
+    const saved = await client.callTool({ name: "workflow_save_template", arguments: { script, args: { bug: "123" } } });
+    const definition = saved.structuredContent?.template as Record<string, unknown>;
+    const loaded = await client.callTool({ name: "workflow_get_template", arguments: { id: definition.id } });
+    assert.deepEqual(loaded.structuredContent?.meta, definition.meta);
+    const listed = await client.callTool({ name: "workflow_list_templates", arguments: {} });
+    const summaries = listed.structuredContent?.templates as Array<Record<string, unknown>>;
+    assert.deepEqual(summaries.find(template => template.id === "saved:bug-args")?.meta, definition.meta);
+    assert.deepEqual(calls, []);
+  } finally { await close(); }
+});
+
 test("preview forwards the explicit execution scope and preserves a closed default scope", async () => {
   const { client, calls, close } = await fixture();
   try {
@@ -63,6 +112,25 @@ test("preview forwards the explicit execution scope and preserves a closed defau
     const update = { id, revision: 1, script: input.script, args: null, networkAccess: false, allowedMcpServers: [], workspaceMode: "snapshot" };
     assert.equal((await client.callTool({ name: "workflow_update", arguments: update })).isError, undefined);
     assert.deepEqual(calls[2]?.input, update);
+  } finally { await close(); }
+});
+
+test("settings tools route explicit defaults and node choices without inference or execution", async () => {
+  const { client, calls, close } = await fixture();
+  try {
+    const projectPath = tmpdir();
+    assert.equal((await client.callTool({ name: "workflow_get_execution_settings", arguments: { projectPath } })).isError, undefined);
+    assert.equal((await client.callTool({ name: "workflow_update_execution_settings", arguments: { revision: 3, model: "model-a", reasoningEffort: "high", projectPath } })).isError, undefined);
+    assert.equal((await client.callTool({ name: "workflow_update_execution_settings", arguments: { revision: 4, projectPath } })).isError, undefined);
+    const script = 'export const meta={name:"node-contract",description:"Node configuration",phases:[{title:"Review"}]}; return await agent("inspect");';
+    const nodeSettings = { "phase:Review": { model: "model-a", reasoningEffort: "low" }, "task:0": { reasoningEffort: "high", identity: "a".repeat(64) } };
+    assert.equal((await client.callTool({ name: "workflow_preview", arguments: { projectPath, script, nodeSettings } })).isError, undefined);
+    assert.deepEqual(calls, [
+      { action: "get-settings", input: { projectPath } },
+      { action: "update-settings", input: { revision: 3, model: "model-a", reasoningEffort: "high", projectPath } },
+      { action: "update-settings", input: { revision: 4, projectPath } },
+      { action: "preview", input: { projectPath, script, nodeSettings, networkAccess: false, allowedMcpServers: [], allowedMcpTools: {}, workspaceMode: "snapshot" } },
+    ]);
   } finally { await close(); }
 });
 

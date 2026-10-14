@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { applyMaintenance, createGitWorkspace, maintenanceFingerprint, reviewMaintenance, validateGitWorkspace } from "../src/maintenance.ts";
 import { gitAwareContextDigest, inspectGitManifest, listGitlinks, readGitIndex } from "../src/submodules.ts";
 import type { MaintenancePlan } from "../src/types.ts";
+import { assertPrivateFixtureFile, preparePrivateFixtureDirectory } from "./fixtures/private-file.ts";
 
 const exec = promisify(execFile);
 const plan: MaintenancePlan = { steps: [{ id: "check", command: ["node", "--version"] }] };
@@ -16,14 +17,23 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
   return stdout.trim();
 }
 async function commit(directory: string, message: string): Promise<string> { await git(directory, "add", "--all"); await git(directory, "commit", "--quiet", "-m", message); return git(directory, "rev-parse", "HEAD"); }
+async function replaceExistingFixtureFile(filename: string, text: string): Promise<void> {
+  // OPEN_EXISTING retains Git for Windows' hidden .git attribute and the ACL.
+  // Default writeFile("w") cannot overwrite a hidden file on Windows.
+  const file = await open(filename, "r+");
+  try { await file.truncate(0); await file.writeFile(text, "utf8"); }
+  finally { await file.close(); }
+}
 async function repository(directory: string, file: string) {
   await mkdir(directory); await git(directory, "init", "--quiet", "--initial-branch=main");
+  await writeFile(path.join(directory, ".gitattributes"), "* text eol=lf\n");
   await writeFile(path.join(directory, file), "original\n"); await writeFile(path.join(directory, ".gitignore"), "dist/\n"); await commit(directory, "Create fixture history");
   await writeFile(path.join(directory, file), "version one\n"); return commit(directory, "Advance fixture history");
 }
 async function fixture(t: TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), "workflow-submodules-test-"));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
+  await preparePrivateFixtureDirectory(root);
   const leafRemote = path.join(root, "leaf-remote"), childRemote = path.join(root, "child-remote"), project = path.join(root, "project"), data = path.join(root, "run");
   const leafHead = await repository(leafRemote, "leaf.txt");
   await repository(childRemote, "child.txt"); await git(childRemote, "submodule", "add", "--quiet", leafRemote, "nested/leaf"); await commit(childRemote, "Add nested submodule");
@@ -90,7 +100,7 @@ test("uninitialized paths reject unmanaged data and symlinks instead of silently
   const missing = path.join(project, "deps/uninitialized");
   await writeFile(path.join(missing, "unexpected.txt"), "unmanaged\n");
   await assert.rejects(gitAwareContextDigest(project), /unmanaged files/);
-  await rm(missing, { recursive: true }); await symlink(root, missing);
+  await rm(missing, { recursive: true }); await symlink(root, missing, process.platform === "win32" ? "junction" : "dir");
   await assert.rejects(gitAwareContextDigest(project), /safe directory/);
 });
 
@@ -145,7 +155,7 @@ test("partial submodule application is durable and refuses to overwrite ignored 
   const review = await reviewMaintenance(workspace, plan), first = await applyMaintenance(workspace, review, plan);
   assert.equal(first.applied, true); assert.equal(first.partial, true); assert.deepEqual(first.conflicts, ["submodule-application"]);
   assert.equal(await git(project, "rev-parse", "HEAD"), target); assert.equal(await readFile(path.join(child, "dist/owned.txt"), "utf8"), "user ignored output\n");
-  assert.equal((await lstat(path.join(data, "submodule-apply-journal.json"))).mode & 0o777, 0o600);
+  await assertPrivateFixtureFile(path.join(data, "submodule-apply-journal.json"));
   const second = await applyMaintenance(workspace, review, plan); assert.equal(second.partial, true);
   await rm(path.join(child, "dist/owned.txt"));
   assert.deepEqual(await applyMaintenance(workspace, review, plan), { applied: true, conflicts: [] });
@@ -168,10 +178,10 @@ test("explicit initialization accepts child gitfiles inside the owned checkout a
   assert.equal(manifest.submodules.find(item => item.path === "deps/uninitialized")!.initialized, true);
   assert.equal((await reviewMaintenance(workspace, plan)).preparedClean, true);
   const externalMetadata = await realpath(path.join(leafRemote, ".git")), gitfile = path.join(child, ".git"), originalGitfile = await readFile(gitfile, "utf8");
-  await writeFile(gitfile, `gitdir: ${externalMetadata}\n`);
+  await replaceExistingFixtureFile(gitfile, `gitdir: ${externalMetadata}\n`);
   await git(leafRemote, "config", "core.worktree", child);
   await assert.rejects(inspectGitManifest(workspace.root, { enforceOwnedMetadata: true }), /owned metadata/);
-  await writeFile(gitfile, originalGitfile); await git(leafRemote, "config", "--unset", "core.worktree");
+  await replaceExistingFixtureFile(gitfile, originalGitfile); await git(leafRemote, "config", "--unset", "core.worktree");
   const common = await realpath(path.resolve(child, await git(child, "rev-parse", "--git-common-dir")));
   await mkdir(path.join(common, "objects/info"), { recursive: true });
   await writeFile(path.join(common, "objects/info/alternates"), path.join(root, "leaf-remote/.git/objects") + "\n");

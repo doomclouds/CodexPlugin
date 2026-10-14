@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
+import { validateScript } from "./script.ts";
 
 const reviewScript = readFileSync(new URL("../workflows/review-changes.workflow.js", import.meta.url), "utf8");
+const reviewMeta = validateScript(reviewScript).meta;
 
 const template = {
   id: "review-changes",
@@ -9,7 +11,7 @@ const template = {
   status: "executable",
   scriptFormat: "workflow-javascript-v1",
   source: "builtin",
-  input: { files: "要审查的文件路径数组" },
+  meta: reviewMeta,
 } as const;
 
 export function listTemplates() {
@@ -23,9 +25,9 @@ export async function getTemplate(id: string) {
 
 export function getCapabilities() {
   return {
-    version: "0.3.1",
+    version: "0.4.0",
     stage: "runtime-v2",
-    available: ["list-templates", "read-template", "save-template", "cross-project-reuse", "preview", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
+    available: ["list-templates", "read-template", "save-template", "cross-project-reuse", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: true, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree"], submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
     ui: { available: true, stage: "live", hostIntegration: "requires-version-specific-verification", exampleDataOnly: false },
     recovery: { automatic: false, mode: "launch-order-replay", stoppedAgentsRestart: true },

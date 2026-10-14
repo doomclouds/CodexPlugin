@@ -64,9 +64,9 @@ codex plugin add workflows@codex-plugin-workspace
 
 ## Workflows
 
-`workflows 0.3.1` 以 Agent 工具为主要入口，动态创建、执行和恢复工作流；真实 worker 使用原生 Codex 工具与已授权 MCP。网络、文件写入与工具范围分别声明。支持文件快照和完整独立 Git checkout，结束后审查并按授权应用。具体业务由工作流表达，不为每种任务增加专用插件代码。
+`workflows 0.4.0` 支持从面板选择工作流、填写其声明的可选或必填参数，再启动、停止和恢复执行。流程图展示节点的实际状态；插件默认模型与思考深度可修改，节点可单独覆盖。真实 worker 使用原生 Codex 工具与已授权 MCP。网络、文件写入与工具范围分别声明。支持文件快照和完整独立 Git checkout，结束后审查并按授权应用。具体业务由工作流表达，不为每种任务增加专用插件代码。
 
-独立工作流库保存脚本和默认输入，不绑定项目；同一定义可以为多个项目创建独立运行。面板按宿主上下文继承主题、样式变量、字体与字号。
+独立工作流库保存脚本和默认输入，不绑定项目；同一定义可以为多个项目创建独立运行。没有参数声明的工作流可以直接启动。面板按宿主上下文继承主题、样式变量、字体与字号。宿主尚未提供主对话模型与思考深度，未配置的节点使用运行开始时记录的工作流默认值。
 
 0.2.1 使用固定面板资源地址并在启动时缓存 HTML，兼容旧版地址，防止升级删除旧缓存后面板资源不可读。仍连接 0.1.4 的宿主必须重新加载服务。故障与修复范围见 [升级修复记录](docs/workflows-panel-upgrade-fix.md)。
 
@@ -75,3 +75,5 @@ codex plugin add workflows@codex-plugin-workspace
 使用见 [插件说明](plugins/workflows/README.md)，深入分析见 [Claude 实现研究](docs/workflows/claude-implementation-analysis-2026.md)，开发记录见 [设计记录](docs/workflows/design.md) 与 [运行时设计](docs/workflows/runtime-design.md)，Claude 依据及差异见 [参考说明](docs/workflows/claude-reference.md)。宿主扩展边界见 [能力核对](docs/codex-extension-boundaries.md)。
 
 [0.2.0 验证记录](docs/workflows-0.2-verification.md) 区分自动测试与本机真实执行；[主题检查](design-qa.md) 记录开发浏览器的样式与窄窗口验证。[旧宿主记录](docs/mcp-app-host-verification.md) 只适用于 0.1.4 原型，不能证明新版原生宿主验收。构建与检查不会自动安装或提交推送；这些动作按用户请求执行。
+
+[0.4.0 验证记录](docs/workflows-0.4-verification.md) 记录参数、节点设置、真实 worker 和本次定向检查的范围。

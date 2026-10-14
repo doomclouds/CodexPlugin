@@ -13,7 +13,7 @@ const fixture = fileURLToPath(new URL("fixtures/app-server.mjs", import.meta.url
 async function setup(scenario: string, options: { startupTimeoutMs?: number; interruptTimeoutMs?: number; shutdownTimeoutMs?: number } = {}) {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "workflows-adapter-test-"));
   const trace = path.join(cwd, "protocol.jsonl");
-  const adapter = new CodexAdapter({ command: process.execPath, args: [fixture, scenario, trace], startupTimeoutMs: 1000, interruptTimeoutMs: 100, shutdownTimeoutMs: 100, ...options });
+  const adapter = new CodexAdapter({ command: process.execPath, args: [fixture, scenario, trace], startupTimeoutMs: 5000, interruptTimeoutMs: 100, shutdownTimeoutMs: 100, ...options });
   const request: WorkerRequest = { id: "test-worker", prompt: "Protocol test task", cwd, mode: "read" };
   const events: WorkerEvent[] = [];
   const controller = new AbortController();
@@ -53,6 +53,61 @@ test("completion received before the turn/start acknowledgement is retained", as
   } finally { await context.cleanup(); }
 });
 
+test("execution settings discovery reads real protocol config and catalogue without a thread or turn", async () => {
+  const context = await setup("complete");
+  try {
+    const environment = await context.adapter.executionEnvironment(context.request.cwd, context.controller.signal);
+    assert.deepEqual(environment.defaults, { model: "test-inherited-model", reasoningEffort: "medium" });
+    assert.deepEqual(environment.models.find(model => model.id === "low-only-model")?.supportedReasoningEfforts, ["low"]);
+    const transcript = await context.transcript();
+    assert.deepEqual(transcript.filter(message => message.method).map(message => message.method), ["initialize", "initialized", "config/read", "model/list"]);
+    assert.equal(transcript.some(message => /thread\/|turn\//.test(String(message.method))), false);
+  } finally { await context.cleanup(); }
+});
+
+test("model and effort overrides are catalogue-validated and observed configured settings are reported", async () => {
+  const context = await setup("complete");
+  try {
+    const result = await context.adapter.run({ ...context.request, model: "explicit-test-model", reasoningEffort: "high", settingsSource: "phase" }, context.controller.signal, event => context.events.push(event));
+    assert.deepEqual(result.executionSettings, { model: "explicit-test-model", reasoningEffort: "high", source: "phase", provenance: "configured" });
+    assert.ok(context.events.some(event => event.type === "execution-settings" && event.settings.provenance === "configured"));
+    const transcript = await context.transcript();
+    assert.equal(transcript.find(message => message.method === "thread/start")?.params.config.model_reasoning_effort, "high");
+    assert.equal(transcript.find(message => message.method === "turn/start")?.params.effort, "high");
+    assert.equal(transcript.find(message => message.method === "thread/start")?.params.allowProviderModelFallback, false);
+    await assert.rejects(context.adapter.run({ ...context.request, model: "low-only-model" }, context.controller.signal, () => {}), /unsupported/);
+    await assert.rejects(context.adapter.run({ ...context.request, model: "unknown-model" }, context.controller.signal, () => {}), /unavailable/);
+    const requests = (await context.transcript()).filter(message => message.method === "turn/start");
+    assert.equal(requests.length, 1);
+  } finally { await context.cleanup(); }
+});
+
+test("catalogue failures and shutdown cannot leak a discovery process or fake model list", async () => {
+  const invalid = await setup("catalog-invalid");
+  try { await assert.rejects(invalid.adapter.executionEnvironment(invalid.request.cwd, invalid.controller.signal)); }
+  finally { await invalid.cleanup(); }
+  const context = await setup("catalog-hang", { startupTimeoutMs: 3000 });
+  try {
+    const discovery = context.adapter.executionEnvironment(context.request.cwd, context.controller.signal);
+    const rejected = assert.rejects(discovery, { name: "AbortError" });
+    await new Promise(resolve => setTimeout(resolve, 80));
+    await context.adapter.close();
+    await rejected;
+    await assert.rejects(context.adapter.executionEnvironment(context.request.cwd, context.controller.signal), /closed/);
+  } finally { await context.cleanup(); }
+});
+
+test("explicit valid selection repairs unavailable CLI defaults at the production protocol boundary", async () => {
+  const context = await setup("config-invalid-defaults");
+  try {
+    const environment = await context.adapter.executionEnvironment(context.request.cwd, context.controller.signal);
+    assert.deepEqual(environment.defaults, { model: "removed-model", reasoningEffort: "unsupported" });
+    assert.equal(environment.models.length, 3);
+    const result = await context.adapter.run({ ...context.request, model: "explicit-test-model", reasoningEffort: "low", settingsSource: "workflow-settings" }, context.controller.signal, () => {});
+    assert.deepEqual(result.executionSettings, { model: "explicit-test-model", reasoningEffort: "low", source: "workflow-settings", provenance: "configured" });
+  } finally { await context.cleanup(); }
+});
+
 test("write worker confines writes to its workspace and forwards an explicit model and schema", async () => {
   const context = await setup("structured");
   try {
@@ -84,11 +139,11 @@ for (const scenario of ["interrupt", "cancel-before-ack"]) {
 test("startup timeout terminates a process that never acknowledges initialize", async () => {
   const context = await setup("startup-hang", { startupTimeoutMs: 100 });
   try {
-    await assert.rejects(context.adapter.run(context.request, context.controller.signal, () => {}), { name: "TimeoutError" });
-    const transcript = await context.transcript();
-    assert.equal(transcript.some(message => message.method === "turn/start"), false);
-    const pid = transcript.find(message => message.type === "pid")!.pid;
-    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    await assert.rejects(context.adapter.run(context.request, context.controller.signal, event => context.events.push(event)), { name: "TimeoutError" });
+    const processes = context.events.filter(event => event.type === "process");
+    assert.equal(processes[0]?.state, "started");
+    assert.deepEqual(processes[1], { type: "process", state: "exited", pid: processes[0]!.pid });
+    assert.equal(context.events.some(event => event.type === "identity"), false);
   } finally { await context.cleanup(); }
 });
 

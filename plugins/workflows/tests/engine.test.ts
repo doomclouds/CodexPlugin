@@ -65,6 +65,40 @@ test("preview persists the plan without starting an adapter or creating a worksp
   assert.equal((await engine.get(run.id)).script, run.script);
 });
 
+test("selected workflow parameters survive preview and reach workers only after start", async t => {
+  const { project, engine, adapter } = await fixture(t);
+  const source = 'export const meta={name:"bug-input",description:"Selected workflow input",parameters:[{name:"bug",label:"Bug 编号",type:"string",required:true},{name:"url",label:"Bug URL",type:"string"},{name:"description",label:"问题描述",type:"string",multiline:true},{name:"attempts",label:"次数",type:"number",required:true},{name:"verify",label:"验证",type:"boolean",required:true},{name:"files",label:"文件",type:"string[]",required:true}]}; return await agent(JSON.stringify(args),{label:"分析输入"});';
+  const args = { bug: "123", url: "https://example.invalid/bugs/123", description: "第一行\n第二行", attempts: 0, verify: false, files: ["source.txt"], additional: { kept: null } };
+  const run = await engine.preview({ projectPath: project, script: source, args });
+  assert.deepEqual(run.args, args);
+  assert.equal(run.meta.parameters?.[0]?.name, "bug");
+  assert.deepEqual((await engine.get(run.id)).args, args);
+  assert.deepEqual(adapter.calls, []);
+  for (const invalid of [{ ...args, bug: "" }, { ...args, attempts: "0" }, { ...args, verify: "false" }, { ...args, files: "source.txt" }]) await assert.rejects(engine.update({ id: run.id, revision: run.revision, script: source, args: invalid }), /Missing required|must be/);
+  assert.deepEqual((await engine.get(run.id)).args, args);
+  await engine.start({ id: run.id, revision: run.revision });
+  const final = await engine.wait(run.id);
+  assert.equal(final.execution, "completed", final.error);
+  assert.deepEqual(adapter.calls, [JSON.stringify(args)]);
+  assert.deepEqual(final.args, args);
+});
+
+test("missing or mistyped declared input fails before persistence or worker dispatch", async t => {
+  const { project, engine, adapter } = await fixture(t);
+  const source = 'export const meta={name:"required-input",description:"Required input",parameters:[{name:"bug",label:"Bug",type:"string",required:true}]}; return await agent(args.bug);';
+  await assert.rejects(engine.preview({ projectPath: project, script: source }), /Missing required/);
+  await assert.rejects(engine.preview({ projectPath: project, script: source, args: { bug: 42 } }), /must be string/);
+  assert.deepEqual(await engine.list(), []);
+  const run = await engine.preview({ projectPath: project, script: source, args: { bug: "42" } });
+  // A retained draft is revalidated at start, before any worker/workspace exists.
+  await engine.store.save({ ...run, args: {} });
+  await assert.rejects(engine.start({ id: run.id, revision: run.revision }), /Missing required/);
+  const retained = await engine.get(run.id);
+  assert.equal(retained.execution, "draft");
+  assert.equal(retained.workspace, undefined);
+  assert.deepEqual(adapter.calls, []);
+});
+
 test("read tasks run concurrently while write tasks share one slot", async t => {
   let reads = 0, writes = 0, maxReads = 0, maxWrites = 0;
   const adapter = new TestAdapter(async request => {

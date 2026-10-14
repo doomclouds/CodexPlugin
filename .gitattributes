@@ -1,2 +1,7 @@
 # The single-file QuickJS bundle embeds WASM byte strings. Preserve its exact bytes.
 plugins/workflows/runtime/script-worker.js -text -diff
+
+# Keep generated runtime files identical in Git marketplace checkouts on every OS.
+plugins/workflows/runtime/index.js text eol=lf
+plugins/workflows/runtime/panel.html text eol=lf
+plugins/workflows/runtime/third-party-licenses.txt text eol=lf

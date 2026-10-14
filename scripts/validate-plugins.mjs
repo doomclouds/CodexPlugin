@@ -82,7 +82,7 @@ for (const name of pluginDirs) {
   catch (error) { if (error.code !== "ENOENT") throw error; skillDirectories = []; }
   for (const skill of skillDirectories) {
     if (!skill.isDirectory()) continue;
-    const content = await readFile(path.join(directory, "skills", skill.name, "SKILL.md"), "utf8");
+    const content = (await readFile(path.join(directory, "skills", skill.name, "SKILL.md"), "utf8")).replace(/\r\n/g, "\n");
     assert.ok(content.startsWith("---\n"), "Skill needs YAML frontmatter");
     assert.match(content, new RegExp(`\\nname: ${skill.name}\\n`));
     assert.match(content, /\ndescription: .+/);

@@ -2,6 +2,7 @@
 import { appendFileSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
+import path from "node:path";
 
 const scenario = process.argv[2];
 const traceFile = process.argv[3];
@@ -55,7 +56,12 @@ createInterface({ input: process.stdin }).on("line", line => {
   } else if (!handshake) {
     send({ id, error: { code: -32000, message: "Not initialized" } });
   } else if (method === "config/read") {
-    response(id, { config: { model: "test-inherited-model", mcp_servers: { [configuredName]: { command: "must-never-start", enabled: scenario !== "mcp-user-disabled", tool_timeout_sec: null, ...(scenario === "mcp-user-filter" ? { enabled_tools: ["read_tool"], disabled_tools: ["write_tool"], tools: { read_tool: { approval_mode: "prompt" } } } : {}) } } } });
+    response(id, { config: { model: scenario === "config-invalid-defaults" ? "removed-model" : "test-inherited-model", model_reasoning_effort: scenario === "config-invalid-defaults" ? "unsupported" : "medium", mcp_servers: { [configuredName]: { command: "must-never-start", enabled: scenario !== "mcp-user-disabled", tool_timeout_sec: null, ...(scenario === "mcp-user-filter" ? { enabled_tools: ["read_tool"], disabled_tools: ["write_tool"], tools: { read_tool: { approval_mode: "prompt" } } } : {}) } } } });
+  } else if (method === "model/list") {
+    if (scenario === "catalog-hang") return;
+    if (scenario === "catalog-invalid") { response(id, { data: [{ id: "invalid" }], nextCursor: null }); return; }
+    const ids = ["test-inherited-model", "explicit-test-model", "low-only-model"];
+    response(id, { data: ids.map(model => ({ id: model, model, displayName: model, isDefault: model === "test-inherited-model", supportedReasoningEfforts: (model === "low-only-model" ? ["low"] : ["low", "medium", "high"]).map(reasoningEffort => ({ reasoningEffort, description: reasoningEffort })), defaultReasoningEffort: model === "low-only-model" ? "low" : "medium" })), nextCursor: null });
   } else if (method === "thread/start") {
     threadParams = params;
     const required = ["apps", "plugins", "browser_use", "computer_use", "multi_agent", "hooks"];
@@ -67,7 +73,7 @@ createInterface({ input: process.stdin }).on("line", line => {
     const sandbox = params.sandbox === "workspace-write" ? {
       type: "workspaceWrite", writableRoots: [params.cwd], networkAccess: params.config["sandbox_workspace_write.network_access"], excludeTmpdirEnvVar: true, excludeSlashTmp: true,
     } : { type: "readOnly", networkAccess: false };
-    response(id, { thread: { id: threadId }, sandbox: scenario === "unsafe-sandbox" ? { type: "dangerFullAccess" } : sandbox });
+    response(id, { thread: { id: threadId }, model: params.model ?? "test-inherited-model", reasoningEffort: params.config.model_reasoning_effort ?? "medium", sandbox: scenario === "unsafe-sandbox" ? { type: "dangerFullAccess" } : sandbox });
   } else if (method === "mcpServerStatus/list") {
     const selected = threadParams?.config.mcp_servers?.[configuredName];
     const tools = params.serverName && !params.threadId ? declaredTools : selected?.enabled ? Object.fromEntries(Object.entries(declaredTools).filter(([name]) => selected.enabled_tools?.includes(name))) : {};
@@ -113,7 +119,7 @@ createInterface({ input: process.stdin }).on("line", line => {
     commandId = id;
     const environment = params.env ?? {};
     const envKeys = ["TMPDIR", "TMP", "TEMP", "XDG_CACHE_HOME", "npm_config_cache", "NPM_CONFIG_CACHE"];
-    if (params.sandboxPolicy?.type !== "workspaceWrite" || !Array.isArray(params.command) || typeof params.sandboxPolicy.networkAccess !== "boolean" || Object.keys(environment).length !== envKeys.length || envKeys.some(key => typeof environment[key] !== "string" || !environment[key].startsWith(params.cwd + "/") || !environment[key].includes(".workflows-command-")) || params.sandboxPolicy.excludeTmpdirEnvVar !== true || params.sandboxPolicy.excludeSlashTmp !== true || params.sandboxPolicy.writableRoots.some(root => root !== params.cwd && root !== params.cwd + "/.git")) process.exit(6);
+    if (params.sandboxPolicy?.type !== "workspaceWrite" || !Array.isArray(params.command) || typeof params.sandboxPolicy.networkAccess !== "boolean" || Object.keys(environment).length !== envKeys.length || envKeys.some(key => typeof environment[key] !== "string" || !environment[key].startsWith(params.cwd + path.sep) || !environment[key].includes(".workflows-command-")) || params.sandboxPolicy.excludeTmpdirEnvVar !== true || params.sandboxPolicy.excludeSlashTmp !== true || params.sandboxPolicy.writableRoots.some(root => root !== params.cwd && root !== path.join(params.cwd, ".git"))) process.exit(6);
     if (scenario === "command-host-request") { send({ id: "command-approval", method: "item/permissions/requestApproval", params: {} }); return; }
     if (scenario === "command-interrupt" || scenario === "command-stubborn") { notify("command/exec/outputDelta", { processId: params.processId, stream: "stdout", deltaBase64: Buffer.from("ready\n").toString("base64") }); return; }
     const attempts = readFileSync(traceFile, "utf8").split("\n").filter(line => line.includes('"method":"command/exec"')).length;

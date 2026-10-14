@@ -53,6 +53,22 @@ test("saved definitions require the current revision before overwriting", async 
   await assert.rejects(templates.save({ script: script("missing"), revision: 1 }), /no longer exists/);
 });
 
+test("saved template metadata is derived from the script without a second persisted definition", async t => {
+  const { store, templates } = await fixture(t);
+  const source = 'export const meta={name:"bug-input",description:"Selected workflow input",phases:[{title:"检查"}],parameters:[{name:"bug",label:"Bug 编号或 URL",type:"string",required:true},{name:"description",label:"问题描述",type:"string",multiline:true}]}; return await agent(JSON.stringify(args));';
+  const saved = await templates.save({ script: source, args: { description: "可复用默认文字" } });
+  assert.deepEqual(saved.meta.phases, [{ title: "检查" }]);
+  assert.equal(saved.meta.parameters?.[0]?.name, "bug");
+  assert.deepEqual((await templates.get(saved.id))?.meta, saved.meta);
+  assert.deepEqual((await templates.list())[0]?.meta, saved.meta);
+  const persisted = JSON.parse(await readFile(path.join(store.root, "templates", "bug-input.json"), "utf8"));
+  assert.equal(persisted.meta, undefined);
+  assert.equal(persisted.parameters, undefined);
+  // A stale secondary representation cannot override the script's declaration.
+  await writeFile(path.join(store.root, "templates", "bug-input.json"), JSON.stringify({ ...persisted, meta: { name: "stale", parameters: [] } }));
+  assert.deepEqual((await templates.get(saved.id))?.meta, saved.meta);
+});
+
 test("concurrent saved-definition updates cannot both overwrite one revision", async t => {
   const { templates } = await fixture(t);
   const initial = await templates.save({ script: script("concurrent"), args: { value: 0 } });

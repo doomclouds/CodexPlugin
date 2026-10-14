@@ -1,8 +1,12 @@
+import type { WorkflowMeta } from "./script.ts";
+import type { EffectiveExecutionSettings, NodeSettings } from "./execution-settings.ts";
+
 export type TaskStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stopping";
 export interface Attempt {
   id: string; status: TaskStatus; startedAt?: string; endedAt?: string;
   threadId?: string; turnId?: string; output?: unknown; error?: string;
   toolsUsed?: string[];
+  executionSettings?: EffectiveExecutionSettings;
   outcome?: "confirmed" | "unknown";
   usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
 }
@@ -10,6 +14,8 @@ export interface Task {
   id: string; index: number; prompt: string; options: Record<string, unknown>;
   label?: string; phase?: string; mode: "read" | "write";
   status: TaskStatus; cached: boolean; attempts: Attempt[]; output?: unknown; error?: string;
+  executionSettings?: EffectiveExecutionSettings;
+  configurationTarget?: string;
 }
 export interface Limits { maxReadWorkers: number; maxCalls: number; timeoutMs: number; maxTokens: number }
 export interface FileRecord { hash: string; mode: number; kind: "file" | "link" }
@@ -39,7 +45,7 @@ export interface ActivationResult {
 }
 export interface WorkflowRun {
   id: string; revision: number; createdAt: string; updatedAt: string;
-  meta: { name: string; description: string; phases?: Array<{ title: string; detail?: string }> };
+  meta: WorkflowMeta;
   script: string; args: unknown; projectPath: string; allowWrite: boolean; limits: Limits;
   execution: "draft" | "running" | "stopping" | "stopped" | "completed" | "failed";
   review: "unavailable" | "pending" | "ready";
@@ -51,4 +57,6 @@ export interface WorkflowRun {
   maintenance?: MaintenancePlan; maintenanceReview?: MaintenanceReview;
   activation?: ActivationResult; controlId?: string; workspaceCheckpoint?: string;
   allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>;
+  nodeSettings?: NodeSettings;
+  executionSettings?: Partial<EffectiveExecutionSettings>;
 }

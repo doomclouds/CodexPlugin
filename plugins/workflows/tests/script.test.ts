@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { executeScript, validateScript } from "../src/script.ts";
+import { executeScript, validateScript, validateWorkflowArgs } from "../src/script.ts";
 import type { ScriptHooks } from "../src/script.ts";
 
 const script = (body: string): string => `export const meta = { name: "sandbox-test", description: "Exercise the isolated runtime", phases: [{ title: "Inspect" }] };\n${body}`;
@@ -24,6 +24,43 @@ test("metadata is parsed without executing it and top-level await/return is supp
     '; export const meta = {name: "x", description: "x"};',
     'const before = 1; export const meta = {name: "x", description: "x"};',
   ]) assert.throws(() => validateScript(source), /Invalid workflow script/);
+});
+
+test("literal parameter declarations are parsed once with safe unique named fields", () => {
+  const parameters = [{ name: "bugNumber", label: "Bug 编号", type: "string", required: true, description: "交给已选工作流的 Bug 编号", placeholder: "例如 123" }, { name: "description", label: "问题描述", type: "string", multiline: true }, { name: "attempts", label: "次数", type: "number" }, { name: "verify", label: "验证", type: "boolean", required: false }];
+  const source = `export const meta={name:"parameter-test",description:"Input metadata",parameters:${JSON.stringify(parameters)}}; return args;`;
+  assert.deepEqual(validateScript(source).meta.parameters, parameters);
+  for (const declaration of [
+    '[{name:"bug",label:"Bug",type:"string"},{name:"bug",label:"Duplicate",type:"string"}]',
+    '[{name:"constructor",label:"Unsafe",type:"string"}]',
+    '[{name:"nested.field",label:"Nested",type:"string"}]',
+    '[{name:"bug",label:"Bug",type:["string"]}]',
+    '[{name:"bug",label:"Bug",type:"string",required:"yes"}]',
+    '[{name:"bug",label:"Bug",type:"number",multiline:true}]',
+    '[{name:"bug",label:"Bug",type:"string",default:"extra"}]',
+    '[{name:"bug",label:"Bug",type:"string",description:args.description}]',
+    '[{name:"bug",label:(() => "executed")(),type:"string"}]',
+  ]) assert.throws(() => validateScript(`export const meta={name:"parameter-test",description:"Input metadata",parameters:${declaration}}; return 1;`), /Invalid workflow script/);
+});
+
+test("agent capability observation includes aliases and dynamic uncertainty while pure orchestration remains independent", () => {
+  assert.equal(validateScript(script("return args.value + 1;")).mayUseAgent, false);
+  assert.equal(validateScript(script('phase("Inspect"); log("Begin"); return await operation("build");')).mayUseAgent, false);
+  for (const body of ['const inspect = agent; return await inspect("read");', 'return await globalThis[args.name]("read");', 'const invoke=()=>1; return invoke();', 'return (0, eval)(args.code);']) assert.equal(validateScript(script(body)).mayUseAgent, true);
+});
+
+test("declared argument validation preserves JSON values and never coerces named input", () => {
+  const { meta } = validateScript('export const meta={name:"typed-input",description:"Typed args",parameters:[{name:"text",label:"文字",type:"string",required:true},{name:"count",label:"次数",type:"number",required:true},{name:"enabled",label:"启用",type:"boolean",required:true},{name:"files",label:"文件",type:"string[]",required:true}]}; return args;');
+  const args = { text: "  caller supplied text\n", count: 0, enabled: false, files: ["one", "two"], extra: { preserved: null } };
+  const before = structuredClone(args);
+  validateWorkflowArgs(meta, args);
+  assert.deepEqual(args, before);
+  for (const invalid of [null, [], "plain", { ...args, text: " " }, { ...args, text: undefined }, { ...args, text: 7 }, { ...args, count: "0" }, { ...args, count: Infinity }, { ...args, enabled: "false" }, { ...args, files: "one" }, { ...args, files: [] }, { ...args, files: [null] }]) assert.throws(() => validateWorkflowArgs(meta, invalid), /Workflow parameter|Missing required|args object/);
+  const optional = validateScript('export const meta={name:"optional-input",description:"Optional args",parameters:[{name:"text",label:"文字",type:"string"}]}; return args;').meta;
+  assert.doesNotThrow(() => validateWorkflowArgs(optional, {}));
+  assert.throws(() => validateWorkflowArgs(optional, { text: null }), /must be string/);
+  const legacy = validateScript(script("return args;")).meta;
+  for (const value of [null, false, 3, "description", [1, "two"]]) assert.doesNotThrow(() => validateWorkflowArgs(legacy, value));
 });
 
 test("module access, host APIs and nondeterminism are rejected by AST rather than text matching", () => {

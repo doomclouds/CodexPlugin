@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.base.json",
-  "compilerOptions": { "rootDir": "prototypes", "lib": ["ES2022", "DOM"], "noEmit": true },
+  "compilerOptions": { "rootDir": "prototypes", "lib": ["ES2022", "DOM"], "noEmit": true, "allowImportingTsExtensions": true },
   "include": ["prototypes/**/*.ts"]
 }

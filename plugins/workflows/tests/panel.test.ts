@@ -190,6 +190,63 @@ test("saved definitions load independently and create a fresh run for a differen
   await panel.teardown();
 });
 
+test("an explicitly selected workflow remains independent of history polling until a real run is selected", async () => {
+  const definition = { id: "saved:review", name: "review", description: "Reusable review", source: "saved", script: "return args", meta: { name: "review", description: "Review", parameters: [{ name: "bugId", label: "Bug ID", type: "string", required: true }] }, args: {} };
+  const calls: string[] = [];
+  const panel = new WorkflowPanelController(async name => {
+    calls.push(name);
+    if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease-1" } };
+    if (name === "workflow_list_runs") return { structuredContent: { runs: [draft()] } };
+    if (name === "workflow_list_templates") return { structuredContent: { templates: [definition] } };
+    if (name === "workflow_get_template") return { structuredContent: definition };
+    return { structuredContent: { run: draft() } };
+  }, () => {}, () => () => {});
+  await panel.connected();
+  panel.selectTemplate(definition.id);
+  await panel.loadTemplate(definition.id);
+  await panel.refresh();
+  assert.equal(panel.selected, undefined);
+  assert.deepEqual(panel.state.definition?.meta, definition.meta);
+  assert.deepEqual(panel.state.definition?.args, {});
+  assert.equal(calls.includes("workflow_preview"), false);
+  assert.equal(calls.includes("workflow_start"), false);
+  const external = { ...draft(), id: "external-run", args: { bugId: "original-id" } };
+  panel.receive({ structuredContent: { run: external } });
+  assert.equal(panel.selected?.id, "external-run");
+  assert.deepEqual(panel.selected?.args, external.args);
+  panel.selectTemplate(undefined);
+  await panel.refreshTemplates();
+  await panel.refresh();
+  assert.equal(panel.state.selectedTemplate, undefined);
+  assert.equal(panel.selected, undefined);
+  await panel.teardown();
+});
+
+test("a template response cannot overwrite a later workflow selection or closed panel", async () => {
+  for (const close of [false, true]) {
+    let respond!: (response: { structuredContent: Record<string, unknown> }) => void;
+    const response = new Promise<{ structuredContent: Record<string, unknown> }>(resolve => { respond = resolve; });
+    const panel = new WorkflowPanelController(async name => {
+      if (name === "workflow_panel_lease") return { structuredContent: { leaseId: "lease-1" } };
+      if (name === "workflow_list_runs") return { structuredContent: { runs: [] } };
+      if (name === "workflow_list_templates") return { structuredContent: { templates: [] } };
+      if (name === "workflow_get_execution_settings") return { isError: true, content: [{ type: "text", text: "Execution settings unavailable in this delayed-template fixture." }] };
+      return response;
+    }, () => {}, () => () => {});
+    await panel.connected();
+    panel.selectTemplate("first");
+    const loading = panel.loadTemplate("first");
+    if (close) await panel.teardown();
+    else panel.selectTemplate("second");
+    respond({ structuredContent: { id: "first", script: "return args", args: { old: true } } });
+    assert.equal(await loading, undefined);
+    assert.equal(panel.state.definition, undefined);
+    assert.equal(panel.state.selectedTemplate, close ? "first" : "second");
+    assert.equal(panel.state.connection, close ? "closed" : "connected");
+    if (!close) await panel.teardown();
+  }
+});
+
 test("saving a loaded definition includes its revision and refreshes the workflow library", async () => {
   const saved = { id: "saved:review", name: "review", description: "Reusable review", source: "saved" as const, revision: 4 };
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
