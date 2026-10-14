@@ -74,12 +74,15 @@ test("host request metadata wins and conflicting real thread identities never fa
 test("source projects and thread ownership are parsed once without cwd or path existence inference", () => {
   const root = path.join(tmpdir(), "uncreated-project-test");
   const mapped = mapProjects(inventory(root), roster, "current-thread");
-  assert.deepEqual(mapped, { available: true, projects: [{ projectId: "project-a", label: " 工程 A ", path: path.join(root, "source project"), hostId: "local" }], currentProjectId: "project-a", contextSource: "thread" });
+  assert.deepEqual(mapped, { available: true, projects: [{ projectId: "project-a", label: " 工程 A ", path: path.join(root, "source project"), hostId: "local" }], currentProjectId: "project-a", contextSource: "thread", bindingSource: "project-id" });
   const global = mapProjects(inventory(root), roster, "ephemeral-global");
   assert.equal(global.contextSource, "global-or-unassigned"); assert.equal(global.currentProjectId, undefined);
   const unknownHost = mapProjects(inventory(root), { ...roster, pinnedThreads: [{ id: "current-thread", projectId: "project-a" }] }, "current-thread");
   assert.equal(unknownHost.currentProjectId, undefined);
   assert.throws(() => mapProjects(inventory(root), { ...roster, threads: [{ id: "current-thread", projectId: null, hostId: "local" }] }, "current-thread"), /conflicting/);
+  const legacyKind = mapProjects(inventory(root), { schemaVersion: 4, pinnedThreads: [{ id: "current-thread", projectId: "project-a", hostId: "local", kind: null }], threads: [{ id: "other-thread", projectId: null, hostId: "local", kind: null }] }, "current-thread");
+  assert.equal(legacyKind.currentProjectId, "project-a", "A legacy null backing kind does not invalidate explicit project ownership.");
+  assert.equal(legacyKind.bindingSource, "project-id");
 });
 
 test("real socket framing survives split headers/payload and calls only two read-only native tools", async t => {
@@ -111,6 +114,158 @@ test("global ephemeral caller can list projects but never receives a guessed sel
   const result = await new CodexProjectsProvider({ pipePath: fixture.pipePath }).getProjects({ meta: { thread_id: "real-ephemeral" }, signal: new AbortController().signal });
   assert.equal(result.available, true);
   if (result.available) { assert.equal(result.projects.length, 1); assert.equal(result.currentProjectId, undefined); assert.equal(result.contextSource, "global-or-unassigned"); }
+});
+
+test("a local Codex caller without project membership binds only its own canonical host execution directory", async t => {
+  let root = "", alias = "";
+  const fixture = await pipeFixture(t, (request, socket) => {
+    if (request.method !== "tools/call") return;
+    const projects = inventory(root);
+    projects.projects[0]!.path = alias;
+    const threads = { schemaVersion: 4, pinnedThreads: [], threads: [{ id: "current-thread", kind: "codex", hostId: "local", projectId: null, cwd: path.join(root, "source project") }, { id: "other-thread", kind: null, hostId: "local", projectId: null, cwd: null }] };
+    socket.end(response(request, request.params!.tool === "list_projects" ? projects : threads));
+  });
+  root = fixture.root;
+  alias = path.join(root, "registered-alias");
+  await symlink(path.join(root, "source project"), alias, process.platform === "win32" ? "junction" : "dir");
+  const result = await new CodexProjectsProvider({ pipePath: fixture.pipePath }).getProjects(context());
+  assert.equal(result.available, true);
+  if (!result.available) return;
+  assert.equal(result.currentProjectId, "project-a");
+  assert.equal(result.contextSource, "thread");
+  assert.equal(result.bindingSource, "thread-cwd");
+  assert.equal(result.reason, undefined);
+  assert.equal(result.projects[0]?.path, await realpath(alias));
+});
+
+test("explicit local project identity wins over a different host execution directory", async t => {
+  let root = "";
+  const fixture = await pipeFixture(t, (request, socket) => {
+    if (request.method !== "tools/call") return;
+    const projects = inventory(root);
+    projects.projects.push({ projectId: "project-b", label: "Other", projectKind: "local", hostId: "local", path: root });
+    const threads = { schemaVersion: 4, pinnedThreads: [], threads: [{ id: "current-thread", kind: "codex", hostId: "local", projectId: "project-a", cwd: root }] };
+    socket.end(response(request, request.params!.tool === "list_projects" ? projects : threads));
+  });
+  root = fixture.root;
+  const result = await new CodexProjectsProvider({ pipePath: fixture.pipePath }).getProjects(context());
+  assert.equal(result.available, true);
+  if (result.available) { assert.equal(result.currentProjectId, "project-a"); assert.equal(result.bindingSource, "project-id"); }
+});
+
+test("thread directory binding rejects remote, non-Codex, absent and explicitly assigned callers", async t => {
+  let root = "";
+  let caller: Record<string, unknown> = {};
+  const fixture = await pipeFixture(t, (request, socket) => {
+    if (request.method !== "tools/call") return;
+    const threads = { schemaVersion: 4, pinnedThreads: [], threads: [caller] };
+    socket.end(response(request, request.params!.tool === "list_projects" ? inventory(root) : threads));
+  });
+  root = fixture.root;
+  const provider = new CodexProjectsProvider({ pipePath: fixture.pipePath });
+  const previous = process.env.CODEX_THREAD_ID;
+  process.env.CODEX_THREAD_ID = "other-chat";
+  try {
+    for (const variant of [
+      { projectId: "unknown" }, { projectId: "remote" }, { projectId: "" }, { hostId: "other-host" }, { hostId: null }, { hostId: undefined }, { kind: "chatgpt" }, { kind: undefined }, { kind: null }, { id: "other-chat" },
+    ]) {
+      caller = { id: "current-thread", kind: "codex", hostId: "local", projectId: null, cwd: path.join(root, "source project"), ...variant };
+      const result = await provider.getProjects({ meta: { threadId: "current-thread", projectPath: path.join(root, "source project"), cwd: path.join(root, "source project") }, signal: new AbortController().signal });
+      assert.equal(result.available, true);
+      if (result.available) {
+        assert.equal(result.currentProjectId, undefined);
+        assert.equal(result.bindingSource, undefined);
+        assert.equal(result.contextSource, "global-or-unassigned");
+        assert.ok(result.reason, "Missing authoritative binding must be explained rather than guessed from another chat or metadata paths.");
+      }
+    }
+  } finally { if (previous === undefined) delete process.env.CODEX_THREAD_ID; else process.env.CODEX_THREAD_ID = previous; }
+});
+
+test("caller directory requires a unique exact existing catalogue match and never adopts a parent project", async t => {
+  let root = "", cwd = "";
+  const fixture = await pipeFixture(t, (request, socket) => {
+    if (request.method !== "tools/call") return;
+    const threads = { schemaVersion: 4, pinnedThreads: [], threads: [{ id: "current-thread", kind: "codex", hostId: "local", cwd }] };
+    socket.end(response(request, request.params!.tool === "list_projects" ? inventory(root) : threads));
+  });
+  root = fixture.root;
+  await mkdir(path.join(root, "source project", "nested"));
+  const provider = new CodexProjectsProvider({ pipePath: fixture.pipePath });
+  for (const value of ["relative", path.join(root, "missing"), path.join(root, "source project", "nested"), root]) {
+    cwd = value;
+    const result = await provider.getProjects(context());
+    assert.equal(result.available, true);
+    if (result.available) { assert.equal(result.currentProjectId, undefined); assert.equal(result.contextSource, "global-or-unassigned"); assert.ok(result.reason); }
+  }
+});
+
+test("duplicate catalogue identities for one canonical directory cannot bind by caller directory", async t => {
+  let root = "", alias = "", projectId: string | null = null;
+  const fixture = await pipeFixture(t, (request, socket) => {
+    if (request.method !== "tools/call") return;
+    const projects = inventory(root);
+    projects.projects.push({ projectId: "same-directory", label: " 工程 A ", projectKind: "local", hostId: "local", path: alias });
+    const threads = { schemaVersion: 4, pinnedThreads: [], threads: [{ id: "current-thread", kind: "codex", hostId: "local", projectId, cwd: path.join(root, "source project") }] };
+    socket.end(response(request, request.params!.tool === "list_projects" ? projects : threads));
+  });
+  root = fixture.root;
+  alias = path.join(root, "duplicate-alias");
+  await symlink(path.join(root, "source project"), alias, process.platform === "win32" ? "junction" : "dir");
+  const provider = new CodexProjectsProvider({ pipePath: fixture.pipePath });
+  const ambiguous = await provider.getProjects(context());
+  assert.equal(ambiguous.available, true);
+  if (ambiguous.available) { assert.equal(ambiguous.currentProjectId, undefined); assert.match(ambiguous.reason ?? "", /multiple local project identities/); }
+  projectId = "project-a";
+  const explicit = await provider.getProjects(context());
+  assert.equal(explicit.available, true);
+  if (explicit.available) { assert.equal(explicit.currentProjectId, "project-a"); assert.equal(explicit.bindingSource, "project-id"); }
+});
+
+test("conflicting duplicate caller hosts, directories, projects or backing kinds fail closed", async t => {
+  let root = "", conflict: Record<string, unknown> = {};
+  const fixture = await pipeFixture(t, (request, socket) => {
+    if (request.method !== "tools/call") return;
+    const caller = { id: "current-thread", kind: "codex", hostId: "local", projectId: null, cwd: path.join(root, "source project") };
+    const threads = { schemaVersion: 4, pinnedThreads: [caller], threads: [{ ...caller, ...conflict }] };
+    socket.end(response(request, request.params!.tool === "list_projects" ? inventory(root) : threads));
+  });
+  root = fixture.root;
+  for (const value of [{ hostId: "other-host" }, { cwd: root }, { projectId: "project-a" }, { kind: "chatgpt" }]) {
+    conflict = value;
+    const result = await new CodexProjectsProvider({ pipePath: fixture.pipePath }).getProjects(context());
+    assert.equal(result.available, false);
+    if (!result.available) assert.match(result.reason, /conflicting current-thread/);
+  }
+});
+
+test("one shared provider keeps concurrent callers isolated when host responses arrive in reverse order", async t => {
+  let root = "";
+  const waiting = new Map<string, Array<{ request: Request; socket: Socket }>>();
+  const fixture = await pipeFixture(t, (request, socket) => {
+    if (request.method !== "tools/call") return;
+    const tool = request.params!.tool;
+    const group = waiting.get(tool) ?? [];
+    group.push({ request, socket }); waiting.set(tool, group);
+    if (group.length !== 2) return;
+    const projects = inventory(root);
+    projects.projects.push({ projectId: "project-b", label: "Other local", projectKind: "local", hostId: "local", path: path.join(root, "second project") });
+    const threads = { schemaVersion: 4, pinnedThreads: [], threads: [
+      { id: "caller-a", kind: "codex", hostId: "local", projectId: null, cwd: path.join(root, "source project") },
+      { id: "caller-b", kind: "codex", hostId: "local", projectId: null, cwd: path.join(root, "second project") },
+    ] };
+    for (const pending of [...group].reverse()) pending.socket.end(response(pending.request, tool === "list_projects" ? projects : threads));
+  });
+  root = fixture.root;
+  await mkdir(path.join(root, "second project"));
+  const provider = new CodexProjectsProvider({ pipePath: fixture.pipePath });
+  const results = await Promise.all(["caller-a", "caller-b"].map(threadId => provider.getProjects({ meta: { threadId, projectPath: path.join(root, "untrusted metadata") }, signal: new AbortController().signal })));
+  for (const [index, result] of results.entries()) {
+    assert.equal(result.available, true);
+    if (result.available) { assert.equal(result.currentProjectId, index === 0 ? "project-a" : "project-b"); assert.equal(result.bindingSource, "thread-cwd"); }
+  }
+  assert.equal(fixture.requests.filter(request => request.params?.threadId === "caller-a").length, 2);
+  assert.equal(fixture.requests.filter(request => request.params?.threadId === "caller-b").length, 2);
 });
 
 test("a real symbolic-link project preserves host ownership and matches the engine's canonical run directory", async t => {

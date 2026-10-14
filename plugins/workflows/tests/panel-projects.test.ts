@@ -74,6 +74,40 @@ test("the authoritative calling project selects its catalogue path before the fi
   assert.ok(calls.findIndex(call => call.name === "workflow_get_projects") < calls.findIndex(call => call.name === "workflow_list_runs"));
 });
 
+test("a trusted thread-cwd binding fixes the project and loads its summary and real detail without executing", async t => {
+  const projects = { ...catalogue(projectIds[0]), bindingSource: "thread-cwd" };
+  const { panel, calls, intercept } = fixture({ structuredContent: projects });
+  const record = savedRun(projects.projects[0]!.path, { id: "rea-existing-run", execution: "completed", script: "return args", args: { acceptedScope: "retained" } });
+  intercept(async name => {
+    if (name === "workflow_list_runs") return { structuredContent: { listSummary: true, totalRuns: 1, runs: [{ id: record.id, revision: record.revision, createdAt: record.createdAt, updatedAt: record.updatedAt, projectPath: record.projectPath, meta: record.meta, execution: record.execution, review: record.review, application: record.application }] } };
+    if (name === "workflow_get_run") return { structuredContent: { run: record } };
+    return undefined;
+  });
+  t.after(() => panel.teardown());
+  await panel.connected();
+  assert.equal(panel.state.projectBindingSource, "thread-cwd");
+  assert.equal(panel.state.currentProjectId, projectIds[0]);
+  assert.equal(panel.state.projectPath, record.projectPath);
+  assert.deepEqual(panel.selected, record);
+  assert.ok(calls.some(call => call.name === "workflow_get_run" && call.args.id === record.id));
+  assert.ok(calls.filter(call => call.name === "workflow_list_runs").every(call => call.args.projectPath === record.projectPath));
+  await panel.selectProject(projectIds[1]!);
+  assert.equal(panel.state.projectPath, record.projectPath);
+  assert.equal(calls.some(call => ["workflow_preview", "workflow_start", "workflow_resume", "workflow_update", "workflow_apply"].includes(call.name)), false);
+});
+
+test("unmatched or ambiguous caller directories preserve the provider's actual reason", async t => {
+  for (const reason of ["当前聊天目录没有唯一匹配的本地项目", "当前聊天目录匹配多个项目，归属存在歧义"]) {
+    const { panel, calls } = fixture({ structuredContent: { ...catalogue(), reason } });
+    t.after(() => panel.teardown());
+    await panel.connected();
+    assert.ok(panel.state.projectsError.includes(reason));
+    assert.equal(panel.canAct, false);
+    assert.equal(panel.state.currentProjectId, undefined);
+    assert.equal(calls.some(call => call.name === "workflow_list_runs" || call.name === "workflow_get_execution_settings"), false);
+  }
+});
+
 test("a stale global entry stays readable but cannot select projects, read global history or start work", async t => {
   const { panel, calls } = fixture();
   t.after(() => panel.teardown());
@@ -93,7 +127,7 @@ test("a stale global entry stays readable but cannot select projects, read globa
 });
 
 test("an explicitly unassigned context cannot adopt a catalogue current-project hint", async t => {
-  const projects = { ...catalogue(projectIds[0]), contextSource: "global-or-unassigned" as const };
+  const projects = { ...catalogue(projectIds[0]), contextSource: "global-or-unassigned" as const, bindingSource: "thread-cwd" };
   const { panel, calls } = fixture({ structuredContent: projects });
   t.after(() => panel.teardown());
   await panel.connected();

@@ -10,7 +10,7 @@ const nonempty = z.string().refine(value => value.trim().length > 0, "Expected a
 
 export interface WorkflowProject { projectId: string; label: string; path: string; hostId: "local" }
 export type WorkflowProjectsResult =
-  | { available: true; projects: WorkflowProject[]; currentProjectId?: string; contextSource: "thread" | "global-or-unassigned" }
+  | { available: true; projects: WorkflowProject[]; currentProjectId?: string; contextSource: "thread" | "global-or-unassigned"; bindingSource?: "project-id" | "thread-cwd"; reason?: string }
   | { available: false; projects: []; reason: string };
 export interface ProjectsProvider {
   getProjects(context: { meta?: unknown; signal: AbortSignal }): Promise<WorkflowProjectsResult>;
@@ -66,22 +66,30 @@ export function callerContext(metaValue: unknown): CallerContext {
 const projectResponse = z.object({ schemaVersion: z.literal(2), projects: z.array(z.object({
   projectId: nonempty, label: z.string(), projectKind: nonempty, hostId: z.string().nullable(), path: z.string().nullable().optional(),
 }).passthrough()) }).passthrough();
-const threadEntry = z.object({ id: nonempty, projectId: z.string().nullable().optional(), hostId: z.string().nullable().optional() }).passthrough();
+const threadEntry = z.object({ id: nonempty, projectId: z.string().nullable().optional(), hostId: z.string().nullable().optional(), kind: z.string().nullable().optional(), cwd: z.string().nullable().optional() }).passthrough();
 const threadsResponse = z.object({ schemaVersion: z.literal(4), pinnedThreads: z.array(threadEntry), threads: z.array(threadEntry) }).passthrough();
+type SourceThread = z.infer<typeof threadEntry>;
+
+function callerThread(threadsValue: unknown, threadId: string): SourceThread | undefined {
+  const roster = threadsResponse.parse(threadsValue);
+  const matches = [...roster.pinnedThreads, ...roster.threads].filter(thread => thread.id === threadId);
+  for (const key of ["projectId", "hostId", "kind", "cwd"] as const) {
+    if (new Set(matches.map(thread => thread[key] ?? null)).size > 1) throw new Error(`Codex returned conflicting current-thread ${key} ownership.`);
+  }
+  return matches[0];
+}
 
 export function mapProjects(projectsValue: unknown, threadsValue: unknown, threadId: string): Extract<WorkflowProjectsResult, { available: true }> {
   const inventory = projectResponse.parse(projectsValue);
-  const roster = threadsResponse.parse(threadsValue);
+  const caller = callerThread(threadsValue, threadId);
   const projects: WorkflowProject[] = inventory.projects.filter(project => project.projectKind === "local" && project.hostId === "local" && typeof project.path === "string" && path.isAbsolute(project.path)).map(project => ({ projectId: project.projectId, label: project.label, path: project.path!, hostId: "local" }));
   if (new Set(projects.map(project => project.projectId)).size !== projects.length) throw new Error("Codex returned duplicate local project identities.");
-  const matches = [...roster.pinnedThreads, ...roster.threads].filter(thread => thread.id === threadId);
-  if (new Set(matches.map(thread => thread.projectId ?? null)).size > 1) throw new Error("Codex returned conflicting current-project ownership.");
-  const projectId = sameIdentity(matches.map(thread => thread.projectId ?? undefined), "current project");
-  const current = matches.length > 0 && matches.every(thread => thread.hostId === "local") ? projects.find(project => project.projectId === projectId) : undefined;
-  return { available: true, projects, ...(current ? { currentProjectId: current.projectId } : {}), contextSource: current ? "thread" : "global-or-unassigned" };
+  const current = caller?.hostId === "local" ? projects.find(project => project.projectId === caller.projectId) : undefined;
+  const reason = !caller ? "The host did not return this caller chat in its current roster; refresh or reopen its project chat." : caller.hostId !== "local" ? "The host caller chat does not belong to the local execution host." : caller.projectId !== null && caller.projectId !== undefined ? "The caller's explicit project is not an available local project; its directory cannot override that assignment." : "The caller chat has no explicit project assignment; checking its host-reported execution directory.";
+  return { available: true, projects, ...(current ? { currentProjectId: current.projectId, bindingSource: "project-id" as const } : { reason }), contextSource: current ? "thread" : "global-or-unassigned" };
 }
 
-async function canonicalProjects(mapped: Extract<WorkflowProjectsResult, { available: true }>, signal: AbortSignal): Promise<Extract<WorkflowProjectsResult, { available: true }>> {
+async function canonicalProjects(mapped: Extract<WorkflowProjectsResult, { available: true }>, signal: AbortSignal, threadsValue: unknown, threadId: string): Promise<Extract<WorkflowProjectsResult, { available: true }>> {
   signal.throwIfAborted();
   const entries = await Promise.all(mapped.projects.map(async project => {
     try {
@@ -99,7 +107,26 @@ async function canonicalProjects(mapped: Extract<WorkflowProjectsResult, { avail
     }
   }));
   signal.throwIfAborted();
-  return { ...mapped, projects: entries.filter((project): project is WorkflowProject => project !== undefined) };
+  const projects = entries.filter((project): project is WorkflowProject => project !== undefined);
+  const result = { ...mapped, projects };
+  if (mapped.currentProjectId) return result;
+  const caller = callerThread(threadsValue, threadId);
+  if (!caller || caller.hostId !== "local" || caller.projectId !== null && caller.projectId !== undefined) return result;
+  if (caller.kind !== "codex") return { ...result, reason: "Only a host-confirmed local Codex caller chat can bind through its execution directory." };
+  if (typeof caller.cwd !== "string" || !path.isAbsolute(caller.cwd)) return { ...result, reason: "The host caller chat has no absolute execution directory; open its project chat and refresh." };
+  let directory: string;
+  try {
+    directory = await realpath(caller.cwd);
+    if (!(await stat(directory)).isDirectory()) throw new Error("not a directory");
+    signal.throwIfAborted();
+  } catch (error) {
+    signal.throwIfAborted();
+    return { ...result, reason: `The host caller chat directory is unavailable (${(error as NodeJS.ErrnoException).code ?? "not a directory"}); restore it or reopen the project chat.` };
+  }
+  const matching = projects.filter(project => project.path === directory);
+  if (matching.length !== 1) return { ...result, reason: matching.length ? "The host caller directory matches multiple local project identities; resolve the duplicate project entries before opening Workflows." : "The host caller directory does not exactly match a registered local project; parent folders and history are not used." };
+  const { reason: _reason, ...bound } = result;
+  return { ...bound, currentProjectId: matching[0]!.projectId, contextSource: "thread", bindingSource: "thread-cwd" };
 }
 
 const pipeResponse = z.union([
@@ -235,7 +262,7 @@ export class CodexProjectsProvider implements ProjectsProvider {
       if (process.platform === "win32" ? !/^\\\\[.?]\\pipe\\/i.test(this.pipePath) : !path.isAbsolute(this.pipePath)) throw new Error("Codex did not provide a local desktop project pipe.");
       const projects = await queryWithRetry(this.pipePath, caller, "list_projects", {}, context.signal, this.timeoutMs);
       const threads = await queryWithRetry(this.pipePath, caller, "list_threads", { limit: 50 }, context.signal, this.timeoutMs);
-      return await canonicalProjects(mapProjects(projects, threads, caller.threadId), context.signal);
+      return await canonicalProjects(mapProjects(projects, threads, caller.threadId), context.signal, threads, caller.threadId);
     } catch (error) { return { available: false, projects: [], reason: error instanceof Error ? error.message : "Codex project discovery is unavailable." }; }
   }
 }

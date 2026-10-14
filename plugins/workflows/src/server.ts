@@ -100,7 +100,7 @@ function registerPanelToolWithIcons(server: McpServer, register: () => void) {
 }
 
 export function createServer(engine: WorkflowEngine, options: { projects?: ProjectsProvider; readDeletionConfig?: (projectPaths: string[]) => Promise<Record<string, unknown>> } = {}) {
-  const serverInfo = { name: "workflows", version: "0.5.8", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.5.9", icons: panelIcons };
   const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server = new McpServer(serverInfo);
   const templates = new TemplateStore(engine.store);
@@ -201,7 +201,7 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
   const safe = (operation: () => Promise<Record<string, unknown>> | Record<string, unknown>): Promise<CallToolResult> => Promise.resolve().then(operation).then(result).catch(error => ({ isError: true, content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }] }));
   server.registerTool("workflow_get_projects", {
     title: "读取 Codex 本机项目",
-    description: "Read the current Codex desktop's local projects and this request's real thread/project ownership through the host's read-only app tools. Canonicalizes accessible local project directories without inferring caller ownership. Returns explicit unavailable status if pipe, caller metadata, schemas or the current project directory are unavailable. Global/unassigned callers receive no automatic project selection. Does not infer a project from cwd or shared server environment, inspect GUI databases, or start workers.",
+    description: "Read the current Codex desktop's local projects and this request's real thread/project ownership through the host's read-only app tools. Uses the caller chat's explicit local project first; a local Codex chat without a project ID may bind only by a unique canonical exact match of its host-reported directory. Never uses the plugin process directory or tool arguments as caller ownership. Returns explicit unavailable status if pipe, caller metadata, schemas or the current project directory are unavailable. Global/unassigned callers receive no automatic project selection. Does not infer a project from cwd or shared server environment, inspect GUI databases, or start workers.",
     inputSchema: {}, annotations, _meta: { ui: { visibility: ["model", "app"] } },
   }, async (_input, extra) => safe(async () => ({ ...await projects.getProjects({ meta: extra._meta, signal: extra.signal }) })));
   server.registerTool("workflow_get_execution_settings", {

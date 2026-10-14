@@ -45008,9 +45008,9 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.5.8",
+    version: "0.5.9",
     stage: "runtime-v2",
-    available: ["bounded-run-transport", "artifact-pagination", "paged-run-summaries", "bounded-diff-preview", "declared-protected-command-paths", "explicit-task-retry", "snapshot-checkpoint", "git-context-cache", "preparation-progress", "node-activity", "node-process", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
+    available: ["host-thread-directory-binding", "bounded-run-transport", "artifact-pagination", "paged-run-summaries", "bounded-diff-preview", "declared-protected-command-paths", "explicit-task-retry", "snapshot-checkpoint", "git-context-cache", "preparation-progress", "node-activity", "node-process", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: true, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree"], submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
     ui: { available: true, stage: "live", hostIntegration: "requires-version-specific-verification", exampleDataOnly: false, entrypoints: ["thread"], projectChatRequired: true, projectSelection: "fixed-current-chat-project", unassignedContext: "project-guidance-with-actions-disabled", programmaticProjectPath: "explicit-user-authorized-target" },
     recovery: { automatic: false, mode: "launch-order-replay", stoppedAgentsRestart: true },
@@ -45868,7 +45868,7 @@ var CodexAdapter = class {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.8" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.9" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config2 = object4(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config2, cwd);
@@ -46026,7 +46026,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.8" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.9" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -46257,7 +46257,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.8" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.5.9" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object4(object4(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== void 0 || request.reasoningEffort !== void 0) {
@@ -47452,27 +47452,33 @@ var projectResponse = external_exports.object({ schemaVersion: external_exports.
   hostId: external_exports.string().nullable(),
   path: external_exports.string().nullable().optional()
 }).passthrough()) }).passthrough();
-var threadEntry = external_exports.object({ id: nonempty, projectId: external_exports.string().nullable().optional(), hostId: external_exports.string().nullable().optional() }).passthrough();
+var threadEntry = external_exports.object({ id: nonempty, projectId: external_exports.string().nullable().optional(), hostId: external_exports.string().nullable().optional(), kind: external_exports.string().nullable().optional(), cwd: external_exports.string().nullable().optional() }).passthrough();
 var threadsResponse = external_exports.object({ schemaVersion: external_exports.literal(4), pinnedThreads: external_exports.array(threadEntry), threads: external_exports.array(threadEntry) }).passthrough();
+function callerThread(threadsValue, threadId) {
+  const roster = threadsResponse.parse(threadsValue);
+  const matches = [...roster.pinnedThreads, ...roster.threads].filter((thread) => thread.id === threadId);
+  for (const key of ["projectId", "hostId", "kind", "cwd"]) {
+    if (new Set(matches.map((thread) => thread[key] ?? null)).size > 1) throw new Error(`Codex returned conflicting current-thread ${key} ownership.`);
+  }
+  return matches[0];
+}
 function mapProjects(projectsValue, threadsValue, threadId) {
   const inventory2 = projectResponse.parse(projectsValue);
-  const roster = threadsResponse.parse(threadsValue);
+  const caller = callerThread(threadsValue, threadId);
   const projects = inventory2.projects.filter((project) => project.projectKind === "local" && project.hostId === "local" && typeof project.path === "string" && path8.isAbsolute(project.path)).map((project) => ({ projectId: project.projectId, label: project.label, path: project.path, hostId: "local" }));
   if (new Set(projects.map((project) => project.projectId)).size !== projects.length) throw new Error("Codex returned duplicate local project identities.");
-  const matches = [...roster.pinnedThreads, ...roster.threads].filter((thread) => thread.id === threadId);
-  if (new Set(matches.map((thread) => thread.projectId ?? null)).size > 1) throw new Error("Codex returned conflicting current-project ownership.");
-  const projectId = sameIdentity(matches.map((thread) => thread.projectId ?? void 0), "current project");
-  const current2 = matches.length > 0 && matches.every((thread) => thread.hostId === "local") ? projects.find((project) => project.projectId === projectId) : void 0;
-  return { available: true, projects, ...current2 ? { currentProjectId: current2.projectId } : {}, contextSource: current2 ? "thread" : "global-or-unassigned" };
+  const current2 = caller?.hostId === "local" ? projects.find((project) => project.projectId === caller.projectId) : void 0;
+  const reason = !caller ? "The host did not return this caller chat in its current roster; refresh or reopen its project chat." : caller.hostId !== "local" ? "The host caller chat does not belong to the local execution host." : caller.projectId !== null && caller.projectId !== void 0 ? "The caller's explicit project is not an available local project; its directory cannot override that assignment." : "The caller chat has no explicit project assignment; checking its host-reported execution directory.";
+  return { available: true, projects, ...current2 ? { currentProjectId: current2.projectId, bindingSource: "project-id" } : { reason }, contextSource: current2 ? "thread" : "global-or-unassigned" };
 }
-async function canonicalProjects(mapped, signal) {
+async function canonicalProjects(mapped, signal, threadsValue, threadId) {
   signal.throwIfAborted();
   const entries = await Promise.all(mapped.projects.map(async (project) => {
     try {
-      const directory = await realpath4(project.path);
-      if (!(await stat(directory)).isDirectory()) throw new Error("not a directory");
+      const directory2 = await realpath4(project.path);
+      if (!(await stat(directory2)).isDirectory()) throw new Error("not a directory");
       signal.throwIfAborted();
-      return { ...project, path: directory };
+      return { ...project, path: directory2 };
     } catch (error62) {
       signal.throwIfAborted();
       if (project.projectId === mapped.currentProjectId) {
@@ -47483,7 +47489,26 @@ async function canonicalProjects(mapped, signal) {
     }
   }));
   signal.throwIfAborted();
-  return { ...mapped, projects: entries.filter((project) => project !== void 0) };
+  const projects = entries.filter((project) => project !== void 0);
+  const result2 = { ...mapped, projects };
+  if (mapped.currentProjectId) return result2;
+  const caller = callerThread(threadsValue, threadId);
+  if (!caller || caller.hostId !== "local" || caller.projectId !== null && caller.projectId !== void 0) return result2;
+  if (caller.kind !== "codex") return { ...result2, reason: "Only a host-confirmed local Codex caller chat can bind through its execution directory." };
+  if (typeof caller.cwd !== "string" || !path8.isAbsolute(caller.cwd)) return { ...result2, reason: "The host caller chat has no absolute execution directory; open its project chat and refresh." };
+  let directory;
+  try {
+    directory = await realpath4(caller.cwd);
+    if (!(await stat(directory)).isDirectory()) throw new Error("not a directory");
+    signal.throwIfAborted();
+  } catch (error62) {
+    signal.throwIfAborted();
+    return { ...result2, reason: `The host caller chat directory is unavailable (${error62.code ?? "not a directory"}); restore it or reopen the project chat.` };
+  }
+  const matching = projects.filter((project) => project.path === directory);
+  if (matching.length !== 1) return { ...result2, reason: matching.length ? "The host caller directory matches multiple local project identities; resolve the duplicate project entries before opening Workflows." : "The host caller directory does not exactly match a registered local project; parent folders and history are not used." };
+  const { reason: _reason, ...bound } = result2;
+  return { ...bound, currentProjectId: matching[0].projectId, contextSource: "thread", bindingSource: "thread-cwd" };
 }
 var pipeResponse = external_exports.union([
   external_exports.object({ jsonrpc: external_exports.literal("2.0"), id: external_exports.string(), result: external_exports.unknown() }).strict(),
@@ -47632,7 +47657,7 @@ var CodexProjectsProvider = class {
       if (process.platform === "win32" ? !/^\\\\[.?]\\pipe\\/i.test(this.pipePath) : !path8.isAbsolute(this.pipePath)) throw new Error("Codex did not provide a local desktop project pipe.");
       const projects = await queryWithRetry(this.pipePath, caller, "list_projects", {}, context.signal, this.timeoutMs);
       const threads = await queryWithRetry(this.pipePath, caller, "list_threads", { limit: 50 }, context.signal, this.timeoutMs);
-      return await canonicalProjects(mapProjects(projects, threads, caller.threadId), context.signal);
+      return await canonicalProjects(mapProjects(projects, threads, caller.threadId), context.signal, threads, caller.threadId);
     } catch (error62) {
       return { available: false, projects: [], reason: error62 instanceof Error ? error62.message : "Codex project discovery is unavailable." };
     }
@@ -48638,7 +48663,7 @@ function registerPanelToolWithIcons(server2, register) {
   }
 }
 function createServer(engine2, options = {}) {
-  const serverInfo = { name: "workflows", version: "0.5.8", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.5.9", icons: panelIcons };
   const panelHtml = readFileSync3(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);
@@ -48732,7 +48757,7 @@ function createServer(engine2, options = {}) {
   const safe = (operation) => Promise.resolve().then(operation).then(result).catch((error62) => ({ isError: true, content: [{ type: "text", text: error62 instanceof Error ? error62.message : String(error62) }] }));
   server2.registerTool("workflow_get_projects", {
     title: "\u8BFB\u53D6 Codex \u672C\u673A\u9879\u76EE",
-    description: "Read the current Codex desktop's local projects and this request's real thread/project ownership through the host's read-only app tools. Canonicalizes accessible local project directories without inferring caller ownership. Returns explicit unavailable status if pipe, caller metadata, schemas or the current project directory are unavailable. Global/unassigned callers receive no automatic project selection. Does not infer a project from cwd or shared server environment, inspect GUI databases, or start workers.",
+    description: "Read the current Codex desktop's local projects and this request's real thread/project ownership through the host's read-only app tools. Uses the caller chat's explicit local project first; a local Codex chat without a project ID may bind only by a unique canonical exact match of its host-reported directory. Never uses the plugin process directory or tool arguments as caller ownership. Returns explicit unavailable status if pipe, caller metadata, schemas or the current project directory are unavailable. Global/unassigned callers receive no automatic project selection. Does not infer a project from cwd or shared server environment, inspect GUI databases, or start workers.",
     inputSchema: {},
     annotations,
     _meta: { ui: { visibility: ["model", "app"] } }

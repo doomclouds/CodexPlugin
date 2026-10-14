@@ -24,7 +24,7 @@ export interface ExecutionSettingsResponse {
   mainAgentContextAvailable: false;
 }
 export interface CodexProject { projectId: string; label: string; path: string; hostId: string }
-export interface ProjectsResponse { contextSource?: "thread" | "global-or-unassigned"; available: boolean; projects: CodexProject[]; currentProjectId?: string; reason?: string }
+export interface ProjectsResponse { contextSource?: "thread" | "global-or-unassigned"; bindingSource?: string; available: boolean; projects: CodexProject[]; currentProjectId?: string; reason?: string }
 
 export interface WorkflowActivity { id: string; kind: "initializing" | "command" | "files" | "search" | "mcp" | "message" | "waiting"; label: string; status: "running" | "completed" | "failed" | "interrupted"; startedAt: string; endedAt?: string; detail?: string }
 export interface Preparation { startedAt: string; endedAt?: string; stages: Array<{ id: "settings" | "project" | "workspace" | "validation"; label: string; status: "running" | "completed" | "failed" | "interrupted"; startedAt: string; endedAt?: string }> }
@@ -174,6 +174,7 @@ export interface PanelState {
   selectedProjectId?: string | undefined;
   currentProjectId?: string | undefined;
   projectContextSource?: "thread" | "global-or-unassigned";
+  projectBindingSource?: string | undefined;
   settings?: ExecutionSettingsResponse;
   settingsProjectPath: string;
   settingsBusy: boolean;
@@ -193,7 +194,7 @@ export function executionSettingsPayload(value: Record<string, unknown>): Execut
 }
 
 export function projectsPayload(value: Record<string, unknown>): ProjectsResponse {
-  if (typeof value.available !== "boolean" || !Array.isArray(value.projects) || value.reason !== undefined && typeof value.reason !== "string" || value.currentProjectId !== undefined && typeof value.currentProjectId !== "string") throw new Error("宿主未返回有效的项目列表");
+  if (typeof value.available !== "boolean" || !Array.isArray(value.projects) || value.reason !== undefined && typeof value.reason !== "string" || value.bindingSource !== undefined && typeof value.bindingSource !== "string" || value.currentProjectId !== undefined && typeof value.currentProjectId !== "string") throw new Error("宿主未返回有效的项目列表");
   const ids = new Set<string>();
   for (const project of value.projects) {
     if (!project || typeof project.projectId !== "string" || !project.projectId || typeof project.label !== "string" || typeof project.path !== "string" || !project.path || typeof project.hostId !== "string" || ids.has(project.projectId)) throw new Error("宿主项目列表包含无效项目");
@@ -362,12 +363,13 @@ export class WorkflowPanelController {
       const project = data.available && data.contextSource !== "global-or-unassigned" ? data.projects.find(project => project.projectId === data.currentProjectId) : undefined;
       this.state.currentProjectId = project?.projectId;
       this.state.projectContextSource = project ? "thread" : "global-or-unassigned";
+      this.state.projectBindingSource = project ? data.bindingSource : undefined;
       this.state.selectedProjectId = project?.projectId;
       this.state.projectPath = project?.path ?? "";
-      if (!project) { this.state.runs = []; this.state.selectedRun = undefined; this.state.projectsError = data.available ? "工作流仅在项目聊天中使用，请从项目内打开。" : `暂时无法确认所属项目：${data.reason || "宿主项目接口不可用"}。请从项目聊天打开并刷新。`; return; }
+      if (!project) { this.state.runs = []; this.state.selectedRun = undefined; this.state.projectsError = data.reason ? `无法确认所属项目：${data.reason}` : data.available ? "工作流仅在项目聊天中使用，请从项目内打开。" : "暂时无法确认所属项目：宿主项目接口不可用。请从项目聊天打开并刷新。"; return; }
       this.state.runs = this.state.runs.filter(run => run.projectPath === project.path);
       if (!this.state.runs.some(run => run.id === this.state.selectedRun)) this.state.selectedRun = undefined;
-    } catch (error) { if (!this.closing && request === this.projectsRequest) { this.state.currentProjectId = undefined; this.state.selectedProjectId = undefined; this.state.projectContextSource = "global-or-unassigned"; this.state.projectPath = ""; this.state.projectsError = `暂时无法确认所属项目：${errorMessage(error)}。请从项目聊天打开并刷新。`; } }
+    } catch (error) { if (!this.closing && request === this.projectsRequest) { this.state.currentProjectId = undefined; this.state.selectedProjectId = undefined; this.state.projectContextSource = "global-or-unassigned"; this.state.projectBindingSource = undefined; this.state.projectPath = ""; this.state.projectsError = `暂时无法确认所属项目：${errorMessage(error)}。请从项目聊天打开并刷新。`; } }
     finally { if (request === this.projectsRequest) this.state.projectsBusy = false; this.changed(); }
   }
 
@@ -1125,7 +1127,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     root.dataset.connection = state.connection;
     root.dataset.reconnecting = String(state.reconnecting);
     const boundProject = controller.currentProject;
-    const projectOptions = boundProject ? `<option value="${escapeHtml(boundProject.projectId)}" selected>${escapeHtml(boundProject.label)}</option>` : '<option value="">请从项目聊天打开</option>';
+    const projectOptions = boundProject ? `<option value="${escapeHtml(boundProject.projectId)}" selected>${escapeHtml(boundProject.label)}</option>` : `<option value="">${state.projectsError && !state.projectsError.startsWith("工作流仅在项目聊天") ? "所属项目待确认" : "请从项目聊天打开"}</option>`;
     if (project.innerHTML !== projectOptions) project.innerHTML = projectOptions;
     project.disabled = true;
     project.title = "使用当前项目聊天，不能切换工作流目录";
@@ -1170,7 +1172,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (element("#wf-actions").innerHTML !== actionMarkup) element("#wf-actions").innerHTML = actionMarkup;
     const currentTask = run?.tasks.find(task => task.status === "running" || task.status === "stopping");
     const stage = run?.preparation?.stages.find(value => value.status === "running");
-    element("#wf-current-action").textContent = (run && stale ? state.reconnecting ? "正在恢复连接，核对实际进度" : "连接已中断，显示上次读取的进度" : !controller.projectBound ? state.projectsBusy ? "正在确认当前聊天所属项目" : "请从项目聊天打开 Workflows" : summary ? state.detailsBusy ? "正在读取工作流详情" : "运行详情尚未就绪，请刷新后查看" : run?.deletionPending ? "清理未完成，可从更多操作中重试删除" : reviewFailed ? run!.tasks.every(task => task.status === "completed") ? "改动审查失败，已完成任务保留，可重试审查" : "改动审查失败，部分任务未完成，可继续恢复" : resultFailure ? `${resultFailure.phase ? resultFailure.phase + "：" : ""}结果检查未通过，查看原因后选择重试节点` : run?.execution === "preparing" ? stage?.label ?? "正在准备工作流" : run?.execution === "stopped" ? stopSummary(run.stopReason) : currentTask?.currentActivity?.label ?? currentTask?.label ?? (run?.execution === "failed" ? run.tasks.length ? "工作流执行失败，点击失败节点查看原因" : "启动准备失败，点击准备步骤查看原因" : run?.execution === "completed" ? "工作流执行完成" : input?.meta?.description || definition?.description || input?.meta?.name || "选择工作流，查看执行过程")).slice(0, 160);
+    element("#wf-current-action").textContent = (run && stale ? state.reconnecting ? "正在恢复连接，核对实际进度" : "连接已中断，显示上次读取的进度" : !controller.projectBound ? state.projectsBusy ? "正在确认当前聊天所属项目" : state.projectsError && !state.projectsError.startsWith("工作流仅在项目聊天") ? "无法确认当前聊天所属项目，请查看具体原因" : "请从项目聊天打开 Workflows" : summary ? state.detailsBusy ? "正在读取工作流详情" : "运行详情尚未就绪，请刷新后查看" : run?.deletionPending ? "清理未完成，可从更多操作中重试删除" : reviewFailed ? run!.tasks.every(task => task.status === "completed") ? "改动审查失败，已完成任务保留，可重试审查" : "改动审查失败，部分任务未完成，可继续恢复" : resultFailure ? `${resultFailure.phase ? resultFailure.phase + "：" : ""}结果检查未通过，查看原因后选择重试节点` : run?.execution === "preparing" ? stage?.label ?? "正在准备工作流" : run?.execution === "stopped" ? stopSummary(run.stopReason) : currentTask?.currentActivity?.label ?? currentTask?.label ?? (run?.execution === "failed" ? run.tasks.length ? "工作流执行失败，点击失败节点查看原因" : "启动准备失败，点击准备步骤查看原因" : run?.execution === "completed" ? "工作流执行完成" : input?.meta?.description || definition?.description || input?.meta?.name || "选择工作流，查看执行过程")).slice(0, 160);
     const latestAt = [currentTask?.currentActivity?.endedAt, currentTask?.currentActivity?.startedAt, run?.logs.at(-1)?.at, run?.updatedAt].filter((value): value is string => !!value && Number.isFinite(Date.parse(value))).sort((left, right) => Date.parse(right) - Date.parse(left))[0];
     const observedNow = stale && run && Number.isFinite(Date.parse(run.updatedAt)) ? Date.parse(run.updatedAt) : Date.now();
     const elapsed = elapsedLabel(run?.startedAt ?? run?.preparation?.startedAt, run?.endedAt, observedNow);
