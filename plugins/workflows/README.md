@@ -2,9 +2,11 @@
 
 <img src="assets/workflows-icon.png" alt="Workflows 产品图标" width="64" height="64">
 
-`0.4.1` 提供工作流选择、参数输入和执行流程图。每个工作流声明自己的输入项，面板把填写的值传入脚本的 `args`，点击启动后才执行。JavaScript 表达分支、循环、并行和按结果调度；真实 Codex worker 使用原生文件、命令和修改工具，以及本次授权的 MCP。运行可保存、停止、恢复、审查和跨项目复用。
+`0.4.2` 提供工作流选择、参数输入和执行流程图。每个工作流声明自己的输入项，面板把填写的值传入脚本的 `args`，点击启动后才执行。JavaScript 表达分支、循环、并行和按结果调度；真实 Codex worker 使用原生文件、命令和修改工具，以及本次授权的 MCP。运行可保存、停止、恢复、审查和跨项目复用。
 
 需要 Node.js 22 或更新版本、支持 `app-server` 的 Codex CLI 和已有登录。安装版本与当前聊天实际加载的版本分别核对。插件不接管用户登录。
+
+根级 `mcp.json` 使用 Agent Plugin 的标准 stdio 字段。Codex 的 `.codex-plugin/plugin.json` 环境兼容清单只转发宿主的项目接口变量；执行入口仍由根清单定义，不固化管道地址或用户目录。
 
 ## 使用
 
@@ -81,11 +83,12 @@ return await agent(`核实并汇总：${JSON.stringify(findings.filter(Boolean))
 npm run typecheck
 npm run build
 npm run smoke
+npm run smoke:host
 npm run smoke:real
 node --experimental-strip-types scripts/real-protocol-smoke.ts --real-workers
 node --experimental-strip-types scripts/real-repository-smoke.ts --project <repository> --real-commands
 ```
 
-普通检查不调用模型。两个真实验证入口显式调用已登录 Codex 的默认模型；协议验证使用一次性仓库与私有临时配置，检查原生工具、授权 MCP、拉取、联网安装、构建、停止恢复、持久化和审查应用，不修改用户真实 MCP 配置。测试环境目录按系统 API 创建，没有固化开发者目录。
+普通检查不调用模型。`smoke:host` 要求 `CODEX_CLI_PATH` 指向实际桌面 CLI，在临时用户目录和市场中检查宿主加载、18 个工具及 thread/global 面板入口；不发送模型 turn、不修改用户真实配置或安装。两个真实 worker 验证入口显式调用已登录 Codex 的默认模型；协议验证使用一次性仓库与私有临时配置，检查原生工具、授权 MCP、拉取、联网安装、构建、停止恢复、持久化和审查应用，不修改用户真实 MCP 配置。测试环境目录按系统 API 创建，没有固化开发者目录。
 
 `runtime/` 包含自包含服务与脚本执行器，面板由 MCP App 资源打开。开发用 localhost 预览不代表原生宿主验收。更新后旧进程缓存面板、脚本执行器与内置定义，避免删除旧安装目录导致运行资源失效；新的能力仍须重新加载新版服务后才能使用。

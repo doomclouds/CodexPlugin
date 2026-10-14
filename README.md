@@ -64,13 +64,13 @@ codex plugin add workflows@codex-plugin-workspace
 
 ## Workflows
 
-`workflows 0.4.1` 支持从面板选择工作流、填写其声明的可选或必填参数，再启动、停止和恢复执行。流程图展示节点的实际状态；插件默认模型与思考深度可修改，节点可单独覆盖。真实 worker 使用原生 Codex 工具与已授权 MCP。网络、文件写入与工具范围分别声明。支持文件快照和完整独立 Git checkout，结束后审查并按授权应用。具体业务由工作流表达，不为每种任务增加专用插件代码。
+`workflows 0.4.2` 支持从面板选择工作流、填写其声明的可选或必填参数，再启动、停止和恢复执行。流程图展示节点的实际状态；插件默认模型与思考深度可修改，节点可单独覆盖。真实 worker 使用原生 Codex 工具与已授权 MCP。网络、文件写入与工具范围分别声明。支持文件快照和完整独立 Git checkout，结束后审查并按授权应用。具体业务由工作流表达，不为每种任务增加专用插件代码。
 
 独立工作流库保存脚本和默认输入，不绑定项目；同一定义可以为多个项目创建独立运行。没有参数声明的工作流可以直接启动。面板按宿主上下文继承主题、样式变量、字体与字号。宿主尚未提供主对话模型与思考深度，未配置的节点使用运行开始时记录的工作流默认值。
 
 0.2.1 使用固定面板资源地址并在启动时缓存 HTML，兼容旧版地址，防止升级删除旧缓存后面板资源不可读。仍连接 0.1.4 的宿主必须重新加载服务。故障与修复范围见 [升级修复记录](docs/workflows-panel-upgrade-fix.md)。
 
-商城与插件图标使用 Image Gen 生成，资产和提示词见 [图标说明](assets/icon-prompts.md)。Workflows 图标已接入插件清单；当前 Codex 市场协议只提供市场名称，商城图标用于仓库及产品展示素材。
+商城与插件图标使用 Image Gen 生成，资产和提示词见 [图标说明](assets/icon-prompts.md)。Workflows 图标已接入插件清单。当前 Codex 的“市场”来源列表固定显示通用图标，市场接口只提供显示名称；仓库商城图标用于仓库及产品展示素材，不能替换该列表图标。
 
 使用见 [插件说明](plugins/workflows/README.md)，深入分析见 [Claude 实现研究](docs/workflows/claude-implementation-analysis-2026.md)，开发记录见 [设计记录](docs/workflows/design.md) 与 [运行时设计](docs/workflows/runtime-design.md)，Claude 依据及差异见 [参考说明](docs/workflows/claude-reference.md)。宿主扩展边界见 [能力核对](docs/codex-extension-boundaries.md)。
 

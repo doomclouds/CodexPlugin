@@ -21,9 +21,31 @@ async function skillValidatorFixture(t) {
   await copyFile(new URL("../validate-plugins.mjs", import.meta.url), validator);
   return {
     writeSkill: content => put("plugins/demo/skills/demo/SKILL.md", content),
+    writeMcp: servers => put("plugins/demo/mcp.json", JSON.stringify({ $schema: "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json", mcpServers: servers })),
+    writeOverlay: overlay => put("plugins/demo/.codex-plugin/plugin.json", JSON.stringify(overlay)),
     validate: () => exec(process.execPath, [validator], { cwd: root, timeout: 10000, windowsHide: true }),
   };
 }
+
+test("native plugin validation rejects unsupported stdio fields before publication", async t => {
+  const { writeMcp, validate } = await skillValidatorFixture(t);
+  const server = { type: "stdio", command: "node", args: [], cwd: "${PLUGIN_ROOT}" };
+  await writeMcp({ demo: server });
+  assert.match((await validate()).stdout, /Validated demo:/);
+  // This was accepted by our package check but rejected by the desktop loader.
+  await writeMcp({ demo: { ...server, env_vars: ["CODEX_APP_TOOLS_PIPE_PATH"] } });
+  await assert.rejects(validate(), error => error.code === 1 && /Unsupported native stdio field: env_vars/.test(error.stderr));
+});
+
+test("Codex environment overlay supplements only a declared native stdio server", async t => {
+  const { writeMcp, writeOverlay, validate } = await skillValidatorFixture(t);
+  await writeMcp({ demo: { type: "stdio", command: "node" } });
+  const server = { command: "node", env_vars: ["CODEX_APP_TOOLS_PIPE_PATH"] };
+  await writeOverlay({ name: "demo", mcpServers: { demo: server } });
+  assert.match((await validate()).stdout, /Validated demo:/);
+  await writeOverlay({ name: "demo", mcpServers: { missing: server } });
+  await assert.rejects(validate(), error => error.code === 1 && /must refer to a native stdio server/.test(error.stderr));
+});
 
 for (const [format, newline] of [["LF", "\n"], ["CRLF", "\r\n"]]) {
   test(`plugin validation accepts ${format} skill metadata`, async t => {

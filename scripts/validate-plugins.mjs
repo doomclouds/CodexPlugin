@@ -59,6 +59,10 @@ for (const name of pluginDirs) {
     assert.equal(mcp.$schema, "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json");
     for (const server of Object.values(mcp.mcpServers)) {
       if (server.type === "stdio") {
+        // Agent Plugin stdio is stricter than Codex's user MCP configuration.
+        // Codex-only env forwarding belongs in the legacy compatibility overlay.
+        const supported = new Set(["type", "command", "args", "env", "cwd"]);
+        for (const key of Object.keys(server)) assert.ok(supported.has(key), `Unsupported native stdio field: ${key}`);
         assert.ok(server.command);
         if (server.cwd) {
           assert.ok(server.cwd === "${PLUGIN_ROOT}" || server.cwd.startsWith("${PLUGIN_DATA}/") || server.cwd === "${PLUGIN_DATA}" || server.cwd.startsWith("${PLUGIN_ROOT}/") || server.cwd.startsWith("./"));
@@ -74,6 +78,19 @@ for (const name of pluginDirs) {
         assert.ok(["streamable-http", "sse"].includes(server.type), "Unknown MCP transport");
         assert.ok(new URL(server.url).protocol === "https:" || new URL(server.url).protocol === "http:");
       }
+    }
+  }
+
+  const overlay = await readOptionalJson(`plugins/${name}/.codex-plugin/plugin.json`);
+  if (overlay) {
+    assert.equal(overlay.name, name, "Codex environment overlay must retain plugin identity");
+    assert.ok(overlay.mcpServers && typeof overlay.mcpServers === "object", "Expected inline Codex MCP overlay");
+    for (const [serverName, server] of Object.entries(overlay.mcpServers)) {
+      const native = mcp?.mcpServers?.[serverName];
+      assert.equal(native?.type, "stdio", "Codex environment overlay must refer to a native stdio server");
+      // The legacy parser needs a command; the native command still owns startup.
+      assert.equal(server.command, native.command, "Codex overlay command must match the native server");
+      assert.ok(Array.isArray(server.env_vars) && server.env_vars.every(variable => typeof variable === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(variable)), "Invalid Codex forwarded environment names");
     }
   }
 

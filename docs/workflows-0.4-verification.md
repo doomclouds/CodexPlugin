@@ -32,3 +32,15 @@ Windows 私有文件夹具需要先在其自行创建的临时根目录设置私
 项目入口改为 Codex 项目下拉框，不提供目录输入。项目对话调用通过宿主逐次注入的真实线程元数据读取项目归属，匹配时自动选择；全局临时线程没有项目归属时保持待选择。本机宿主接口读取到 4 个真实本机项目；不从 cwd、共享进程环境或历史记录推断当前项目，不读取 GUI 私有数据库。该集成检测本机桌面接口能力，缺少环境、上下文或协议不兼容时明确报不可用。宿主原生工具的每次子调用使用独立 callId，保留真实 threadId/turnId。
 
 本修订验证：68 项前端控制器/项目/参数/图回归通过，17 项项目 socket 与 MCP 路由检查通过，类型、构建、隔离 MCP smoke 与发布路径检查通过。浏览器验证了自动选择、全局待选择、正确目录下发、刷新保留手动选择、运行期间禁用切换、弹窗焦点与取消、深浅色圆环和 320px 布局。真实接口枚举与模拟 UI 验证分别记录，未调用真实模型或重跑全量 Git/子模块套件。
+
+## 0.4.2 宿主加载修复
+
+0.4.1 在根级 Agent Plugin `mcp.json` 中声明了 Codex 用户配置才支持的 `env_vars`。桌面实际使用的 Codex CLI `0.162.0-alpha.17.2` 在启动服务前以 `unknown field env_vars` 拒绝该清单，导致重启后入口消失。此前隔离 MCP smoke 手动启动执行文件，未经过宿主插件加载器，因此没有覆盖此失败。
+
+根级清单现在只使用标准 stdio 字段，包内 `.codex-plugin/plugin.json` 使用宿主支持的环境兼容 overlay 转发项目接口变量。该 overlay 仅补充同名服务的环境转发，不替换 native 执行入口，也不写入管道地址。对应版本的 [宿主实现](https://github.com/openai/codex/blob/rust-v0.162.0-alpha.17.2/codex-rs/core-plugins/src/agent_plugin_mcp_overlay.rs) 明确处理此兼容路径。
+
+类型检查、构建、87 文件发布路径验证、18 项可移植性与清单回归、隔离 MCP smoke 通过。新增回归先复现旧发布检查错误接受 `env_vars`，再确认新检查拒绝该字段；环境 overlay 只能补充已声明的 stdio 服务。真实桌面 CLI 的一次性目录验证确认环境变量实际转发，native `${PLUGIN_ROOT}` 正常展开；`${VAR}` 和 `${env:VAR}` 保持原文字面值，不能代替 overlay。验证使用哨兵值，无模型调用，也未修改真实用户配置。
+
+可重复的 `smoke:host` 使用桌面自带的 `0.162.0-alpha.17.2` 加载正式包，三种清单变体最终共 25.1 秒通过：旧根级字段使 `plugin/read` 没有 MCP 服务；标准根清单和最终 overlay 清单均实际连接成功，发现 18 个工具与 `workflow_open_panel` 的 thread/global 入口。通过宿主实际调用生产 `workflow_get_projects` 工具，还确认了没有 overlay 时变量缺失、使用最终 overlay 后哨兵变量成功转发。未调用模型，临时安装与配置均已清理。该验证证明宿主加载器接受并注册入口，不代表当前主窗口已经重新加载或原生像素已验收。
+
+当前桌面插件设置的“市场”来源列表固定使用通用图标，没有读取市场自定义图标的分支。对应版本的 [市场接口](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/app-server-protocol/src/protocol/v2/plugin.rs#L629-L631) 只有 `displayName`。市场资源已在仓库中用于展示；Workflows 自身的插件与 MCP 图标仍有独立配置。

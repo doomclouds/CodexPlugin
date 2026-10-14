@@ -45008,7 +45008,7 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.4.1",
+    version: "0.4.2",
     stage: "runtime-v2",
     available: ["list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: true, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree"], submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
@@ -45578,7 +45578,7 @@ var CodexAdapter = class {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.2" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config2 = object3(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config2);
@@ -45715,7 +45715,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.2" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -45881,7 +45881,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.4.2" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object3(object3(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== void 0 || request.reasoningEffort !== void 0) {
@@ -47048,7 +47048,7 @@ function registerPanelToolWithIcons(server2, register) {
   }
 }
 function createServer(engine2, options = {}) {
-  const serverInfo = { name: "workflows", version: "0.4.1", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.4.2", icons: panelIcons };
   const panelHtml = readFileSync3(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);
