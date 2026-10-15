@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { TestContext } from "node:test";
-import { captureLocalWorkspaceCheckpoints, createLocalWorkspace, localWorkspaceDiff, localWorkspaceFingerprint, validateLocalWorkspace } from "../src/local-workspace.ts";
+import { captureLocalWorkspaceCheckpoints, createLocalWorkspace, localWorkspaceDiff, localWorkspaceFingerprint, validateLocalWorkspace, validateLocalWorkspaceForDeletion } from "../src/local-workspace.ts";
 import { readOnlyGitContextDigest } from "../src/submodules.ts";
+import { requireFileSymlinks } from "./fixtures/symlink.ts";
 const exec = promisify(execFile);
 async function fixture(t: TestContext) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "workflows-local-test-")));
@@ -17,7 +18,7 @@ async function fixture(t: TestContext) {
   t.after(() => rm(root, { recursive: true, force: true }));
   return { root, project, run };
 }
-async function git(project: string, args: string[]) { return (await exec("git", args, { cwd: project, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } })).stdout; }
+async function git(project: string, args: string[]) { return (await exec("git", ["-c", "core.autocrlf=false", "-c", "core.eol=lf", ...args], { cwd: project, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } })).stdout; }
 async function commit(project: string) { await git(project, ["add", "--all"]); await git(project, ["-c", "user.name=Workflow Fixture", "-c", "user.email=workflow@example.invalid", "commit", "--quiet", "-m", "Add fixture"]); }
 
 test("local non-Git baseline uses current contents and reports actual original-project writes", async t => {
@@ -36,6 +37,66 @@ test("local non-Git baseline uses current contents and reports actual original-p
   assert.match(diff.text, /dirty baseline/); assert.match(diff.text, /changed by worker/); assert.equal(diff.previewTruncated, false);
   assert.equal(await readFile(path.join(project, "keep.txt"), "utf8"), "existing user edits\n");
   assert.equal((await readdir(project)).includes(".git"), false);
+});
+
+test("local directory identities survive JSON persistence as exact decimal strings", async t => {
+  const { project, run } = await fixture(t);
+  await writeFile(path.join(project, "code.txt"), "base\n");
+  const workspace = await createLocalWorkspace(project, run);
+  const identity = await lstat(project, { bigint: true });
+  assert.deepEqual(workspace.rootIdentity, { dev: identity.dev.toString(), ino: identity.ino.toString() });
+  const persisted = JSON.parse(JSON.stringify(workspace));
+  await validateLocalWorkspace(persisted, project, run);
+  await validateLocalWorkspaceForDeletion(persisted, project, run);
+  const adjacent = [identity.ino + 1n, identity.ino - 1n].find(value => value >= 0n && Number(value) === Number(identity.ino)) ?? identity.ino + 1n;
+  await assert.rejects(validateLocalWorkspace({ ...workspace, rootIdentity: { dev: identity.dev.toString(), ino: adjacent.toString() } }, project, run), /identity changed/);
+});
+
+test("legacy numeric identities retain exact checkpoint compatibility only within safe integer precision", async t => {
+  const { project, run } = await fixture(t);
+  await writeFile(path.join(project, "code.txt"), "base\n");
+  const workspace = await createLocalWorkspace(project, run);
+  const identity = await lstat(project);
+  const legacy = { ...workspace, rootIdentity: { dev: identity.dev, ino: identity.ino } };
+  if (Number.isSafeInteger(identity.dev) && Number.isSafeInteger(identity.ino)) {
+    await validateLocalWorkspace(legacy, project, run);
+    const first = await localWorkspaceFingerprint(legacy);
+    assert.equal(await localWorkspaceFingerprint(JSON.parse(JSON.stringify(legacy))), first);
+    assert.deepEqual(legacy.rootIdentity, { dev: identity.dev, ino: identity.ino });
+  } else await assert.rejects(validateLocalWorkspace(legacy, project, run), /precision.*new preview/i);
+  const rounded = { ...workspace, rootIdentity: { dev: 1, ino: Number.MAX_SAFE_INTEGER + 1 } };
+  await assert.rejects(validateLocalWorkspace(rounded, project, run), /precision.*new preview/i);
+  await validateLocalWorkspaceForDeletion(rounded, project, run);
+});
+
+test("portable local manifests and legacy native manifests both retain their checkpoint encoding", async t => {
+  const { project, run } = await fixture(t);
+  await mkdir(path.join(project, "nested")); await writeFile(path.join(project, "nested", "code.txt"), "base\n");
+  const workspace = await createLocalWorkspace(project, run);
+  assert.deepEqual(Object.keys(workspace.baseline), ["nested/code.txt"]);
+  const legacy = { ...workspace, localPathFormat: undefined,
+    baseline: Object.fromEntries(Object.entries(workspace.baseline).map(([name, entry]) => [name.replaceAll("/", path.sep), entry])),
+  };
+  const first = await localWorkspaceFingerprint(legacy);
+  assert.equal(await localWorkspaceFingerprint(JSON.parse(JSON.stringify(legacy))), first);
+  assert.deepEqual((await localWorkspaceDiff(legacy)).files, []);
+  await writeFile(path.join(project, "nested", "code.txt"), "changed\n");
+  assert.deepEqual((await localWorkspaceDiff(workspace)).files, [{ path: "nested/code.txt", status: "modified" }]);
+  assert.deepEqual((await localWorkspaceDiff(legacy)).files, [{ path: path.join("nested", "code.txt"), status: "modified" }]);
+});
+
+test("POSIX literal backslashes remain file-name characters during local capture and diff", { skip: process.platform === "win32" }, async t => {
+  const { project, run } = await fixture(t);
+  const name = String.raw`literal\name.txt`;
+  await writeFile(path.join(project, name), "base\n");
+  assert.deepEqual(await readdir(project), [name], "The fixture has no literal parent directory.");
+  const workspace = await createLocalWorkspace(project, run);
+  assert.deepEqual(Object.keys(workspace.baseline), [name]);
+  assert.deepEqual((await localWorkspaceDiff(workspace)).files, []);
+  const before = await localWorkspaceFingerprint(workspace);
+  await writeFile(path.join(project, name), "changed\n");
+  assert.deepEqual((await localWorkspaceDiff(workspace)).files, [{ path: name, status: "modified" }]);
+  assert.notEqual(await localWorkspaceFingerprint(workspace), before);
 });
 
 test("unborn Git preserves staged and dirty state while ignored output changes invalidate checkpoints", async t => {
@@ -198,14 +259,18 @@ test("local workspace validates project identity, owned baseline paths, and disj
   await assert.rejects(validateLocalWorkspace(workspace, project, run), /identity changed/);
 });
 
-test("external symlinks and tampered baseline contents fail closed without reading or replacing the target", async t => {
-  const { root, project, run } = await fixture(t);
+test("tampered local baseline contents fail closed", async t => {
+  const { project, run } = await fixture(t);
   await writeFile(path.join(project, "code.txt"), "base"); const workspace = await createLocalWorkspace(project, run);
   await writeFile(path.join(workspace.baselineRoot!, "code.txt"), "tampered");
   await assert.rejects(localWorkspaceFingerprint(workspace), /baseline contents changed/);
+});
+
+test("external file symlinks fail closed without reading or replacing the target", async t => {
+  const { root, project, run } = await fixture(t);
+  if (!(await requireFileSymlinks(t, root))) return;
   await writeFile(path.join(root, "outside.txt"), "private marker"); await symlink("../outside.txt", path.join(project, "external"));
-  const otherRun = path.join(root, "state", "other"); await mkdir(otherRun);
-  await assert.rejects(createLocalWorkspace(project, otherRun), /symbolic link/);
+  await assert.rejects(createLocalWorkspace(project, run), /symbolic link/);
   assert.equal(await readFile(path.join(root, "outside.txt"), "utf8"), "private marker");
 });
 

@@ -14,6 +14,12 @@ import { RunStore } from "../src/store.ts";
 import type { Task } from "../src/types.ts";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/checkpoint-owner.mjs", import.meta.url));
+const ownerPhaseTimeoutMs = 10000;
+const ownerCloseTimeoutMs = 5000;
+const staleLockTimeoutMs = 11000;
+// Loading the subprocess and preparing its preview each have their own budget.
+// Keep the crash boundary, real stale-lock wait and recovery budgets separate.
+const crashTestTimeoutMs = ownerPhaseTimeoutMs * 3 + ownerCloseTimeoutMs + staleLockTimeoutMs + 30000;
 type Scenario = "entered" | "partial-write" | "uncommitted-manifest" | "uncommitted-no-change";
 interface OwnerMessage {
   event: string;
@@ -34,6 +40,7 @@ async function ownedCrashFixture(t: TestContext, scenario: Scenario) {
   const store = new RunStore(path.join(root, "state"));
   const requests: WorkerRequest[] = [], engines: WorkflowEngine[] = [];
   const child = spawn(process.execPath, ["--experimental-strip-types", fixturePath, root, scenario], { stdio: ["ignore", "ignore", "pipe", "ipc"], windowsHide: true });
+  const spawnedAt = Date.now(), eventTimes: string[] = [];
   let diagnostics = "", closed = false;
   child.stderr?.on("data", (data: Buffer) => { diagnostics = (diagnostics + data.toString("utf8")).slice(-8192); });
   const messages: OwnerMessage[] = [];
@@ -41,19 +48,23 @@ async function ownedCrashFixture(t: TestContext, scenario: Scenario) {
   const wake = () => { for (const notify of changed) notify(); };
   let startupError: Error | undefined;
   child.on("error", error => { startupError = error; wake(); });
-  child.on("message", message => { messages.push(message as OwnerMessage); wake(); });
+  child.on("message", message => {
+    messages.push(message as OwnerMessage);
+    eventTimes.push(`${(message as OwnerMessage).event}@${Date.now() - spawnedAt}ms`);
+    wake();
+  });
   const closing = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => {
     child.once("close", (code, signal) => { closed = true; wake(); resolve({ code, signal }); });
   });
   async function waitFor(event: string): Promise<OwnerMessage> {
-    const deadline = Date.now() + 10000;
+    const startedAt = Date.now(), deadline = startedAt + ownerPhaseTimeoutMs;
     while (true) {
       const fatal = messages.find(message => message.event === "fatal");
-      if (fatal) throw new Error(`Checkpoint owner failed: ${fatal.error}\n${diagnostics}`);
+      if (fatal) throw new Error(`Checkpoint owner failed while waiting for ${event}: ${fatal.error}\nEvents: ${eventTimes.join(", ")}\n${diagnostics}`);
       const found = messages.find(message => message.event === event);
       if (found) return found;
       if (startupError) throw startupError;
-      if (closed || Date.now() >= deadline) throw new Error(`Checkpoint owner did not report ${event}; closed=${closed}\n${diagnostics}`);
+      if (closed || Date.now() >= deadline) throw new Error(`Checkpoint owner did not report ${event} after ${Date.now() - startedAt}ms; closed=${closed}\nEvents: ${eventTimes.join(", ")}\n${diagnostics}`);
       await new Promise<void>(resolve => {
         let timer: NodeJS.Timeout;
         const notify = () => { clearTimeout(timer); changed.delete(notify); resolve(); };
@@ -62,15 +73,22 @@ async function ownedCrashFixture(t: TestContext, scenario: Scenario) {
       });
     }
   }
+  async function waitForOwnerClose() {
+    let timer: NodeJS.Timeout | undefined;
+    return Promise.race([
+      closing,
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Owned checkpoint fixture did not close after SIGKILL")), ownerCloseTimeoutMs); }),
+    ]).finally(() => clearTimeout(timer));
+  }
   async function killOwner() {
     assert.ok(child.pid && child.pid !== process.pid, "the killed PID must belong to this spawned fixture");
     if (!closed) assert.equal(child.kill("SIGKILL"), true);
-    const result = await Promise.race([closing, pause(5000).then(() => { throw new Error("Owned checkpoint fixture did not close after SIGKILL"); })]);
+    const result = await waitForOwnerClose();
     assert.equal(result.signal, "SIGKILL");
     return result;
   }
   t.after(async () => {
-    if (!closed) { child.kill("SIGKILL"); await closing; }
+    if (!closed) { child.kill("SIGKILL"); await waitForOwnerClose(); }
     for (const engine of engines) await engine.close();
     await rm(root, { recursive: true, force: true });
   });
@@ -84,7 +102,7 @@ async function ownedCrashFixture(t: TestContext, scenario: Scenario) {
     close: async () => {},
   };
   async function reopen(id: string) {
-    const deadline = Date.now() + 11000;
+    const deadline = Date.now() + staleLockTimeoutMs;
     while (await store.isLocked(id)) {
       if (Date.now() >= deadline) throw new Error("Crashed fixture owner lock did not become stale");
       await pause(50);
@@ -93,10 +111,17 @@ async function ownedCrashFixture(t: TestContext, scenario: Scenario) {
     engines.push(engine);
     return { engine, recovered: await engine.get(id) };
   }
+  const command = (event: "prepare" | "start") => new Promise<void>((resolve, reject) => {
+    child.send({ event }, error => error ? reject(error) : resolve());
+  });
+  await waitFor("ready");
+  await command("prepare");
+  await waitFor("created");
+  await command("start");
   return { root, project, store, requests, messages, waitFor, killOwner, reopen };
 }
 
-test("a real owner crash preserves a stable completed node and manually resumes only the interrupted node", { timeout: 30000 }, async t => {
+test("a real owner crash preserves a stable completed node and manually resumes only the interrupted node", { timeout: crashTestTimeoutMs }, async t => {
   const f = await ownedCrashFixture(t, "entered");
   const entered = await f.waitFor("second-entered");
   assert.equal(entered.checkpoint?.completedTasks, 1);
@@ -140,7 +165,7 @@ test("a real owner crash preserves a stable completed node and manually resumes 
   assert.deepEqual(manifest.nodes.map(node => node.attemptId), [first.attempts[0]!.id, "task_2_attempt_2"]);
 });
 
-test("a real crash after a partial write blocks recovery and preserves the actual source changes", { timeout: 30000 }, async t => {
+test("a real crash after a partial write blocks recovery and preserves the actual source changes", { timeout: crashTestTimeoutMs }, async t => {
   const f = await ownedCrashFixture(t, "partial-write");
   const entered = await f.waitFor("second-entered");
   assert.equal(entered.checkpoint?.completedTasks, 1);
@@ -160,7 +185,7 @@ test("a real crash after a partial write blocks recovery and preserves the actua
   assert.equal((await f.store.load(recovered.id)).revision, recovered.revision);
 });
 
-test("an immutable manifest written before the owner crashes is not a committed checkpoint without its run pointer", { timeout: 30000 }, async t => {
+test("an immutable manifest written before the owner crashes is not a committed checkpoint without its run pointer", { timeout: crashTestTimeoutMs }, async t => {
   const f = await ownedCrashFixture(t, "uncommitted-manifest");
   const boundary = await f.waitFor("uncommitted-manifest");
   assert.equal(boundary.pending?.completedTasks, 1);
@@ -186,7 +211,7 @@ test("an immutable manifest written before the owner crashes is not a committed 
   assert.equal(f.messages.some(message => message.event === "second-entered"), false);
 });
 
-test("an unchanged workspace cannot make a completed result reusable before its checkpoint pointer commits", { timeout: 30000 }, async t => {
+test("an unchanged workspace cannot make a completed result reusable before its checkpoint pointer commits", { timeout: crashTestTimeoutMs }, async t => {
   const f = await ownedCrashFixture(t, "uncommitted-no-change");
   const boundary = await f.waitFor("uncommitted-manifest");
   await f.killOwner();

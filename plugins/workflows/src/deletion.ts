@@ -7,6 +7,7 @@ import { TemplateStore } from "./templates.ts";
 import type { WorkflowRun } from "./types.ts";
 import { inspectProjectTemporaryFiles } from "./project-temps.ts";
 import { validateLocalWorkspaceForDeletion } from "./local-workspace.ts";
+import { isWindowsNamedPipe, resolveReferencePath } from "./deletion-path.ts";
 
 export type DeleteInput = { kind: "run"; id: string; revision: number } | { kind: "definition"; id: string; revision: number; runIds?: string[]; includeAssociatedRuns?: true };
 export interface DeletionBlock { code: string; message: string; runId?: string; path?: string; reference?: { source: string; serverName?: string; field?: string } }
@@ -70,7 +71,7 @@ async function serverReferences(server: unknown, directory: string, cwd: string 
   const base = cwd ? isObject(server) && typeof server.cwd === "string" ? path.resolve(cwd, server.cwd) : cwd : undefined;
   const canonical = (filename: string) => {
     let value = cache.get(filename);
-    if (!value) { value = realpath(filename).catch(error => { if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return undefined; throw error; }); cache.set(filename, value); }
+    if (!value) { value = resolveReferencePath(filename); cache.set(filename, value); }
     return value;
   };
   const visit = async (value: unknown, field: string): Promise<void> => {
@@ -78,6 +79,8 @@ async function serverReferences(server: unknown, directory: string, cwd: string 
       for (const token of value.split(/[\s'";]+/).filter(Boolean)) {
         const candidate = token.startsWith("--") && token.includes("=") ? token.slice(token.indexOf("=") + 1) : token;
         if (!candidate || candidate.startsWith("-")) continue;
+        // Named pipes belong to the Windows IPC namespace, not a run's files.
+        if (process.platform === "win32" && isWindowsNamedPipe(candidate)) continue;
         const pathLike = candidate.startsWith(".") || candidate.includes("/") || candidate.includes("\\") || field.startsWith("args[");
         const filenames: string[] = [];
         if (pathLike && (base || path.isAbsolute(candidate))) filenames.push(path.resolve(base ?? "", candidate));

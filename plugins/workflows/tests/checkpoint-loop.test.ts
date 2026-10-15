@@ -10,6 +10,9 @@ import { WorkflowEngine } from "../src/engine.ts";
 import { RunStore } from "../src/store.ts";
 
 const loopPrompt = "Process the next loop input.", branchPrompt = "Verify the selected loop branch.";
+const executionTimeoutMs = 20000;
+// This test performs two executions, then checks recovery and durable history.
+const testTimeoutMs = executionTimeoutMs * 3;
 const promptOf = (request: WorkerRequest) => request.prompt.slice(request.prompt.lastIndexOf("\n\nTask:\n") + 8);
 const script = `export const meta={name:"checkpoint-loop-identity",description:"Verify distinct loop calls and result-directed branches in this disposable fixture",phases:[{title:"循环"},{title:"分支"}]};
 const reports=[];
@@ -88,14 +91,14 @@ async function fixture(t: TestContext, stopped: boolean) {
   return { root, project, state, ledger, input, calls, middle, makeEngine };
 }
 
-for (const stopped of [false, true]) test(`${stopped ? "stopped" : "failed"} loop recovery distinguishes identical prompts and follows a newly returned branch after reopening`, { timeout: 30000 }, async t => {
+for (const stopped of [false, true]) test(`${stopped ? "stopped" : "failed"} loop recovery distinguishes identical prompts and follows a newly returned branch after reopening`, { timeout: testTimeoutMs }, async t => {
   const f = await fixture(t, stopped);
   const firstEngine = f.makeEngine("original");
   const schema = {
     type: "object", properties: { kind: { type: "string", enum: ["loop", "branch"] }, iteration: { type: "integer" }, branch: { type: "boolean" }, value: { type: "string" } },
     required: ["kind", "iteration", "branch", "value"], additionalProperties: false,
   };
-  const draft = await firstEngine.preview({ projectPath: f.project, allowWrite: true, workspaceMode: "local", script, args: { loopPrompt, branchPrompt, schema }, limits: { maxCalls: 5, timeoutMs: 20000 } });
+  const draft = await firstEngine.preview({ projectPath: f.project, allowWrite: true, workspaceMode: "local", script, args: { loopPrompt, branchPrompt, schema }, limits: { maxCalls: 5, timeoutMs: executionTimeoutMs } });
   await firstEngine.start({ id: draft.id, revision: draft.revision });
   await Promise.race([f.middle, firstEngine.wait(draft.id).then(run => { throw new Error(`Loop fixture finished before reaching the middle: ${run.execution}: ${run.error ?? "no error"}`); })]);
   const first = stopped ? await firstEngine.stop(draft.id) : await firstEngine.wait(draft.id);

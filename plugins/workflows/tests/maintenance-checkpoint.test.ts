@@ -17,7 +17,8 @@ async function fixture(t: TestContext) {
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const project = path.join(root, "project"); await mkdir(project);
   await git(project, "init", "--quiet", "--initial-branch=main");
-  await writeFile(path.join(project, "source.txt"), "base\n"); await git(project, "add", "source.txt"); await git(project, "commit", "--quiet", "-m", "Add fixture source");
+  await writeFile(path.join(project, ".gitattributes"), "* text eol=lf\n");
+  await writeFile(path.join(project, "source.txt"), "base\n"); await git(project, "add", ".gitattributes", "source.txt"); await git(project, "commit", "--quiet", "-m", "Add fixture source");
   await writeFile(path.join(project, "history.txt"), "history\n"); await git(project, "add", "history.txt"); await git(project, "commit", "--quiet", "-m", "Add fixture history");
   const workspace = await createGitWorkspace(project, path.join(root, "run"));
   return { root, workspace, cwd: workspace.root };

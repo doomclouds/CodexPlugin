@@ -7,6 +7,7 @@ import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { promisify } from "node:util";
 import { applyWorkspace, createWorkspace, workspaceDiff } from "../src/workspace.ts";
+import { requireFileSymlinks } from "./fixtures/symlink.ts";
 
 const exec = promisify(execFile);
 
@@ -39,6 +40,21 @@ test("the snapshot retains dirty tracked and untracked files without source Git 
   assert.equal(workspace.baseline["delete.txt"], undefined);
   await assert.rejects(exec("git", ["config", "--get", "remote.origin.url"], { cwd: workspace.root }));
   assert.deepEqual((await workspaceDiff(workspace)).files, []);
+});
+
+test("POSIX backslashes remain literal filenames throughout snapshot and application", { skip: process.platform === "win32" }, async t => {
+  const { project, data } = await fixture(t);
+  const name = "literal\\name.txt";
+  await writeFile(path.join(project, name), "literal baseline\n");
+  const workspace = await createWorkspace(project, data);
+  assert.equal(await readFile(path.join(workspace.root, name), "utf8"), "literal baseline\n");
+  await assert.rejects(access(path.join(workspace.root, "literal")), { code: "ENOENT" });
+  await writeFile(path.join(workspace.root, name), "literal update\n");
+  const reviewed = await workspaceDiff(workspace);
+  assert.deepEqual(reviewed.files, [{ path: name, status: "modified" }]);
+  assert.equal((await applyWorkspace(workspace, reviewed)).applied, true);
+  assert.equal(await readFile(path.join(project, name), "utf8"), "literal update\n");
+  await assert.rejects(access(path.join(project, "literal")), { code: "ENOENT" });
 });
 
 test("binary changes, deletion and newly added files are reviewed and applied exactly", async t => {
@@ -107,7 +123,8 @@ test("ignored test and dependency output is excluded while tracked ignored files
 });
 
 test("internal symbolic links are copied and applied as links", async t => {
-  const { project, data } = await fixture(t);
+  const { root, project, data } = await fixture(t);
+  if (!(await requireFileSymlinks(t, root))) return;
   await symlink("tracked.txt", path.join(project, "internal-link"));
   const workspace = await createWorkspace(project, data);
   assert.equal((await lstat(path.join(workspace.root, "internal-link"))).isSymbolicLink(), true);
@@ -122,6 +139,7 @@ test("internal symbolic links are copied and applied as links", async t => {
 
 test("external symbolic links are rejected before source contents can enter the snapshot", async t => {
   const { root, project, data } = await fixture(t);
+  if (!(await requireFileSymlinks(t, root))) return;
   await writeFile(path.join(root, "outside.txt"), "outside fixture data\n");
   await symlink("../outside.txt", path.join(project, "external-link"));
   await assert.rejects(createWorkspace(project, data), /symbolic link|unsafe.*parent/i);
@@ -135,7 +153,7 @@ test("a tracked source path under an external symlinked parent is never copied",
   // Hide the symlink leaf from git's untracked list while the nested tracked path remains.
   await writeFile(path.join(project, ".gitignore"), "folder\n");
   await rm(path.join(project, "folder"), { recursive: true });
-  await symlink(outside, path.join(project, "folder"));
+  await symlink(outside, path.join(project, "folder"), process.platform === "win32" ? "junction" : "dir");
   await assert.rejects(createWorkspace(project, data), /symbolic link|unsafe.*parent/i);
 });
 
@@ -148,7 +166,7 @@ test("application never follows a project parent replaced by an external symboli
   await mkdir(outside);
   await writeFile(path.join(outside, "nested.txt"), "outside untouched\n");
   await rm(path.join(project, "folder"), { recursive: true });
-  await symlink(outside, path.join(project, "folder"));
+  await symlink(outside, path.join(project, "folder"), process.platform === "win32" ? "junction" : "dir");
   await assert.rejects(applyWorkspace(workspace, reviewed), /unsafe.*parent|symbolic link/i);
   assert.equal(await readFile(path.join(outside, "nested.txt"), "utf8"), "outside untouched\n");
 });
@@ -169,7 +187,7 @@ test("snapshot mode refuses a real Git submodule before creating an incomplete w
   await writeFile(path.join(child,"component.txt"),"real child source\n");
   await exec("git",["add","-A"],{cwd:child});
   await exec("git",["-c","user.name=Workflow Test","-c","user.email=workflow-test@example.invalid","commit","--quiet","-m","Add child fixture"],{cwd:child});
-  await exec("git",["-c","protocol.file.allow=always","submodule","add","--quiet",child,"third_party/component"],{cwd:project});
+  await exec("git",["-c","core.autocrlf=false","-c","core.eol=lf","-c","protocol.file.allow=always","submodule","add","--quiet",child,"third_party/component"],{cwd:project});
   await assert.rejects(createWorkspace(project,data),/Snapshot writing.*submodules.*git-worktree/);
   await assert.rejects(access(path.join(data,"workspace")),{code:"ENOENT"});
   assert.equal(await readFile(path.join(project,"third_party/component/component.txt"),"utf8"),"real child source\n");

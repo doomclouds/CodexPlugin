@@ -1,6 +1,6 @@
 {
   "name": "@codex-plugin/workflows",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json --noEmit",
     "dev": "node --experimental-strip-types src/index.ts",
     "start": "node runtime/index.js",
-    "smoke": "node scripts/smoke.mjs && node --experimental-strip-types --test tests/*.test.ts",
+    "smoke": "node scripts/smoke.mjs && node --experimental-strip-types --test --test-concurrency=4 tests/*.test.ts",
     "smoke:host": "node scripts/host-loader-smoke.mjs",
     "smoke:real": "node --experimental-strip-types scripts/real-smoke.ts --real-workers",
     "smoke:checkpoint": "node --experimental-strip-types scripts/checkpoint-real-smoke.ts --real-workers",

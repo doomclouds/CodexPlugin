@@ -15,6 +15,16 @@ const send = value => new Promise((resolve, reject) => {
   process.send(value, error => error ? reject(error) : resolve());
 });
 const forever = () => new Promise(() => {});
+const commands = new Set();
+const commandWaiters = new Map();
+process.on("message", message => {
+  if (message?.event !== "prepare" && message?.event !== "start") return;
+  commands.add(message.event);
+  commandWaiters.get(message.event)?.();
+});
+const waitForCommand = event => commands.has(event) ? Promise.resolve() : new Promise(resolve => {
+  commandWaiters.set(event, () => { commandWaiters.delete(event); resolve(); });
+});
 
 if (scenario === "uncommitted-manifest" || scenario === "uncommitted-no-change") {
   const save = store.save.bind(store);
@@ -49,6 +59,10 @@ const adapter = {
 
 const engine = new WorkflowEngine({ store, adapter });
 try {
+  // Signal only after static imports and IPC handlers are ready. The parent
+  // budgets subprocess startup, preview preparation and execution separately.
+  await send({ event: "ready" });
+  await waitForCommand("prepare");
   const run = await engine.preview({
     projectPath: project, allowWrite: true, workspaceMode: "local",
     limits: { timeoutMs: 60000 },
@@ -56,6 +70,7 @@ try {
   });
   runId = run.id;
   await send({ event: "created", id: runId });
+  await waitForCommand("start");
   await engine.start({ id: run.id, revision: run.revision });
   const result = await engine.wait(run.id);
   throw new Error(`Fixture unexpectedly finished with ${result.execution}: ${result.error ?? "no error"}`);

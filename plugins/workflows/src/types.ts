@@ -45,7 +45,10 @@ export interface Workspace {
   root: string; baseline: Record<string, FileRecord>; original: string;
   kind?: WorkspaceMode;
   baselineRoot?: string;
-  rootIdentity?: { dev: number; ino: number };
+  // New local runs persist exact decimal identities; numeric values are legacy records.
+  rootIdentity?: { dev: string | number; ino: string | number };
+  // Missing on historical runs whose manifest keys use native path separators.
+  localPathFormat?: "posix";
   git?: { base: string; branch: string; upstream?: string; target?: string };
 }
 export interface Diff {

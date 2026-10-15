@@ -337,7 +337,7 @@ test("oversized frame is rejected before payload allocation and releases its own
   await waitFor(() => fixture.closedConnections() === 1);
 });
 
-test("cancellation never retries and timeout retries at most once inside the existing bound", async t => {
+test("cancellation never retries after the owned request is sent", async t => {
   const fixture = await pipeFixture(t, () => {});
   const controller = new AbortController();
   const pending = new CodexProjectsProvider({ pipePath: fixture.pipePath }).getProjects({ meta: { threadId: "current-thread" }, signal: controller.signal });
@@ -347,11 +347,23 @@ test("cancellation never retries and timeout retries at most once inside the exi
   assert.equal(cancelled.available, false);
   if (!cancelled.available) assert.match(cancelled.reason, /cancelled/);
   await waitFor(() => fixture.closedConnections() === 1);
+  assert.equal(fixture.connections(), 1);
+  assert.equal(fixture.requests.filter(request => request.method === "tools/call").length, 1);
+});
+
+test("timeout retries at most once inside the existing bound and closes every owned connection", async t => {
+  const fixture = await pipeFixture(t, () => {});
   const timedOut = await new CodexProjectsProvider({ pipePath: fixture.pipePath, timeoutMs: 50 }).getProjects(context());
   assert.equal(timedOut.available, false);
   if (!timedOut.available) assert.match(timedOut.reason, /timed out/);
-  await waitFor(() => fixture.closedConnections() === 3);
-  assert.equal(fixture.requests.filter(request => request.method === "tools/call").length, 3);
+  // Closing the first Windows pipe can exhaust this short total budget. A
+  // retry is allowed only while budget remains, so both one and two attempts
+  // are valid; every connection actually accepted must still be released.
+  const attempts = fixture.connections();
+  assert.ok(attempts >= 1 && attempts <= 2, `Expected at most one retry, observed ${attempts} connections`);
+  await waitFor(() => fixture.closedConnections() === attempts);
+  const calls = fixture.requests.filter(request => request.method === "tools/call");
+  assert.ok(calls.length >= 1 && calls.length <= 2, `Expected at most two requests, observed ${calls.length}`);
   assert.ok(fixture.requests.filter(request => request.method === "tools/call").every(request => request.params?.tool === "list_projects"));
 });
 

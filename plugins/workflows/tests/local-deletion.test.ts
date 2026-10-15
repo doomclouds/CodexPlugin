@@ -67,7 +67,10 @@ test("definition deletion cleans associated local runs without removing any orig
 test("tampered local workspace roots and baseline paths are rejected before deletion", async t => {
   const { root, project, store, service, run } = await fixture(t);
   const record = await run(); const external = path.join(root, "external"); await mkdir(external); await writeFile(path.join(external, "keep.txt"), "must remain");
-  for (const workspace of [{ ...record.workspace!, root: external }, { ...record.workspace!, baselineRoot: project }, { ...record.workspace!, rootIdentity: { dev: -1, ino: -1 } }]) {
+  for (const workspace of [
+    { ...record.workspace!, root: external }, { ...record.workspace!, baselineRoot: project },
+    ...[{ dev: -1, ino: -1 }, { dev: 1.5, ino: 2 }, { dev: "01", ino: "1" }, { dev: "1", ino: "18446744073709551616" }].map(rootIdentity => ({ ...record.workspace!, rootIdentity })),
+  ]) {
     await store.save({ ...record, workspace });
     const preview = await service.preview({ kind: "run", id: record.id, revision: record.revision });
     assert.equal(preview.canDelete, false); assert.ok(preview.blocked.some(block => block.code === "workspace_ownership"));
@@ -131,4 +134,18 @@ test("corrupted local baseline content does not prevent complete owned-data dele
   assert.equal((await service.execute({ ...preview.target, fingerprint: preview.fingerprint })).deleted, true);
   await missing(store.directory(record.id));
   assert.equal(await readFile(path.join(project, "code.txt"), "utf8"), "existing user edit\n");
+});
+
+test("legacy imprecise identities permit owned-data cleanup without authorizing project recovery", async t => {
+  const { root, project, store, service, run } = await fixture(t);
+  const record = await run();
+  record.workspace!.rootIdentity = { dev: 1, ino: Number.MAX_SAFE_INTEGER + 1 };
+  await store.save(record);
+  const moved = path.join(root, "moved-legacy-project"); await rename(project, moved);
+  const preview = await service.preview({ kind: "run", id: record.id, revision: record.revision });
+  assert.equal(preview.canDelete, true, JSON.stringify(preview.blocked));
+  const removed = await service.execute({ ...preview.target, fingerprint: preview.fingerprint });
+  assert.equal(removed.deleted, true, JSON.stringify(removed));
+  await missing(store.directory(record.id));
+  assert.equal(await readFile(path.join(moved, "code.txt"), "utf8"), "existing user edit\n");
 });

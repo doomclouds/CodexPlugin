@@ -194,7 +194,7 @@ test("a shorter dynamic branch archives every retired task with paged full attem
 });
 
 test("an edited retained plan cannot reuse a concurrent reader from before its changed write", async t => {
-  const oldWritten = deferred(), newWritten = deferred(); let updated = false;
+  const oldWritten = deferred(), newWritten = deferred(), readerDispatched = deferred(); let updated = false;
   const f = await fixture(t, async request => {
     const prompt = promptOf(request);
     if (prompt.startsWith("writer ")) {
@@ -202,6 +202,7 @@ test("an edited retained plan cannot reuse a concurrent reader from before its c
       if (value === "old") oldWritten.resolve(); else newWritten.resolve();
       return value;
     }
+    if (updated) readerDispatched.resolve();
     await (updated ? newWritten.promise : oldWritten.promise);
     return readFile(path.join(request.cwd, "source.txt"), "utf8");
   });
@@ -210,12 +211,21 @@ test("an edited retained plan cannot reuse a concurrent reader from before its c
   assert.deepEqual(first.result, ["old", "old"]);
   const changed = await f.engine.update({ id: draft.id, revision: first.revision, script: script(body("new")), args: {} }); updated = true;
   const scheduling = f.engine as unknown as { agentEnvironment(...args: unknown[]): Promise<unknown> }, original = scheduling.agentEnvironment.bind(f.engine); let arrivals = 0;
-  scheduling.agentEnvironment = async (...args) => { if (++arrivals === 1) await new Promise(resolve => setTimeout(resolve, 50)); return original(...args); };
+  scheduling.agentEnvironment = async (...args) => {
+    if (++arrivals === 1) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([readerDispatched.promise, new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("The changed plan's reader did not dispatch before its writer")), 5000); })]);
+      } finally { clearTimeout(timer); }
+    }
+    return original(...args);
+  };
   await f.engine.start({ id: draft.id, revision: changed.revision }); const result = await f.engine.wait(draft.id);
   assert.equal(result.execution, "completed", result.error); assert.deepEqual(result.result, ["new", "new"]);
   assert.deepEqual(result.tasks.map(task => task.cached), [false, false]); assert.deepEqual(result.tasks.map(task => task.attempts.length), [2, 2]);
   for (let index = 0; index < 2; index++) assert.deepEqual(result.tasks[index]?.attempts[0], first.tasks[index]?.attempts[0]);
-  assert.deepEqual(f.calls.map(promptOf), ["writer old", "reader", "reader", "writer new"]);
+  assert.deepEqual(f.calls.slice(0, 2).map(promptOf).sort(), ["reader", "writer old"]);
+  assert.deepEqual(f.calls.slice(2).map(promptOf), ["reader", "writer new"]);
   assert.equal(await readFile(path.join(f.project, "source.txt"), "utf8"), "new");
 });
 

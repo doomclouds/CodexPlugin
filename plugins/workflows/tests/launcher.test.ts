@@ -24,7 +24,7 @@ test("desktop launch selects only explicit host runtime candidates in priority o
     assert.equal(plan.env.KEEP_VALUE, "kept");
     assert.equal(plan.env.CODEX_APP_TOOLS_PIPE_PATH, "/desktop.sock");
     assert.equal(launcher.desktopNodeCandidates({ CODEX_MCP_NODE_PATH: "/mcp/node", CODEX_BROWSER_USE_NODE_PATH: "/browser/node", CODEX_ELECTRON_RESOURCES_PATH: "/resources", CODEX_CLI_PATH: "/cli/codex" })[0], "/mcp/node");
-    assert.deepEqual(launcher.desktopNodeCandidates({ CODEX_ELECTRON_RESOURCES_PATH: "/resources", CODEX_CLI_PATH: "/cli/codex" }), ["/resources/cua_node/bin/node", "/cli/cua_node/bin/node"]);
+    assert.deepEqual(launcher.desktopNodeCandidates({ CODEX_ELECTRON_RESOURCES_PATH: "/resources", CODEX_CLI_PATH: "/cli/codex" }), [path.join("/resources", "cua_node", "bin", "node"), path.join("/cli", "cua_node", "bin", "node")]);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

@@ -25,7 +25,7 @@ export async function getTemplate(id: string) {
 
 export function getCapabilities() {
   return {
-    version: "0.8.0",
+    version: "0.8.1",
     stage: "runtime-v2",
     checkpoints: { available: true, tools: ["workflow_preview_recovery", "workflow_get_checkpoints", "workflow_get_task_history"], nodeAttemptDiagnostics: true, historyPagination: true, includedInRunDeletion: true },
     available: ["host-thread-directory-binding", "bounded-run-transport", "artifact-pagination", "paged-run-summaries", "bounded-diff-preview", "declared-protected-command-paths", "explicit-task-retry", "snapshot-checkpoint", "git-context-cache", "preparation-progress", "node-activity", "node-process", "bounded-mcp-error-diagnostics", "native-auto-review", "native-tool-error-diagnostics", "task-output-validation", "same-thread-result-recovery", "typed-task-failure-origin", "writable-workspace-operations", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "local-project-writing", "local-project-git-writing", "project-writer-serialization", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],

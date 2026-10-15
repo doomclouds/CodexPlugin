@@ -480,7 +480,7 @@ export class CodexAdapter implements WorkerAdapter {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config = object(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config, cwd);
@@ -595,7 +595,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer); startupTimer = undefined;
       if (canceled || signal.aborted) throw canceled ?? abortError();
@@ -879,7 +879,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object(object(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== undefined || request.reasoningEffort !== undefined) {

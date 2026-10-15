@@ -18,17 +18,21 @@ function deferred() {
   return { promise, resolve };
 }
 
+const executionTimeoutMs = 20_000;
+// Allow preparation, one bounded execution, and checkpoint/transport cleanup.
+const testTimeoutMs = executionTimeoutMs * 3;
+
 for (const outcome of ["completed", "failed"] as const) {
-  test(`node diagnostics remain live during ${outcome} terminal persistence without releasing action locks`, { timeout: 10_000 }, async t => {
+  test(`node diagnostics remain live during ${outcome} terminal persistence without releasing action locks`, { timeout: testTimeoutMs }, async t => {
     const root = await realpath(await mkdtemp(path.join(tmpdir(), "workflows-node-process-live-")));
     const project = path.join(root, "project");
     await mkdir(project); await writeFile(path.join(project, "source.txt"), "user baseline\n");
     const terminalSave = deferred(), releaseSave = deferred();
     class HeldTerminalStore extends RunStore {
       terminalRevision = 0;
-      override async save(run: WorkflowRun) {
+      override async save(run: WorkflowRun, durable = false) {
         if (run.execution === outcome) { this.terminalRevision = run.revision; terminalSave.resolve(); await releaseSave.promise; }
-        await super.save(run);
+        await super.save(run, durable);
       }
     }
     let dispatched = 0;
@@ -53,9 +57,11 @@ for (const outcome of ["completed", "failed"] as const) {
     });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport); await client.connect(clientTransport);
-    const draft = await engine.preview({ projectPath: project, allowWrite: true, workspaceMode: "local", script: 'export const meta={name:"live-diagnostics",description:"Exercise a held terminal persistence boundary",phases:[{title:"Inspect source"}]}; phase("Inspect source"); return await agent("PRIVATE PROMPT",{mode:"write",label:"Inspect edited source"});' });
+    const draft = await engine.preview({ projectPath: project, allowWrite: true, workspaceMode: "local", limits: { timeoutMs: executionTimeoutMs }, script: 'export const meta={name:"live-diagnostics",description:"Exercise a held terminal persistence boundary",phases:[{title:"Inspect source"}]}; phase("Inspect source"); return await agent("PRIVATE PROMPT",{mode:"write",label:"Inspect edited source"});' });
     await engine.start({ id: draft.id, revision: draft.revision });
-    await terminalSave.promise;
+    await Promise.race([terminalSave.promise, engine.wait(draft.id).then(run => {
+      throw new Error(`Fixture finished before reaching the held ${outcome} save: ${run.execution}: ${run.error ?? "no error"}`);
+    })]);
 
     let getSettled = false, stopSettled = false;
     const full = engine.get(draft.id).then(run => { getSettled = true; return run; });

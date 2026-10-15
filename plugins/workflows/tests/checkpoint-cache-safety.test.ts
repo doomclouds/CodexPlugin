@@ -8,9 +8,13 @@ import { WorkflowEngine } from "../src/engine.ts";
 import { RunStore } from "../src/store.ts";
 import type { WorkerAdapter, WorkerRequest } from "../src/adapter.ts";
 import type { ExecutionEnvironment } from "../src/execution-settings.ts";
+import type { WorkflowRun } from "../src/types.ts";
 
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(settle => { resolve = settle; }); return { promise, resolve }; }
 const promptOf = (request: WorkerRequest) => request.prompt.slice(request.prompt.lastIndexOf("\n\nTask:\n") + 8);
+const executionTimeoutMs = 20000;
+// Two executions plus recovery validation and durable checkpoint cleanup.
+const testTimeoutMs = executionTimeoutMs * 3;
 
 async function pausedWriter(t: TestContext, operation: boolean) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "workflow-checkpoint-cache-")));
@@ -37,26 +41,35 @@ async function pausedWriter(t: TestContext, operation: boolean) {
     command: async (_request, signal) => ({ exitCode: 0, stdout: await write(signal), stderr: "", attempts: 1 }),
     close: async () => {},
   };
-  const engine = new WorkflowEngine({ store: new RunStore(path.join(root, "state")), adapter });
+  const readerCompleted = deferred();
+  class ReaderObservedStore extends RunStore {
+    override async save(run: WorkflowRun, durable = false) {
+      const observed = run.tasks[0]?.status === "running" && run.tasks[1]?.status === "completed";
+      await super.save(run, durable);
+      if (observed) readerCompleted.resolve();
+    }
+  }
+  const engine = new WorkflowEngine({ store: new ReaderObservedStore(path.join(root, "state")), adapter });
   t.after(async () => { await engine.close(); await rm(root, { recursive: true, force: true }); });
   const run = await engine.preview({
     projectPath: project, allowWrite: true, workspaceMode: "local",
+    limits: { timeoutMs: executionTimeoutMs },
     ...(operation ? { maintenance: { steps: [{ id: "writer", command: ["node", "fixture.mjs"], idempotent: true }] } } : {}),
     script: `export const meta={name:"checkpoint-cache",description:"Modify only this temporary fixture"}; return await parallel([()=>${operation ? 'operation("writer")' : 'agent("writer",{mode:"write"})'},()=>agent("reader")]);`,
   });
   await engine.start({ id: run.id, revision: run.revision });
-  const deadline = Date.now() + 5000;
-  while ((await engine.get(run.id)).tasks[1]?.status !== "completed") {
-    if (Date.now() >= deadline) throw new Error("Fixture reader did not observe the partial write");
-    await new Promise(resolve => setTimeout(resolve, 5));
-  }
+  // Stop only after the real persistence boundary records the partial read.
+  // Startup and checkpoint I/O do not consume a separate five-second poll race.
+  await Promise.race([readerCompleted.promise, engine.wait(run.id).then(finished => {
+    throw new Error(`Fixture finished before saving the partial read: ${finished.execution}: ${finished.error ?? "no error"}`);
+  })]);
   const stopped = await engine.stop(run.id);
   assert.deepEqual(stopped.tasks.map(task => task.status), ["interrupted", "completed"]);
   assert.equal(stopped.tasks[1]?.output, "partial");
   return { engine, stopped, project, calls: () => ({ writerCalls, readerCalls }) };
 }
 
-for (const operation of [false, true]) test(`resuming an interrupted ${operation ? "idempotent operation" : "write worker"} invalidates later completed readers`, async t => {
+for (const operation of [false, true]) test(`resuming an interrupted ${operation ? "idempotent operation" : "write worker"} invalidates later completed readers`, { timeout: testTimeoutMs }, async t => {
   const f = await pausedWriter(t, operation);
   await f.engine.start({ id: f.stopped.id, revision: f.stopped.revision }, true);
   const result = await f.engine.wait(f.stopped.id);
@@ -67,7 +80,7 @@ for (const operation of [false, true]) test(`resuming an interrupted ${operation
   assert.equal(await readFile(path.join(f.project, "source.txt"), "utf8"), "final");
 });
 
-test("interrupted-write invalidation precedes a later reader's faster environment discovery", async t => {
+test("interrupted-write invalidation precedes a later reader's faster environment discovery", { timeout: testTimeoutMs }, async t => {
   const f = await pausedWriter(t, false);
   const scheduling = f.engine as unknown as { agentEnvironment(...args: unknown[]): Promise<ExecutionEnvironment | undefined> };
   const original = scheduling.agentEnvironment.bind(f.engine), writerDiscovery = deferred(); let arrivals = 0;

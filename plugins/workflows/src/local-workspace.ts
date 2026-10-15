@@ -15,6 +15,16 @@ const absent = (error: unknown) => (error as NodeJS.ErrnoException).code === "EN
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const within = (root: string, target: string) => target === root || target.startsWith(root + path.sep);
 const equal = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+const maxIdentity = (1n << 64n) - 1n;
+function identityPart(value: string | number): bigint | undefined {
+  if (typeof value === "number") return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : undefined;
+  if (typeof value !== "string" || !/^(0|[1-9][0-9]{0,19})$/.test(value)) return undefined;
+  const exact = BigInt(value);
+  return exact <= maxIdentity ? exact : undefined;
+}
+function legacyImpreciseIdentity(value: string | number): boolean {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= Number(maxIdentity) && !Number.isSafeInteger(value);
+}
 function filename(root: string, name: string): string {
   if (!name || path.isAbsolute(name) || name.includes("\0") || name.split(/[\\/]/).some(part => !part || part === "." || part === ".." || part === ".git")) throw new Error("Unsafe local workspace path");
   const target = path.resolve(root, name);
@@ -23,7 +33,7 @@ function filename(root: string, name: string): string {
 }
 async function parents(root: string, name: string): Promise<void> {
   let parent = root;
-  for (const segment of name.split(path.sep).slice(0, -1)) {
+  for (const segment of name.split(process.platform === "win32" ? /[\\/]/ : "/").slice(0, -1)) {
     parent = path.join(parent, segment);
     const info = await lstat(parent);
     if (!info.isDirectory() || info.isSymbolicLink() || await realpath(parent) !== parent) throw new Error("Unsafe local workspace parent directory");
@@ -45,8 +55,9 @@ async function gitRoot(root: string): Promise<boolean> {
     throw error;
   }
 }
-async function names(root: string, includeIgnored: boolean, signal?: AbortSignal): Promise<string[]> {
+async function names(root: string, includeIgnored: boolean, signal?: AbortSignal, portablePaths = false): Promise<string[]> {
   const result = new Set<string>();
+  const separator = portablePaths ? "/" : path.sep;
   const walk = async (current: string, prefix: string, depth: number) => {
     signal?.throwIfAborted();
     if (depth > 64) throw new Error("Local workspace exceeds 64 directory levels");
@@ -57,7 +68,7 @@ async function names(root: string, includeIgnored: boolean, signal?: AbortSignal
       const relative = prefix + entry, target = filename(root, relative), info = await lstat(target);
       if (info.isDirectory() && !info.isSymbolicLink()) {
         if (await realpath(target) !== target) throw new Error("Local workspace directory identity changed");
-        await walk(target, relative + path.sep, depth + 1);
+        await walk(target, relative + separator, depth + 1);
       } else result.add(relative);
       if (result.size > 100000) throw new Error("Local workspace exceeds 100000 files");
     }
@@ -84,7 +95,7 @@ async function names(root: string, includeIgnored: boolean, signal?: AbortSignal
       let info;
       try { await parents(root, relative); info = await lstat(target); } catch (error) { if (absent(error)) continue; throw error; }
       if (!info.isDirectory() || info.isSymbolicLink() || await realpath(target) !== target) throw new Error("Local Git submodule is not a real project directory");
-      if (await gitRoot(target)) await git(target, relative + path.sep, depth + 1);
+      if (await gitRoot(target)) await git(target, relative + separator, depth + 1);
       else if ((await readdir(target)).length) throw new Error("Uninitialized local Git submodule contains unmanaged files");
     }
   };
@@ -92,9 +103,9 @@ async function names(root: string, includeIgnored: boolean, signal?: AbortSignal
   return [...result].sort();
 }
 interface Scan { records: Record<string, FileRecord>; bytes: number }
-async function scan(root: string, includeIgnored: boolean, limit: number, signal?: AbortSignal, destination?: string, retainedNames: string[] = []): Promise<Scan> {
+async function scan(root: string, includeIgnored: boolean, limit: number, signal?: AbortSignal, destination?: string, retainedNames: string[] = [], portablePaths = false): Promise<Scan> {
   const records: Record<string, FileRecord> = Object.create(null);
-  const inventory = await names(root, includeIgnored, signal);
+  const inventory = await names(root, includeIgnored, signal, portablePaths);
   const initial = [...new Set([...inventory, ...retainedNames])].sort();
   const identities: Array<{ target: string; dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }> = [];
   let bytes = 0;
@@ -132,7 +143,7 @@ async function scan(root: string, includeIgnored: boolean, limit: number, signal
     } else throw new Error("Local workspace contains an unsupported filesystem entry");
     identities.push({ target, dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs });
   }
-  if (!equal(inventory, await names(root, includeIgnored, signal))) throw new Error("Local workspace file inventory changed during hashing");
+  if (!equal(inventory, await names(root, includeIgnored, signal, portablePaths))) throw new Error("Local workspace file inventory changed during hashing");
   for (const previous of identities) {
     signal?.throwIfAborted();
     await parents(root, path.relative(root, previous.target));
@@ -169,8 +180,10 @@ export async function validateLocalWorkspace(workspace: Workspace, projectPath: 
   if (within(project, data) || within(data, project)) throw new Error("Local project and workflow data directories must not overlap");
   await assertIndependentGitMetadata(project, data);
   if (workspace.root !== project || workspace.original !== project || workspace.baselineRoot !== path.join(run, "local-baseline")) throw new Error("Local workspace paths do not match their project and owned run directory");
-  const identity = await lstat(project);
-  if (!workspace.rootIdentity || identity.dev !== workspace.rootIdentity.dev || identity.ino !== workspace.rootIdentity.ino) throw new Error("Local project directory identity changed");
+  const savedIdentity = workspace.rootIdentity;
+  if (savedIdentity && [savedIdentity.dev, savedIdentity.ino].some(legacyImpreciseIdentity)) throw new Error("Legacy local project directory identity lost numeric precision; create a new preview before resuming");
+  const identity = await lstat(project, { bigint: true });
+  if (!savedIdentity || identity.dev !== identityPart(savedIdentity.dev) || identity.ino !== identityPart(savedIdentity.ino)) throw new Error("Local project directory identity changed");
   if (await directory(workspace.baselineRoot) !== workspace.baselineRoot) throw new Error("Local baseline directory identity changed");
 }
 // Cleanup owns the run directory only. It must remain possible after a user
@@ -180,7 +193,9 @@ export async function validateLocalWorkspaceForDeletion(workspace: Workspace, pr
   const project = path.resolve(projectPath);
   if (workspace.kind !== "local" || !path.isAbsolute(projectPath) || projectPath !== project || workspace.root !== project || workspace.original !== project || workspace.baselineRoot !== path.join(run, "local-baseline")) throw new Error("Local workspace paths do not match their project and owned run directory");
   if (within(project, data) || within(data, project)) throw new Error("Local project and workflow data directories must not overlap");
-  if (!workspace.rootIdentity || !Number.isSafeInteger(workspace.rootIdentity.dev) || workspace.rootIdentity.dev < 0 || !Number.isSafeInteger(workspace.rootIdentity.ino) || workspace.rootIdentity.ino < 0) throw new Error("Local project directory identity is invalid");
+  // Cleanup never accesses or removes the original project. Historical rounded
+  // identities may describe this owned run, but cannot authorize project recovery.
+  if (!workspace.rootIdentity || [workspace.rootIdentity.dev, workspace.rootIdentity.ino].some(value => identityPart(value) === undefined && !legacyImpreciseIdentity(value))) throw new Error("Local project directory identity is invalid");
   try { if (await directory(workspace.baselineRoot) !== workspace.baselineRoot) throw new Error("Local baseline directory identity changed"); }
   catch (error) { if (!absent(error)) throw error; }
 }
@@ -189,7 +204,7 @@ async function validate(workspace: Workspace): Promise<void> {
   await validateLocalWorkspace(workspace, workspace.original, path.dirname(workspace.baselineRoot));
 }
 async function baseline(workspace: Workspace): Promise<void> {
-  const actual = await scan(workspace.baselineRoot!, false, sourceLimit);
+  const actual = await scan(workspace.baselineRoot!, false, sourceLimit, undefined, undefined, [], workspace.localPathFormat === "posix");
   if (!equal(actual.records, workspace.baseline)) throw new Error("Local baseline contents changed; create a new preview");
 }
 export async function createLocalWorkspace(projectPath: string, runDirectory: string, signal?: AbortSignal): Promise<Workspace> {
@@ -197,15 +212,15 @@ export async function createLocalWorkspace(projectPath: string, runDirectory: st
   const root = await directory(projectPath), run = await directory(runDirectory), data = await realpath(path.dirname(run));
   if (within(root, data) || within(data, root)) throw new Error("Local project and workflow data directories must not overlap");
   await assertIndependentGitMetadata(root, data);
-  const identity = await lstat(root), baselineRoot = path.join(run, "local-baseline");
+  const identity = await lstat(root, { bigint: true }), baselineRoot = path.join(run, "local-baseline");
   try { await directory(baselineRoot); } catch (error) { if (!absent(error)) throw error; }
   await rm(baselineRoot, { recursive: true, force: true });
   await mkdir(baselineRoot, { mode: 0o700 });
   const beforeGit = await gitRoot(root) ? await readOnlyGitContextDigest(root, { ignoreHostCheckpoints: true }) : undefined;
-  const captured = await scan(root, false, sourceLimit, signal, baselineRoot);
+  const captured = await scan(root, false, sourceLimit, signal, baselineRoot, [], true);
   const afterGit = await gitRoot(root) ? await readOnlyGitContextDigest(root, { ignoreHostCheckpoints: true }) : undefined;
   if (beforeGit !== afterGit) throw new Error("Local Git state changed while capturing the baseline");
-  const workspace: Workspace = { root, original: root, kind: "local", baselineRoot, baseline: captured.records, rootIdentity: { dev: identity.dev, ino: identity.ino } };
+  const workspace: Workspace = { root, original: root, kind: "local", baselineRoot, baseline: captured.records, localPathFormat: "posix", rootIdentity: { dev: identity.dev.toString(), ino: identity.ino.toString() } };
   await validateLocalWorkspace(workspace, root, run);
   await baseline(workspace);
   return workspace;
@@ -230,7 +245,7 @@ export async function captureLocalWorkspaceCheckpoints(workspace: Workspace, sig
   signal?.throwIfAborted();
   await validate(workspace); await baseline(workspace);
   const gitBefore = await gitRoot(workspace.root) ? await readOnlyGitContextDigests(workspace.root) : undefined;
-  const current = await scan(workspace.root, true, checkpointLimit, signal);
+  const current = await scan(workspace.root, true, checkpointLimit, signal, undefined, [], workspace.localPathFormat === "posix");
   const gitAfter = await gitRoot(workspace.root) ? await readOnlyGitContextDigests(workspace.root) : undefined;
   if (gitBefore?.withoutHostCheckpoints !== gitAfter?.withoutHostCheckpoints) throw new Error("Local Git state changed during checkpoint hashing");
   await validate(workspace);
@@ -264,7 +279,7 @@ async function fileDiff(cwd: string, left: string, right: string, full: ReturnTy
 export async function localWorkspaceDiff(workspace: Workspace): Promise<Diff> {
   await validate(workspace); await baseline(workspace);
   const retained = Object.keys(workspace.baseline);
-  const current = await scan(workspace.root, false, sourceLimit, undefined, undefined, retained);
+  const current = await scan(workspace.root, false, sourceLimit, undefined, undefined, retained, workspace.localPathFormat === "posix");
   const files: Diff["files"] = [], details: unknown[] = [];
   const full = createHash("sha256"); let text = "", totalBytes = 0, previewTruncated = false;
   for (const name of [...new Set([...Object.keys(workspace.baseline), ...Object.keys(current.records)])].sort()) {
@@ -281,7 +296,7 @@ export async function localWorkspaceDiff(workspace: Workspace): Promise<Diff> {
     if (Buffer.byteLength(normalized) > remaining) previewTruncated = true;
     if (remaining > 0) text += new StringDecoder("utf8").write(Buffer.from(normalized).subarray(0, remaining));
   }
-  if (!equal(current.records, (await scan(workspace.root, false, sourceLimit, undefined, undefined, retained)).records)) throw new Error("Local project changed while generating its review diff");
+  if (!equal(current.records, (await scan(workspace.root, false, sourceLimit, undefined, undefined, retained, workspace.localPathFormat === "posix")).records)) throw new Error("Local project changed while generating its review diff");
   await validate(workspace);
   return { text, files, fingerprint: hash(details), previewTruncated, totalBytes, contentSha256: full.digest("hex") };
 }

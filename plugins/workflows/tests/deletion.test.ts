@@ -13,6 +13,7 @@ import { DeletionService } from "../src/deletion.ts";
 import type { DeletionOptions } from "../src/deletion.ts";
 import type { WorkflowRun } from "../src/types.ts";
 import { createGitWorkspace } from "../src/maintenance.ts";
+import { requireFileSymlinks } from "./fixtures/symlink.ts";
 const exec = promisify(execFile);
 const source = 'export const meta={name:"reusable",description:"Deletion fixture"}; return args;';
 async function fixture(t: TestContext, options: DeletionOptions = {}, aliasDataRoot = false) {
@@ -53,7 +54,7 @@ test("definition deletion removes all proven run data and locks, preserving same
     await mkdir(path.join(owned, name), { recursive: true }); await writeFile(path.join(owned, name, "owned.fixture"), "Private fixture result");
   }
   await writeFile(path.join(owned, "activation-config.backup.toml"), "Private backup");
-  await symlink(path.join(root, "original"), path.join(owned, "external-link"));
+  await symlink(path.join(root, "original"), path.join(owned, "external-link"), process.platform === "win32" ? "junction" : "dir");
   const preview = await service.preview({ kind: "definition", id: definition.id, revision: definition.revision });
   assert.equal(preview.canDelete, true, JSON.stringify(preview.blocked)); assert.deepEqual(preview.runs.map(item => item.id), [associated.id]);
   assert.ok(preview.totalFiles >= 10); assert.ok(preview.totalBytes > 0);
@@ -211,6 +212,27 @@ test("effective MCP references block deletion and stale configuration cannot aut
   assert.equal((await service.execute({ ...preview.target, fingerprint: preview.fingerprint })).deleted, true); assert.deepEqual(config, {});
 });
 
+test("Windows named-pipe MCP settings do not block unrelated run deletion", { skip: process.platform !== "win32" }, async t => {
+  let config: Record<string, unknown> = {};
+  const { store, service, run } = await fixture(t, { readEffectiveConfig: async () => config });
+  const record = await run();
+  config = { scopes: [{ cwd: path.dirname(store.root), mcp_servers: { desktop: {
+    command: process.execPath,
+    env: { SKY_CUA_NATIVE_PIPE_DIRECTORY: "\\\\.\\pipe\\" },
+  } } }] };
+  const preview = await service.preview({ kind: "run", id: record.id, revision: record.revision });
+  assert.equal(preview.canDelete, true, JSON.stringify(preview.blocked));
+  config = { scopes: [{ cwd: path.dirname(store.root), mcp_servers: { desktop: {
+    command: process.execPath,
+    args: [path.join(store.directory(record.id), "server.mjs")],
+    env: { SKY_CUA_NATIVE_PIPE_DIRECTORY: "\\\\.\\pipe\\" },
+  } } }] };
+  const referenced = await service.preview({ kind: "run", id: record.id, revision: record.revision });
+  assert.equal(referenced.canDelete, false);
+  assert.ok(referenced.blocked.some(block => block.code === "config_reference"));
+  assert.ok(!referenced.blocked.some(block => block.code === "config_unavailable"));
+});
+
 test("effective configuration map ordering does not invalidate a fresh deletion preview", async t => {
   let reads = 0;
   const { store, service, run } = await fixture(t, { readEffectiveConfig: async () => (++reads % 2 ? {
@@ -324,14 +346,19 @@ test("explicit historical runs are shown and deleted while built-in definitions 
   assert.ok(builtin.blocked.some(block => block.code === "builtin")); assert.equal((await service.execute({ ...builtin.target, fingerprint: builtin.fingerprint })).deleted, false);
 });
 
-test("unsafe run and template symlinks never cause deletion outside the owned data root", async t => {
-  const { root, store, service, templates, run } = await fixture(t);
+test("unsafe run directory links never cause deletion outside the owned data root", async t => {
+  const { root, store, service, run } = await fixture(t);
   const record = await run(); const directory = store.directory(record.id);
-  await rm(directory, { recursive: true }); await symlink(path.join(root, "original"), directory);
+  await rm(directory, { recursive: true }); await symlink(path.join(root, "original"), directory, process.platform === "win32" ? "junction" : "dir");
   const preview = await service.preview({ kind: "run", id: record.id, revision: 1 }); assert.equal(preview.canDelete, false);
   assert.equal((await service.execute({ ...preview.target, fingerprint: preview.fingerprint })).deleted, false);
   assert.equal(await readFile(path.join(root, "original", "delivered.txt"), "utf8"), "Delivered project contents\n");
-  await rm(directory); const definition = await templates.save({ script: source });
+});
+
+test("unsafe template file symlinks never cause deletion outside the owned data root", async t => {
+  const { root, service, templates } = await fixture(t);
+  if (!(await requireFileSymlinks(t, root))) return;
+  const definition = await templates.save({ script: source });
   await rm(templates.filename(definition.id)); await symlink(path.join(root, "original", "delivered.txt"), templates.filename(definition.id));
   const definitionPreview = await service.preview({ kind: "definition", id: definition.id, revision: definition.revision }); assert.equal(definitionPreview.canDelete, false);
   await assert.rejects(templates.save({ script: source, revision: definition.revision }), /owned regular file/);
@@ -467,6 +494,7 @@ test("a reader notices pending deletion created between marker read and run.json
 test("MCP executable and script symlinks retain their referenced workflow runtime", async t => {
   let config: Record<string, unknown> = {};
   const { root, store, service, run } = await fixture(t, { readEffectiveConfig: async () => config });
+  if (!(await requireFileSymlinks(t, root))) return;
   const record = await run(); const workspace = path.join(store.directory(record.id), "workspace"); await mkdir(workspace);
   const owned = path.join(workspace, "server.mjs"); await writeFile(owned, "// Fixture runtime\n");
   const executable = path.join(root, "retained-tool"); await symlink(owned, executable);

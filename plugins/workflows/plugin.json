@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "workflows",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Tool-driven dynamic workflows with native Codex execution, scoped MCP tools, durable node checkpoints, recovery previews, and reviewed changes.",
   "license": "MIT",
   "extensions": {

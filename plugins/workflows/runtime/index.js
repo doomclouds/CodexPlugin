@@ -45015,7 +45015,7 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.8.0",
+    version: "0.8.1",
     stage: "runtime-v2",
     checkpoints: { available: true, tools: ["workflow_preview_recovery", "workflow_get_checkpoints", "workflow_get_task_history"], nodeAttemptDiagnostics: true, historyPagination: true, includedInRunDeletion: true },
     available: ["host-thread-directory-binding", "bounded-run-transport", "artifact-pagination", "paged-run-summaries", "bounded-diff-preview", "declared-protected-command-paths", "explicit-task-retry", "snapshot-checkpoint", "git-context-cache", "preparation-progress", "node-activity", "node-process", "bounded-mcp-error-diagnostics", "native-auto-review", "native-tool-error-diagnostics", "task-output-validation", "same-thread-result-recovery", "typed-task-failure-origin", "writable-workspace-operations", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "local-project-writing", "local-project-git-writing", "project-writer-serialization", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
@@ -46762,7 +46762,7 @@ var CodexAdapter = class {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config2 = object6(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config2, cwd);
@@ -46920,7 +46920,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -47252,7 +47252,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object6(object6(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== void 0 || request.reasoningEffort !== void 0) {
@@ -48384,7 +48384,7 @@ var CodexProjectsProvider = class {
 
 // src/deletion.ts
 import { createHash as createHash6 } from "node:crypto";
-import { lstat as lstat9, readFile as readFile7, readdir as readdir7, rm as rm7, realpath as realpath8 } from "node:fs/promises";
+import { lstat as lstat10, readFile as readFile7, readdir as readdir7, rm as rm7, realpath as realpath9 } from "node:fs/promises";
 import path12 from "node:path";
 
 // src/project-temps.ts
@@ -48511,6 +48511,16 @@ var absent2 = (error62) => error62.code === "ENOENT";
 var hash3 = (value) => createHash5("sha256").update(JSON.stringify(value)).digest("hex");
 var within2 = (root, target) => target === root || target.startsWith(root + path11.sep);
 var equal = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+var maxIdentity = (1n << 64n) - 1n;
+function identityPart(value) {
+  if (typeof value === "number") return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : void 0;
+  if (typeof value !== "string" || !/^(0|[1-9][0-9]{0,19})$/.test(value)) return void 0;
+  const exact = BigInt(value);
+  return exact <= maxIdentity ? exact : void 0;
+}
+function legacyImpreciseIdentity(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= Number(maxIdentity) && !Number.isSafeInteger(value);
+}
 function filename(root, name) {
   if (!name || path11.isAbsolute(name) || name.includes("\0") || name.split(/[\\/]/).some((part) => !part || part === "." || part === ".." || part === ".git")) throw new Error("Unsafe local workspace path");
   const target = path11.resolve(root, name);
@@ -48519,7 +48529,7 @@ function filename(root, name) {
 }
 async function parents2(root, name) {
   let parent = root;
-  for (const segment of name.split(path11.sep).slice(0, -1)) {
+  for (const segment of name.split(process.platform === "win32" ? /[\\/]/ : "/").slice(0, -1)) {
     parent = path11.join(parent, segment);
     const info = await lstat8(parent);
     if (!info.isDirectory() || info.isSymbolicLink() || await realpath7(parent) !== parent) throw new Error("Unsafe local workspace parent directory");
@@ -48549,8 +48559,9 @@ async function gitRoot(root) {
     throw error62;
   }
 }
-async function names(root, includeIgnored, signal) {
+async function names(root, includeIgnored, signal, portablePaths = false) {
   const result2 = /* @__PURE__ */ new Set();
+  const separator = portablePaths ? "/" : path11.sep;
   const walk = async (current2, prefix2, depth) => {
     signal?.throwIfAborted();
     if (depth > 64) throw new Error("Local workspace exceeds 64 directory levels");
@@ -48561,7 +48572,7 @@ async function names(root, includeIgnored, signal) {
       const relative2 = prefix2 + entry, target = filename(root, relative2), info = await lstat8(target);
       if (info.isDirectory() && !info.isSymbolicLink()) {
         if (await realpath7(target) !== target) throw new Error("Local workspace directory identity changed");
-        await walk(target, relative2 + path11.sep, depth + 1);
+        await walk(target, relative2 + separator, depth + 1);
       } else result2.add(relative2);
       if (result2.size > 1e5) throw new Error("Local workspace exceeds 100000 files");
     }
@@ -48600,7 +48611,7 @@ async function names(root, includeIgnored, signal) {
         throw error62;
       }
       if (!info.isDirectory() || info.isSymbolicLink() || await realpath7(target) !== target) throw new Error("Local Git submodule is not a real project directory");
-      if (await gitRoot(target)) await git2(target, relative2 + path11.sep, depth + 1);
+      if (await gitRoot(target)) await git2(target, relative2 + separator, depth + 1);
       else if ((await readdir6(target)).length) throw new Error("Uninitialized local Git submodule contains unmanaged files");
     }
   };
@@ -48608,9 +48619,9 @@ async function names(root, includeIgnored, signal) {
   else await walk(root, "", 0);
   return [...result2].sort();
 }
-async function scan(root, includeIgnored, limit2, signal, destination, retainedNames = []) {
+async function scan(root, includeIgnored, limit2, signal, destination, retainedNames = [], portablePaths = false) {
   const records2 = /* @__PURE__ */ Object.create(null);
-  const inventory2 = await names(root, includeIgnored, signal);
+  const inventory2 = await names(root, includeIgnored, signal, portablePaths);
   const initial = [.../* @__PURE__ */ new Set([...inventory2, ...retainedNames])].sort();
   const identities = [];
   let bytes2 = 0;
@@ -48667,7 +48678,7 @@ async function scan(root, includeIgnored, limit2, signal, destination, retainedN
     } else throw new Error("Local workspace contains an unsupported filesystem entry");
     identities.push({ target, dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs });
   }
-  if (!equal(inventory2, await names(root, includeIgnored, signal))) throw new Error("Local workspace file inventory changed during hashing");
+  if (!equal(inventory2, await names(root, includeIgnored, signal, portablePaths))) throw new Error("Local workspace file inventory changed during hashing");
   for (const previous of identities) {
     signal?.throwIfAborted();
     await parents2(root, path11.relative(root, previous.target));
@@ -48707,8 +48718,10 @@ async function validateLocalWorkspace(workspace, projectPath, runDirectory) {
   if (within2(project, data2) || within2(data2, project)) throw new Error("Local project and workflow data directories must not overlap");
   await assertIndependentGitMetadata(project, data2);
   if (workspace.root !== project || workspace.original !== project || workspace.baselineRoot !== path11.join(run, "local-baseline")) throw new Error("Local workspace paths do not match their project and owned run directory");
-  const identity2 = await lstat8(project);
-  if (!workspace.rootIdentity || identity2.dev !== workspace.rootIdentity.dev || identity2.ino !== workspace.rootIdentity.ino) throw new Error("Local project directory identity changed");
+  const savedIdentity = workspace.rootIdentity;
+  if (savedIdentity && [savedIdentity.dev, savedIdentity.ino].some(legacyImpreciseIdentity)) throw new Error("Legacy local project directory identity lost numeric precision; create a new preview before resuming");
+  const identity2 = await lstat8(project, { bigint: true });
+  if (!savedIdentity || identity2.dev !== identityPart(savedIdentity.dev) || identity2.ino !== identityPart(savedIdentity.ino)) throw new Error("Local project directory identity changed");
   if (await directory(workspace.baselineRoot) !== workspace.baselineRoot) throw new Error("Local baseline directory identity changed");
 }
 async function validateLocalWorkspaceForDeletion(workspace, projectPath, runDirectory) {
@@ -48716,7 +48729,7 @@ async function validateLocalWorkspaceForDeletion(workspace, projectPath, runDire
   const project = path11.resolve(projectPath);
   if (workspace.kind !== "local" || !path11.isAbsolute(projectPath) || projectPath !== project || workspace.root !== project || workspace.original !== project || workspace.baselineRoot !== path11.join(run, "local-baseline")) throw new Error("Local workspace paths do not match their project and owned run directory");
   if (within2(project, data2) || within2(data2, project)) throw new Error("Local project and workflow data directories must not overlap");
-  if (!workspace.rootIdentity || !Number.isSafeInteger(workspace.rootIdentity.dev) || workspace.rootIdentity.dev < 0 || !Number.isSafeInteger(workspace.rootIdentity.ino) || workspace.rootIdentity.ino < 0) throw new Error("Local project directory identity is invalid");
+  if (!workspace.rootIdentity || [workspace.rootIdentity.dev, workspace.rootIdentity.ino].some((value) => identityPart(value) === void 0 && !legacyImpreciseIdentity(value))) throw new Error("Local project directory identity is invalid");
   try {
     if (await directory(workspace.baselineRoot) !== workspace.baselineRoot) throw new Error("Local baseline directory identity changed");
   } catch (error62) {
@@ -48728,7 +48741,7 @@ async function validate2(workspace) {
   await validateLocalWorkspace(workspace, workspace.original, path11.dirname(workspace.baselineRoot));
 }
 async function baseline(workspace) {
-  const actual = await scan(workspace.baselineRoot, false, sourceLimit);
+  const actual = await scan(workspace.baselineRoot, false, sourceLimit, void 0, void 0, [], workspace.localPathFormat === "posix");
   if (!equal(actual.records, workspace.baseline)) throw new Error("Local baseline contents changed; create a new preview");
 }
 async function createLocalWorkspace(projectPath, runDirectory, signal) {
@@ -48736,7 +48749,7 @@ async function createLocalWorkspace(projectPath, runDirectory, signal) {
   const root = await directory(projectPath), run = await directory(runDirectory), data2 = await realpath7(path11.dirname(run));
   if (within2(root, data2) || within2(data2, root)) throw new Error("Local project and workflow data directories must not overlap");
   await assertIndependentGitMetadata(root, data2);
-  const identity2 = await lstat8(root), baselineRoot = path11.join(run, "local-baseline");
+  const identity2 = await lstat8(root, { bigint: true }), baselineRoot = path11.join(run, "local-baseline");
   try {
     await directory(baselineRoot);
   } catch (error62) {
@@ -48745,10 +48758,10 @@ async function createLocalWorkspace(projectPath, runDirectory, signal) {
   await rm6(baselineRoot, { recursive: true, force: true });
   await mkdir7(baselineRoot, { mode: 448 });
   const beforeGit = await gitRoot(root) ? await readOnlyGitContextDigest(root, { ignoreHostCheckpoints: true }) : void 0;
-  const captured = await scan(root, false, sourceLimit, signal, baselineRoot);
+  const captured = await scan(root, false, sourceLimit, signal, baselineRoot, [], true);
   const afterGit = await gitRoot(root) ? await readOnlyGitContextDigest(root, { ignoreHostCheckpoints: true }) : void 0;
   if (beforeGit !== afterGit) throw new Error("Local Git state changed while capturing the baseline");
-  const workspace = { root, original: root, kind: "local", baselineRoot, baseline: captured.records, rootIdentity: { dev: identity2.dev, ino: identity2.ino } };
+  const workspace = { root, original: root, kind: "local", baselineRoot, baseline: captured.records, localPathFormat: "posix", rootIdentity: { dev: identity2.dev.toString(), ino: identity2.ino.toString() } };
   await validateLocalWorkspace(workspace, root, run);
   await baseline(workspace);
   return workspace;
@@ -48768,7 +48781,7 @@ async function captureLocalWorkspaceCheckpoints(workspace, signal) {
   await validate2(workspace);
   await baseline(workspace);
   const gitBefore = await gitRoot(workspace.root) ? await readOnlyGitContextDigests(workspace.root) : void 0;
-  const current2 = await scan(workspace.root, true, checkpointLimit, signal);
+  const current2 = await scan(workspace.root, true, checkpointLimit, signal, void 0, [], workspace.localPathFormat === "posix");
   const gitAfter = await gitRoot(workspace.root) ? await readOnlyGitContextDigests(workspace.root) : void 0;
   if (gitBefore?.withoutHostCheckpoints !== gitAfter?.withoutHostCheckpoints) throw new Error("Local Git state changed during checkpoint hashing");
   await validate2(workspace);
@@ -48820,7 +48833,7 @@ async function localWorkspaceDiff(workspace) {
   await validate2(workspace);
   await baseline(workspace);
   const retained = Object.keys(workspace.baseline);
-  const current2 = await scan(workspace.root, false, sourceLimit, void 0, void 0, retained);
+  const current2 = await scan(workspace.root, false, sourceLimit, void 0, void 0, retained, workspace.localPathFormat === "posix");
   const files2 = [], details = [];
   const full = createHash5("sha256");
   let text3 = "", totalBytes = 0, previewTruncated = false;
@@ -48844,9 +48857,34 @@ Symbolic link or file type changed
     if (Buffer.byteLength(normalized) > remaining) previewTruncated = true;
     if (remaining > 0) text3 += new StringDecoder3("utf8").write(Buffer.from(normalized).subarray(0, remaining));
   }
-  if (!equal(current2.records, (await scan(workspace.root, false, sourceLimit, void 0, void 0, retained)).records)) throw new Error("Local project changed while generating its review diff");
+  if (!equal(current2.records, (await scan(workspace.root, false, sourceLimit, void 0, void 0, retained, workspace.localPathFormat === "posix")).records)) throw new Error("Local project changed while generating its review diff");
   await validate2(workspace);
   return { text: text3, files: files2, fingerprint: hash3(details), previewTruncated, totalBytes, contentSha256: full.digest("hex") };
+}
+
+// src/deletion-path.ts
+import { lstat as lstat9, readlink as readlink5, realpath as realpath8 } from "node:fs/promises";
+import referencePath from "node:path";
+function isWindowsNamedPipe(value) {
+  return /^\\\\[^\\]+\\pipe(?:\\|$)/i.test(value.replaceAll("/", "\\"));
+}
+async function resolveReferencePath(filename2, filesystem = { realpath: realpath8, lstat: lstat9, readlink: readlink5 }) {
+  const visited = /* @__PURE__ */ new Set();
+  let current2 = filename2;
+  for (let depth = 0; depth < 40; depth++) {
+    if (visited.has(current2)) break;
+    visited.add(current2);
+    try {
+      return await filesystem.realpath(current2);
+    } catch (error62) {
+      const code = error62.code ?? "";
+      if (["ENOENT", "ENOTDIR"].includes(code)) return void 0;
+      if (!["EACCES", "EPERM"].includes(code) || !(await filesystem.lstat(current2)).isSymbolicLink()) throw error62;
+      const target = await filesystem.readlink(current2);
+      current2 = referencePath.isAbsolute(target) ? target : referencePath.resolve(await filesystem.realpath(referencePath.dirname(current2)), target);
+    }
+  }
+  throw Object.assign(new Error("Cannot safely resolve a cyclic or excessive MCP reference link chain"), { code: "ELOOP" });
 }
 
 // src/deletion.ts
@@ -48892,10 +48930,7 @@ async function serverReferences(server2, directory2, cwd, cache) {
   const canonical4 = (filename2) => {
     let value = cache.get(filename2);
     if (!value) {
-      value = realpath8(filename2).catch((error62) => {
-        if (["ENOENT", "ENOTDIR"].includes(error62.code ?? "")) return void 0;
-        throw error62;
-      });
+      value = resolveReferencePath(filename2);
       cache.set(filename2, value);
     }
     return value;
@@ -48905,6 +48940,7 @@ async function serverReferences(server2, directory2, cwd, cache) {
       for (const token of value.split(/[\s'";]+/).filter(Boolean)) {
         const candidate = token.startsWith("--") && token.includes("=") ? token.slice(token.indexOf("=") + 1) : token;
         if (!candidate || candidate.startsWith("-")) continue;
+        if (process.platform === "win32" && isWindowsNamedPipe(candidate)) continue;
         const pathLike = candidate.startsWith(".") || candidate.includes("/") || candidate.includes("\\") || field.startsWith("args[");
         const filenames = [];
         if (pathLike && (base || path12.isAbsolute(candidate))) filenames.push(path12.resolve(base ?? "", candidate));
@@ -48934,7 +48970,7 @@ function configScopes(config2) {
   return [{ servers: isObject2(config2.mcp_servers) ? config2.mcp_servers : config2 }];
 }
 async function privateJson(filename2) {
-  const info = await lstat9(filename2);
+  const info = await lstat10(filename2);
   if (!info.isFile() || info.isSymbolicLink()) throw new Error("\u5220\u9664\u8BB0\u5F55\u5FC5\u987B\u662F\u8FD0\u884C\u76EE\u5F55\u5185\u7684\u666E\u901A\u6587\u4EF6");
   if (info.size > 32 * 1024 * 1024) throw new Error("\u5220\u9664\u8BB0\u5F55\u8D85\u8FC7\u5B89\u5168\u8BFB\u53D6\u4E0A\u9650");
   return JSON.parse(await readFile7(filename2, "utf8"));
@@ -48945,7 +48981,7 @@ async function inventory(filename2) {
   let bytes2 = 0;
   async function visit2(current2, relative2, depth) {
     if (depth > 128 || entries.length >= 25e4) throw new Error("\u5220\u9664\u8303\u56F4\u8FC7\u5927\uFF0C\u8BF7\u5148\u68C0\u67E5\u8FD0\u884C\u76EE\u5F55");
-    const info = await lstat9(current2);
+    const info = await lstat10(current2);
     entries.push([relative2, info.isSymbolicLink() ? "link" : info.isDirectory() ? "directory" : "file", info.size, info.mode, info.ino, info.mtimeMs, info.ctimeMs]);
     if (info.isDirectory() && !info.isSymbolicLink()) {
       for (const child of (await readdir7(current2)).sort()) await visit2(path12.join(current2, child), path12.join(relative2, child), depth + 1);
@@ -49012,7 +49048,7 @@ var DeletionService = class {
         throw error62;
       }
       for (const name of await readdir7(directory2)) if (name.startsWith(probe.basename) && probe.suffix.test(name.slice(probe.basename.length))) {
-        const filename2 = path12.join(directory2, name), info = await lstat9(filename2);
+        const filename2 = path12.join(directory2, name), info = await lstat10(filename2);
         if (!info.isFile() && !info.isSymbolicLink()) throw new Error("\u5220\u9664\u4E34\u65F6\u5143\u6570\u636E\u8DEF\u5F84\u4E0D\u662F\u666E\u901A\u6587\u4EF6\uFF0C\u4E0D\u80FD\u81EA\u52A8\u6E05\u7406");
         filenames.push(filename2);
       }
@@ -49078,7 +49114,7 @@ var DeletionService = class {
       const directory2 = this.store.directory(descriptor.id);
       let canonicalDirectory;
       try {
-        canonicalDirectory = await realpath8(await this.store.ownedDirectory(descriptor.id));
+        canonicalDirectory = await realpath9(await this.store.ownedDirectory(descriptor.id));
         canonicalDirectories.set(descriptor.id, canonicalDirectory);
       } catch (error62) {
         if (!absent3(error62)) blocked.push({ code: "unsafe_path", runId: descriptor.id, path: directory2, message: text(error62) });
@@ -49139,7 +49175,7 @@ var DeletionService = class {
         signatures.push([descriptor.id, size.signature]);
         const lock = `${directory2}.lock`;
         try {
-          const info = await lstat9(lock);
+          const info = await lstat10(lock);
           if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("\u8FD0\u884C\u9501\u8DEF\u5F84\u4E0D\u662F\u81EA\u6709\u76EE\u5F55\uFF0C\u4E0D\u80FD\u81EA\u52A8\u6E05\u7406");
         } catch (error62) {
           if (!absent3(error62)) throw error62;
@@ -49171,7 +49207,7 @@ var DeletionService = class {
     }
     const selectedIds = new Set(selection.keys());
     const directories = [...selectedIds].map((id) => ({ id, directory: this.store.directory(id) }));
-    const canonicalRoot = await realpath8(await this.store.ownedDirectory());
+    const canonicalRoot = await realpath9(await this.store.ownedDirectory());
     const directoryVariants = directories.flatMap((entry) => {
       const canonical4 = canonicalDirectories.get(entry.id) ?? path12.join(canonicalRoot, entry.id);
       return [{ ...entry }, ...canonical4 !== entry.directory ? [{ id: entry.id, directory: canonical4 }] : []];
@@ -49221,7 +49257,7 @@ var DeletionService = class {
       result2.alreadyGone = true;
       for (const object10 of preview.objects) {
         try {
-          await lstat9(object10.path);
+          await lstat10(object10.path);
           result2.alreadyGone = false;
           break;
         } catch (error62) {
@@ -49282,7 +49318,7 @@ var DeletionService = class {
             }
             await remove(directory2);
             try {
-              await lstat9(directory2);
+              await lstat10(directory2);
               throw new Error("\u5220\u9664\u540E\u8FD0\u884C\u76EE\u5F55\u4ECD\u5B58\u5728");
             } catch (error62) {
               if (!absent3(error62)) throw error62;
@@ -49307,7 +49343,7 @@ var DeletionService = class {
       }
       for (const run of preview.runs) {
         try {
-          await lstat9(`${this.store.directory(run.id)}.lock`);
+          await lstat10(`${this.store.directory(run.id)}.lock`);
           result2.remaining.push({ path: `${this.store.directory(run.id)}.lock`, reason: "\u8FD0\u884C\u9501\u6E05\u7406\u672A\u5B8C\u6210\uFF0C\u8BF7\u68C0\u67E5\u540E\u53F0\u8FDB\u7A0B\u3002" });
         } catch (error62) {
           if (!absent3(error62)) result2.remaining.push({ path: `${this.store.directory(run.id)}.lock`, reason: "\u65E0\u6CD5\u786E\u8BA4\u8FD0\u884C\u9501\u5DF2\u6E05\u7406\u3002" });
@@ -49316,7 +49352,7 @@ var DeletionService = class {
       if (input2.kind === "definition") {
         const lock = path12.join(this.store.root, "locks", `template_${input2.id.slice(6)}.lock`);
         try {
-          await lstat9(lock);
+          await lstat10(lock);
           result2.remaining.push({ path: lock, reason: "\u5DE5\u4F5C\u6D41\u5B9A\u4E49\u9501\u6E05\u7406\u672A\u5B8C\u6210\u3002" });
         } catch (error62) {
           if (!absent3(error62)) result2.remaining.push({ path: lock, reason: "\u65E0\u6CD5\u786E\u8BA4\u5B9A\u4E49\u9501\u5DF2\u6E05\u7406\u3002" });
@@ -49673,7 +49709,7 @@ function registerPanelToolWithIcons(server2, register) {
   }
 }
 function createServer(engine2, options = {}) {
-  const serverInfo = { name: "workflows", version: "0.8.0", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.8.1", icons: panelIcons };
   const panelHtml = readFileSync3(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);
@@ -49875,43 +49911,43 @@ function createServer(engine2, options = {}) {
 
 // src/engine.ts
 import { randomBytes as randomBytes9, createHash as createHash10 } from "node:crypto";
-import { lstat as lstat13, realpath as realpath12, stat as stat3 } from "node:fs/promises";
+import { lstat as lstat14, realpath as realpath13, stat as stat3 } from "node:fs/promises";
 import path16 from "node:path";
 
 // src/snapshot-checkpoint.ts
 import { createHash as createHash7 } from "node:crypto";
 import { constants as constants4 } from "node:fs";
-import { lstat as lstat10, open as open6, readdir as readdir8, readlink as readlink5, realpath as realpath9 } from "node:fs/promises";
+import { lstat as lstat11, open as open6, readdir as readdir8, readlink as readlink6, realpath as realpath10 } from "node:fs/promises";
 import path13 from "node:path";
 var maxFiles2 = 1e5;
 var maxBytes = 2 * 1024 * 1024 * 1024;
 var maxFileBytes = 512 * 1024 * 1024;
 async function assertOwnedGit(root) {
   const metadata = path13.join(root, ".git");
-  const entry = await lstat10(metadata);
-  if (!entry.isDirectory() || entry.isSymbolicLink() || await realpath9(metadata) !== metadata) throw new Error("Snapshot Git metadata must remain an independent owned directory");
+  const entry = await lstat11(metadata);
+  if (!entry.isDirectory() || entry.isSymbolicLink() || await realpath10(metadata) !== metadata) throw new Error("Snapshot Git metadata must remain an independent owned directory");
   const [actual, common, top] = await Promise.all([
     gitCommand(root, ["rev-parse", "--absolute-git-dir"]),
     gitCommand(root, ["rev-parse", "--git-common-dir"]),
     gitCommand(root, ["rev-parse", "--show-toplevel"])
   ]);
-  if (await realpath9(actual.trim()) !== metadata || await realpath9(path13.resolve(root, common.trim())) !== metadata || await realpath9(top.trim()) !== root) throw new Error("Snapshot Git metadata or working tree redirects outside its independent directory");
+  if (await realpath10(actual.trim()) !== metadata || await realpath10(path13.resolve(root, common.trim())) !== metadata || await realpath10(top.trim()) !== root) throw new Error("Snapshot Git metadata or working tree redirects outside its independent directory");
   let parent = metadata;
   for (const name of ["objects", "info"]) {
     parent = path13.join(parent, name);
     let info2;
     try {
-      info2 = await lstat10(parent);
+      info2 = await lstat11(parent);
     } catch (error62) {
       if (error62.code === "ENOENT") return;
       throw error62;
     }
-    if (!info2.isDirectory() || info2.isSymbolicLink() || await realpath9(parent) !== parent) throw new Error("Snapshot Git object storage must remain owned directories");
+    if (!info2.isDirectory() || info2.isSymbolicLink() || await realpath10(parent) !== parent) throw new Error("Snapshot Git object storage must remain owned directories");
   }
   const alternates = path13.join(parent, "alternates");
   let info;
   try {
-    info = await lstat10(alternates);
+    info = await lstat11(alternates);
   } catch (error62) {
     if (error62.code === "ENOENT") return;
     throw error62;
@@ -49920,20 +49956,20 @@ async function assertOwnedGit(root) {
   const descriptor = await open6(alternates, constants4.O_RDONLY | (constants4.O_NOFOLLOW ?? 0));
   try {
     const opened = await descriptor.stat();
-    if (!opened.isFile() || opened.size > 65536 || info.dev !== opened.dev || info.ino !== opened.ino || await realpath9(alternates) !== alternates) throw new Error("Snapshot Git cannot share alternate object storage");
+    if (!opened.isFile() || opened.size > 65536 || info.dev !== opened.dev || info.ino !== opened.ino || await realpath10(alternates) !== alternates) throw new Error("Snapshot Git cannot share alternate object storage");
     const buffer = Buffer.alloc(65537);
     const { bytesRead } = await descriptor.read(buffer, 0, buffer.length, 0);
     if (bytesRead > 65536 || buffer.subarray(0, bytesRead).toString("utf8").trim()) throw new Error("Snapshot Git cannot share alternate object storage");
-    const after = await descriptor.stat(), current2 = await lstat10(alternates);
+    const after = await descriptor.stat(), current2 = await lstat11(alternates);
     if (after.size !== info.size || after.mtimeMs !== info.mtimeMs || after.ctimeMs !== info.ctimeMs || current2.isSymbolicLink() || current2.dev !== opened.dev || current2.ino !== opened.ino) throw new Error("Snapshot Git alternate storage changed during validation");
   } finally {
     await descriptor.close();
   }
 }
 async function snapshotFingerprint(workspace, signal) {
-  const original = await lstat10(workspace.root);
+  const original = await lstat11(workspace.root);
   if (!original.isDirectory() || original.isSymbolicLink()) throw new Error("Snapshot checkpoint requires an owned directory");
-  const root = await realpath9(workspace.root);
+  const root = await realpath10(workspace.root);
   await assertOwnedGit(root);
   const digest3 = createHash7("sha256");
   let files2 = 0, directories = 0, bytes2 = 0;
@@ -49946,43 +49982,43 @@ async function snapshotFingerprint(workspace, signal) {
     signal?.throwIfAborted();
     if (depth > 64) throw new Error("Snapshot checkpoint exceeds 64 directory levels");
     const filename2 = relative2 ? path13.join(root, relative2) : root;
-    const before = await lstat10(filename2);
+    const before = await lstat11(filename2);
     const mode = before.mode & 511;
     if (before.isSymbolicLink()) {
-      const target = await readlink5(filename2);
+      const target = await readlink6(filename2);
       if (path13.isAbsolute(target) || !owned(path13.resolve(path13.dirname(filename2), target))) throw new Error("Snapshot checkpoint cannot follow an external symbolic link");
-      const resolved = await realpath9(filename2).catch((error62) => {
+      const resolved = await realpath10(filename2).catch((error62) => {
         if (error62.code === "ENOENT") return path13.resolve(path13.dirname(filename2), target);
         throw error62;
       });
       if (!owned(resolved)) throw new Error("Snapshot checkpoint symbolic link chain escapes its workspace");
       if (++files2 > maxFiles2) throw new Error("Snapshot checkpoint exceeds 100000 files");
-      const after = await lstat10(filename2);
-      if (!after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || target !== await readlink5(filename2)) throw new Error("Snapshot symbolic link changed during checkpoint hashing");
+      const after = await lstat11(filename2);
+      if (!after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || target !== await readlink6(filename2)) throw new Error("Snapshot symbolic link changed during checkpoint hashing");
       append([relative2, "link", mode, target]);
     } else if (before.isDirectory()) {
       if (++directories > maxFiles2) throw new Error("Snapshot checkpoint exceeds 100000 directories");
-      if (await realpath9(filename2) !== filename2) throw new Error("Snapshot checkpoint directory ownership changed");
+      if (await realpath10(filename2) !== filename2) throw new Error("Snapshot checkpoint directory ownership changed");
       const names2 = (await readdir8(filename2)).sort();
       append([relative2, "directory", mode]);
       for (const name of names2) await visit2(path13.join(relative2, name), depth + 1);
-      const after = await lstat10(filename2);
-      if (!after.isDirectory() || after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || await realpath9(filename2) !== filename2 || JSON.stringify(names2) !== JSON.stringify((await readdir8(filename2)).sort())) throw new Error("Snapshot directory changed during checkpoint hashing");
+      const after = await lstat11(filename2);
+      if (!after.isDirectory() || after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || await realpath10(filename2) !== filename2 || JSON.stringify(names2) !== JSON.stringify((await readdir8(filename2)).sort())) throw new Error("Snapshot directory changed during checkpoint hashing");
     } else if (before.isFile()) {
       bytes2 += before.size;
       if (++files2 > maxFiles2 || before.size > maxFileBytes || bytes2 > maxBytes) throw new Error("Snapshot checkpoint exceeds its bounded 100000-file, 512 MiB per file or 2 GiB total limit");
       const descriptor = await open6(filename2, constants4.O_RDONLY | (constants4.O_NOFOLLOW ?? 0));
       try {
         const opened = await descriptor.stat();
-        if (!opened.isFile() || before.dev !== opened.dev || before.ino !== opened.ino || await realpath9(filename2) !== filename2) throw new Error("Snapshot file ownership changed while opening it");
+        if (!opened.isFile() || before.dev !== opened.dev || before.ino !== opened.ino || await realpath10(filename2) !== filename2) throw new Error("Snapshot file ownership changed while opening it");
         const index = relative2 === path13.join(".git", "index") ? await readGitIndexState(root) : void 0;
         const content = createHash7("sha256");
         if (!index) for await (const chunk of descriptor.createReadStream({ autoClose: false })) {
           signal?.throwIfAborted();
           content.update(chunk);
         }
-        const after = await descriptor.stat(), current3 = await lstat10(filename2);
-        if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || current3.dev !== opened.dev || current3.ino !== opened.ino || current3.isSymbolicLink() || await realpath9(filename2) !== filename2) throw new Error("Snapshot file changed during checkpoint hashing");
+        const after = await descriptor.stat(), current3 = await lstat11(filename2);
+        if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || current3.dev !== opened.dev || current3.ino !== opened.ino || current3.isSymbolicLink() || await realpath10(filename2) !== filename2) throw new Error("Snapshot file changed during checkpoint hashing");
         append(index ? [relative2, "git-index", mode, index] : [relative2, "file", mode, before.size, content.digest("hex")]);
       } finally {
         await descriptor.close();
@@ -49991,8 +50027,8 @@ async function snapshotFingerprint(workspace, signal) {
   };
   await visit2("", 0);
   await assertOwnedGit(root);
-  const current2 = await lstat10(workspace.root);
-  if (!current2.isDirectory() || current2.isSymbolicLink() || current2.dev !== original.dev || current2.ino !== original.ino || await realpath9(workspace.root) !== root) throw new Error("Snapshot root changed during checkpoint hashing");
+  const current2 = await lstat11(workspace.root);
+  if (!current2.isDirectory() || current2.isSymbolicLink() || current2.dev !== original.dev || current2.ino !== original.ino || await realpath10(workspace.root) !== root) throw new Error("Snapshot root changed during checkpoint hashing");
   return `snapshot-v1:${digest3.digest("hex")}`;
 }
 
@@ -50095,7 +50131,7 @@ function nodeProcess(run, input2, checkpointCoverage) {
 import { execFile as execFile2 } from "node:child_process";
 import { promisify as promisify2 } from "node:util";
 import { createHash as createHash8, randomBytes as randomBytes7 } from "node:crypto";
-import { copyFile, lstat as lstat11, mkdir as mkdir8, readFile as readFile8, readlink as readlink6, realpath as realpath10, rename as rename6, rm as rm8, symlink as symlink2, writeFile as writeFile6, chmod as chmod2 } from "node:fs/promises";
+import { copyFile, lstat as lstat12, mkdir as mkdir8, readFile as readFile8, readlink as readlink7, realpath as realpath11, rename as rename6, rm as rm8, symlink as symlink2, writeFile as writeFile6, chmod as chmod2 } from "node:fs/promises";
 import path14 from "node:path";
 import { constants as constants5 } from "node:fs";
 var exec2 = promisify2(execFile2);
@@ -50111,13 +50147,13 @@ async function record4(root, name) {
   const target = resolveFile(root, name);
   let stat4;
   try {
-    stat4 = await lstat11(target);
+    stat4 = await lstat12(target);
   } catch (error62) {
     if (error62.code === "ENOENT") return;
     throw error62;
   }
   if (stat4.isSymbolicLink()) {
-    const value = await readlink6(target);
+    const value = await readlink7(target);
     const destination = path14.resolve(path14.dirname(target), value);
     if (path14.isAbsolute(value) || !destination.startsWith(root + path14.sep)) throw new Error(`External symbolic link is unsupported: ${name}`);
     return { hash: hash5(value), kind: "link", mode: stat4.mode & 511 };
@@ -50127,12 +50163,12 @@ async function record4(root, name) {
   return { hash: hash5(await readFile8(target)), kind: "file", mode: stat4.mode & 511 };
 }
 async function safeParents2(root, name, create = true) {
-  const pieces = name.split(path14.sep).slice(0, -1);
+  const pieces = name.split(process.platform === "win32" ? /[\\/]/ : "/").slice(0, -1);
   let directory2 = root;
   for (const piece of pieces) {
     directory2 = path14.join(directory2, piece);
     try {
-      const stat4 = await lstat11(directory2);
+      const stat4 = await lstat12(directory2);
       if (!stat4.isDirectory() || stat4.isSymbolicLink()) throw new Error(`Unsafe parent directory: ${name}`);
     } catch (error62) {
       if (error62.code !== "ENOENT") throw error62;
@@ -50146,7 +50182,7 @@ async function copyEntry(source, destination, name, entry) {
   await safeParents2(destination, name);
   const target = resolveFile(destination, name);
   await rm8(target, { force: true });
-  if (entry.kind === "link") await symlink2(await readlink6(resolveFile(source, name)), target);
+  if (entry.kind === "link") await symlink2(await readlink7(resolveFile(source, name)), target);
   else {
     await copyFile(resolveFile(source, name), target);
     await chmod2(target, entry.mode);
@@ -50161,19 +50197,19 @@ async function replaceEntry(source, destination, name, entry, transaction) {
   await trackProjectTemporary(transaction, destination, descriptor);
   let identity2;
   try {
-    if (entry.kind === "link") await symlink2(await readlink6(resolveFile(source, name)), temporary);
+    if (entry.kind === "link") await symlink2(await readlink7(resolveFile(source, name)), temporary);
     else {
       await copyFile(resolveFile(source, name), temporary, constants5.COPYFILE_EXCL);
       await chmod2(temporary, entry.mode);
     }
-    const stat4 = await lstat11(temporary);
+    const stat4 = await lstat12(temporary);
     identity2 = { dev: stat4.dev, ino: stat4.ino };
     await trackProjectTemporary(transaction, destination, { ...descriptor, ...identity2 });
     await rename6(temporary, target);
   } finally {
     if (identity2) {
       try {
-        const stat4 = await lstat11(temporary);
+        const stat4 = await lstat12(temporary);
         if (stat4.dev !== identity2.dev || stat4.ino !== identity2.ino) throw new Error("Project temporary ownership changed during application");
         await rm8(temporary);
       } catch (error62) {
@@ -50192,9 +50228,9 @@ async function contextDigest(project) {
   return hash5(JSON.stringify(records2));
 }
 async function createWorkspace(project, directory2) {
-  const canonical4 = await realpath10(project);
+  const canonical4 = await realpath11(project);
   const { stdout } = await exec2("git", ["rev-parse", "--show-toplevel"], { cwd: canonical4 });
-  if (await realpath10(stdout.trim()) !== canonical4) throw new Error("Writing workflows require the Git repository root as projectPath");
+  if (await realpath11(stdout.trim()) !== canonical4) throw new Error("Writing workflows require the Git repository root as projectPath");
   const gitlinks = await listGitlinks(canonical4);
   if (gitlinks.length) throw new Error("Snapshot writing does not copy Git submodules. Create a new preview with workspaceMode: git-worktree to retain their commit and initialization state.");
   const root = path14.join(directory2, "workspace");
@@ -50208,7 +50244,7 @@ async function createWorkspace(project, directory2) {
   for (const name of await projectFiles(canonical4)) {
     const entry = await record4(canonical4, name);
     if (!entry) continue;
-    size += (await lstat11(resolveFile(canonical4, name))).size;
+    size += (await lstat12(resolveFile(canonical4, name))).size;
     if (size > 256 * 1024 * 1024) throw new Error("Workspace snapshot exceeds 256 MiB");
     baseline2[name] = entry;
     await copyEntry(canonical4, base, name, entry);
@@ -50340,7 +50376,7 @@ ${input2.prompt}`;
 // src/checkpoint-store.ts
 import { createHash as createHash9, randomBytes as randomBytes8 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
-import { lstat as lstat12, open as open7, readdir as readdir9, realpath as realpath11, rename as rename7, rm as rm9 } from "node:fs/promises";
+import { lstat as lstat13, open as open7, readdir as readdir9, realpath as realpath12, rename as rename7, rm as rm9 } from "node:fs/promises";
 import path15 from "node:path";
 var manifestLimit = 1024 * 1024;
 var historyLimit = 32 * 1024 * 1024;
@@ -50403,9 +50439,9 @@ var CheckpointStore = class {
   }
   async bytes(id, kind, name, maximum) {
     const directory2 = await this.directory(id, kind), filename2 = path15.join(directory2, `${name}.json`);
-    const ownedFilename = path15.join(await realpath11(directory2), `${name}.json`);
-    const before = await lstat12(filename2);
-    if (!before.isFile() || before.isSymbolicLink() || before.size > maximum || await realpath11(filename2) !== ownedFilename) throw new Error("Invalid private checkpoint artifact");
+    const ownedFilename = path15.join(await realpath12(directory2), `${name}.json`);
+    const before = await lstat13(filename2);
+    if (!before.isFile() || before.isSymbolicLink() || before.size > maximum || await realpath12(filename2) !== ownedFilename) throw new Error("Invalid private checkpoint artifact");
     const file2 = await open7(filename2, constants6.O_RDONLY | (constants6.O_NOFOLLOW ?? 0));
     try {
       const opened = await file2.stat();
@@ -50420,8 +50456,8 @@ var CheckpointStore = class {
         if (size > maximum) throw new Error("Checkpoint artifact exceeds its bounded read limit");
         chunks.push(buffer.subarray(0, bytesRead));
       }
-      const content = Buffer.concat(chunks, size).toString("utf8"), after = await file2.stat(), current2 = await lstat12(filename2);
-      if (Buffer.byteLength(content) > maximum || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || current2.isSymbolicLink() || current2.dev !== opened.dev || current2.ino !== opened.ino || await realpath11(filename2) !== ownedFilename) throw new Error("Checkpoint artifact changed while being read");
+      const content = Buffer.concat(chunks, size).toString("utf8"), after = await file2.stat(), current2 = await lstat13(filename2);
+      if (Buffer.byteLength(content) > maximum || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || current2.isSymbolicLink() || current2.dev !== opened.dev || current2.ino !== opened.ino || await realpath12(filename2) !== ownedFilename) throw new Error("Checkpoint artifact changed while being read");
       await this.directory(id, kind);
       return content;
     } finally {
@@ -50431,7 +50467,7 @@ var CheckpointStore = class {
   async immutable(id, kind, name, content) {
     const directory2 = await this.directory(id, kind, true), target = path15.join(directory2, `${name}.json`);
     try {
-      await lstat12(target);
+      await lstat13(target);
       throw new Error("Immutable checkpoint artifact already exists");
     } catch (error62) {
       if (error62.code !== "ENOENT") throw error62;
@@ -50913,7 +50949,7 @@ var WorkflowEngine = class {
   }
   async list(projectPath) {
     await this.initialization;
-    const project = projectPath ? await realpath12(projectPath) : void 0;
+    const project = projectPath ? await realpath13(projectPath) : void 0;
     const runs = await this.store.list();
     return runs.filter((run) => !project || run.projectPath === project);
   }
@@ -51071,7 +51107,7 @@ var WorkflowEngine = class {
   }
   async executionEnvironment(projectPath, signal = this.configAbort.signal) {
     if (!this.adapter.executionEnvironment) throw new Error("This worker adapter cannot provide the Codex model catalogue.");
-    const cwd = await realpath12(projectPath ?? process.cwd());
+    const cwd = await realpath13(projectPath ?? process.cwd());
     if (!(await stat3(cwd)).isDirectory()) throw new Error("projectPath must be a directory");
     return this.adapter.executionEnvironment(cwd, signal);
   }
@@ -51126,7 +51162,7 @@ var WorkflowEngine = class {
     validateWorkflowArgs(meta3, input2.args === void 0 ? {} : input2.args);
     const nodeSettings = validateNodeSettings(input2.nodeSettings, meta3);
     const approvalMode = resolveApprovalMode(input2.approvalMode, "auto-review");
-    const projectPath = await realpath12(input2.projectPath);
+    const projectPath = await realpath13(input2.projectPath);
     if (!(await stat3(projectPath)).isDirectory()) throw new Error("projectPath must be a directory");
     const maintenance = validateMaintenanceScope(input2);
     if (input2.allowedMcpServers?.some((name) => !/^[a-zA-Z0-9_.-]{1,128}$/.test(name) || /workflows/i.test(name))) throw new Error("Invalid or recursive MCP server grant");
@@ -51551,9 +51587,9 @@ var WorkflowEngine = class {
     }
     const expectedKind = run.workspaceMode ?? "snapshot";
     if ((workspace.kind ?? "snapshot") !== expectedKind) throw new Error("Command operation workspace kind differs from its previewed scope");
-    const owned = path16.join(await realpath12(await this.store.ownedDirectory(run.id)), "workspace");
-    const entry = await lstat13(workspace.root);
-    if (!entry.isDirectory() || entry.isSymbolicLink() || await realpath12(workspace.root) !== owned || await realpath12(workspace.original) !== run.projectPath || owned === await realpath12(workspace.original)) throw new Error("Command operations must remain bound to this run's owned isolated workspace");
+    const owned = path16.join(await realpath13(await this.store.ownedDirectory(run.id)), "workspace");
+    const entry = await lstat14(workspace.root);
+    if (!entry.isDirectory() || entry.isSymbolicLink() || await realpath13(workspace.root) !== owned || await realpath13(workspace.original) !== run.projectPath || owned === await realpath13(workspace.original)) throw new Error("Command operations must remain bound to this run's owned isolated workspace");
     if (workspace.kind === "git-worktree") await validateGitWorkspace(workspace);
   }
   async execute(run, active) {
@@ -51675,8 +51711,8 @@ var WorkflowEngine = class {
                 const step = run.maintenance.steps.find((step2) => step2.id === operationId);
                 if (step.protectedPaths !== void 0) {
                   if (run.workspace?.kind !== "git-worktree") throw new Error("Protected maintenance paths require an independent Git workspace");
-                  const owned = path16.join(await realpath12(await this.store.ownedDirectory(run.id)), "workspace");
-                  if (run.workspace.root !== owned || run.workspacePath !== run.workspace.root || run.workspace.root === run.workspace.original || run.workspace.root === await realpath12(run.workspace.original)) throw new Error("Protected maintenance paths must remain bound to this run's owned isolated workspace");
+                  const owned = path16.join(await realpath13(await this.store.ownedDirectory(run.id)), "workspace");
+                  if (run.workspace.root !== owned || run.workspacePath !== run.workspace.root || run.workspace.root === run.workspace.original || run.workspace.root === await realpath13(run.workspace.original)) throw new Error("Protected maintenance paths must remain bound to this run's owned isolated workspace");
                   await validateGitWorkspace(run.workspace);
                 }
               }

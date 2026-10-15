@@ -32,7 +32,7 @@ async function record(root: string, name: string): Promise<FileRecord | undefine
   return { hash: hash(await readFile(target)), kind: "file", mode: stat.mode & 0o777 };
 }
 async function safeParents(root: string, name: string, create = true) {
-  const pieces = name.split(path.sep).slice(0, -1);
+  const pieces = name.split(process.platform === "win32" ? /[\\/]/ : "/").slice(0, -1);
   let directory = root;
   for (const piece of pieces) {
     directory = path.join(directory, piece);
