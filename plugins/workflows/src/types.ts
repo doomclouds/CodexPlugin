@@ -5,6 +5,7 @@ import type { WorkflowStopReason } from "./stop-context.ts";
 
 export type TaskStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stopping";
 export type WorkspaceMode = "snapshot" | "git-worktree" | "local";
+export type ApprovalMode = "auto-review" | "never";
 export interface Activity {
   id: string;
   kind: "initializing" | "command" | "files" | "search" | "mcp" | "message" | "waiting";
@@ -76,6 +77,7 @@ export interface WorkflowRun {
   workspace?: Workspace; workspacePath?: string; diff?: Diff; result?: unknown; error?: string;
   leaseId?: string; scriptDigest: string; contextDigest?: string;
   networkAccess?: boolean; workspaceMode?: WorkspaceMode;
+  approvalMode?: ApprovalMode;
   // Internal preview-time sandbox scope. Its absence keeps legacy runs unchanged.
   localGitWrite?: true;
   maintenance?: MaintenancePlan; maintenanceReview?: MaintenanceReview;

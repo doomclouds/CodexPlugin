@@ -45,7 +45,12 @@ description: 根据用户任务生成、保存并执行 Workflows 动态工作�
 
 执行模式由 AI 在创建计划时按任务选择，并显式传入 `workspaceMode`，用户无需改脚本：明确要求直接开发、修 Bug 并立即在当前项目看到改动时用 `local`；试验、希望先看差异再采用时用 `snapshot`；拉取并固定 Git 提交、分支或子模块的隔离维护用 `git-worktree`。只读分析保持 `allowWrite: false` 和任务 `mode: "read"`，不因“在本机执行”就开放写入。写入权限与工作位置分别配置；本地写入运行里的分析节点仍可只读。普通“写代码”没有说明是否原地且上下文无法确定时，保留 `snapshot`，不猜测用户已同意立即修改原项目。API 默认仍是 `snapshot`；复用已有定义保留其模式，需要改变时明确说明并创建新预览，不自动迁移已有运行。
 
-`networkAccess` 默认 `false`，与 `allowWrite` 独立。只读联网研究可保持 `allowWrite: false` 和 `agent` 默认只读模式，仅按授权打开 `networkAccess: true`；这不会开放文件写入。只有用户任务已授权相应网络访问时设置 `true`；维护步骤仍须声明自己的 `networkAccess: true` 才能联网。不能用命令、临时环境或其他工具绕过关闭的网络。worker 不隐式继承外部工具或父聊天能力。需要已配置的 MCP 时，在 `allowedMcpServers` 明确列出授权服务名称，并以 `allowedMcpTools` 按服务列出授权的实际工具名称；默认服务和工具均未开放。只使用现有配置工具的交集，不绕过审批。只读 worker 仅使用明确 `readOnlyHint: true` 的工具；写入 worker 也按工具授权限制。worker 当前为非交互执行，工具白名单不代替原生审批。遇到 `MCP tool call requires approval, but approval policy is never` 时，报告具体工具需要用户审批配置，不反复调用，也不改注解、直接连接服务或开放全部工具绕过。只有用户明确授权对应工具的预批准设置时，才按 Codex 支持的逐工具配置最小调整；不因工作流授权就自行削弱原生审批策略。不包含 Workflows 自身，避免递归调度。父聊天专有 apps/连接器不属于用户 MCP 配置，不能声称已继承或可调用。
+`networkAccess` 默认 `false`，与 `allowWrite` 独立。只读联网研究可保持 `allowWrite: false` 和 `agent` 默认只读模式，仅按授权打开 `networkAccess: true`；这不会开放文件写入。只有用户任务已授权相应网络访问时设置 `true`；维护步骤仍须声明自己的 `networkAccess: true` 才能联网。不能用命令、临时环境或其他工具绕过关闭的网络。worker 不隐式继承外部工具或父聊天能力。需要已配置的 MCP 时，在 `allowedMcpServers` 明确列出授权服务名称，并以 `allowedMcpTools` 按服务列出授权的实际工具名称；默认服务和工具均未开放。只使用现有配置工具的交集，不绕过审批。只读 worker 仅使用明确 `readOnlyHint: true` 的工具；写入 worker 也按工具授权限制。工具白名单不代替原生审批，现场人工审批或用户输入请求仍不支持。需要审批的操作可交给独立的 Codex 自动审核器；不能改注解、直接连接服务或开放全部工具绕过审批。不包含 Workflows 自身，避免递归调度。父聊天专有 apps/连接器不属于用户 MCP 配置，不能声称已继承或可调用。
+
+
+`approvalMode` 独立于写入、网络、MCP 和工作区设置。新建预览默认 `"auto-review"`，新建定义默认保存此模式；旧运行或定义缺少字段时按 `"never"` 处理，读取、更新或恢复时不得静默升级。面板“参数”弹窗提供“审批方式”：自动审核或禁止审批。Agent 可在 `workflow_preview`、`workflow_update`、`workflow_save_template` 中显式传 `approvalMode: "auto-review" | "never"`；保存和复用定义须保留实际选择。`workflow_start` 使用已保存的预览模式，不传模式覆盖；`workflow_resume` 可按用户选择显式传 `approvalMode`，省略时保留原行为。更换审核方式不改业务脚本、不放宽文件、网络或工具授权，不绕过缓存或检查点校验。确定性 `operation()` 命令保持禁止审批。
+
+自动审核使用原生 `on-request` 与 `auto_review`，由插件核对实际生效的策略，不修改 Codex 用户全局配置或逐工具 `approval_mode`，也不永久预批准工具。原生版本、账号或受管要求不支持所选方式时停止并报告真实错误，不改用全自动放行。审核拒绝、超时或中止会停止当前 worker；核对相关节点的简要状态及有界脱敏开发日志，报告动作类别和原因，不能自动重试、改路径或借其他工具实现被拒绝的效果。遇到 `approval policy is never` 时先读运行的实际模式；按用户已授权的选择显式改为自动审核后再继续，不把升级安装当作旧运行已经切换。仅更换模式不会重跑已完成任务；确需重试某节点时按既有授权显式指定实际 `retryFromTaskId`，仍须核对可能已经生效的外部副作用。
 
 工作区默认 `workspaceMode: "snapshot"`，写入先在隔离工作区完成。需要 Git 元数据的隔离维护使用 `"git-worktree"`，并明确 Git 仓库根目录。用户明确要求直接修改当前项目时，使用 `workspaceMode: "local"`、`allowWrite: true`，修改任务仍传 `{ mode: "write" }`。本地模式的 worker 直接在原项目读取、修改和测试，保留已有未提交编辑，不要求工作区干净或必须是 Git 仓库。改动立即生效，不需要也不能调用 `workflow_apply`。停止、失败和删除运行都不撤销已写入的项目文件。共用同一 Workflows 数据目录时，同一项目的本地写入运行串行；外部编辑器与其他数据目录不受此锁协调。预览应明确说明即时写入的范围；已有直接修改授权不重复确认。
 
@@ -61,7 +66,7 @@ description: 根据用户任务生成、保存并执行 Workflows 动态工作�
 
 快照检查点包含忽略产物，隔离区被外部修改时停止旧验证重放。旧快照已派发任务而没有检查点，须新建预览。只读 Git 缓存随提交、分支、索引、引用和本地配置变化失效；网络、外部 MCP、工具链或其他动态事实的新鲜度应按任务明确核验，需要时显式重试，不假设本地源码未变就代表外部事实未变。
 
-用 `workflow_list_templates`、`workflow_get_template` 查看内置或保存的定义。用户希望复用时，用 `workflow_save_template` 保存脚本、默认输入、写入和网络范围、MCP 服务和工具授权、工作区类型、维护计划及限制。定义不绑定项目或运行结果；ID 为 `saved:<meta.name>`，更新前读取当前定义版本。
+用 `workflow_list_templates`、`workflow_get_template` 查看内置或保存的定义。用户希望复用时，用 `workflow_save_template` 保存脚本、默认输入、写入和网络范围、MCP 服务和工具授权、工作区类型、审批方式、维护计划及限制。定义不绑定项目或运行结果；ID 为 `saved:<meta.name>`，更新前读取当前定义版本。
 
 复用定义时，向 `workflow_preview` 传 `sourceDefinition: { id, revision }`，并使用该定义的实际脚本；服务端核对来源、版本和脚本。脚本已修改时先保存定义的新版本再关联，不伪造来源。新定义使用随机初始版本，之后更新递增；删除后重建必须重新读取，不复用旧版本或旧删除指纹。
 

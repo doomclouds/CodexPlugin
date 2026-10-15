@@ -13,7 +13,8 @@ import { nodeProcess } from "./node-process.ts";
 import type { WorkflowStopReason } from "./stop-context.ts";
 import { applyWorkspace, contextDigest, createWorkspace, workspaceDiff } from "./workspace.ts";
 import { createGitWorkspace, validateMaintenance, reviewMaintenance, applyMaintenance, maintenanceFingerprint, validateGitWorkspace } from "./maintenance.ts";
-import type { Activity, Attempt, Limits, Task, WorkflowRun, MaintenancePlan, Preparation, DefinitionSource, WorkspaceMode } from "./types.ts";
+import type { Activity, ApprovalMode, Attempt, Limits, Task, WorkflowRun, MaintenancePlan, Preparation, DefinitionSource, WorkspaceMode } from "./types.ts";
+import { resolveApprovalMode } from "./approval-mode.ts";
 import { ExecutionSettingsStore, modelSettingsSchema, resolveExecutionSettings, validateExplicitModelSettings, validateNodeSettings } from "./execution-settings.ts";
 import type { EffectiveExecutionSettings, ExecutionEnvironment, ModelSettings, NodeSettings, StoredExecutionSettings } from "./execution-settings.ts";
 import { buildWorkerPrompt } from "./worker-prompt.ts";
@@ -236,11 +237,12 @@ export class WorkflowEngine {
       return this.settingsView(await this.settings.update(settings), environment);
     });
   }
-  async preview(input: { projectPath: string; script: string; args?: unknown; allowWrite?: boolean; networkAccess?: boolean; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; workspaceMode?: WorkspaceMode; maintenance?: MaintenancePlan; limits?: Partial<Limits>; nodeSettings?: NodeSettings; sourceDefinition?: DefinitionSource }) {
+  async preview(input: { projectPath: string; script: string; args?: unknown; allowWrite?: boolean; networkAccess?: boolean; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; workspaceMode?: WorkspaceMode; approvalMode?: ApprovalMode; maintenance?: MaintenancePlan; limits?: Partial<Limits>; nodeSettings?: NodeSettings; sourceDefinition?: DefinitionSource }) {
     await this.initialization;
     const { meta } = validateScript(input.script);
     validateWorkflowArgs(meta, input.args === undefined ? {} : input.args);
     const nodeSettings = validateNodeSettings(input.nodeSettings, meta);
+    const approvalMode = resolveApprovalMode(input.approvalMode, "auto-review");
     const projectPath = await realpath(input.projectPath);
     if (!(await stat(projectPath)).isDirectory()) throw new Error("projectPath must be a directory");
     if (input.workspaceMode === "local" && !input.allowWrite) throw new Error("Local project mode requires explicit allowWrite permission");
@@ -254,6 +256,7 @@ export class WorkflowEngine {
     const run: WorkflowRun = {
       id: `wf_${randomBytes(12).toString("hex")}`, revision: 0, createdAt: now(), updatedAt: now(),
       meta, script: input.script, scriptDigest: digest(input.script), args: input.args === undefined ? {} : input.args, projectPath,
+      approvalMode,
       allowWrite: input.allowWrite ?? false, networkAccess: input.networkAccess ?? false, allowedMcpServers: input.allowedMcpServers ?? [], allowedMcpTools: input.allowedMcpTools ?? {}, workspaceMode: input.workspaceMode ?? "snapshot", ...(input.maintenance ? { maintenance: input.maintenance } : {}), ...(input.nodeSettings !== undefined ? { nodeSettings } : {}), limits, execution: "draft", review: "unavailable", application: "none", tasks: [], logs: [],
       ...(input.workspaceMode === "local" && input.allowWrite ? { localGitWrite: true as const } : {}),
       ...(input.sourceDefinition ? { sourceDefinition: { ...input.sourceDefinition } } : {}),
@@ -263,7 +266,7 @@ export class WorkflowEngine {
     await this.store.create(run);
     return structuredClone(run);
   }
-  async update(input: { id: string; revision: number; script: string; args: unknown; allowWrite?: boolean; networkAccess?: boolean; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; workspaceMode?: WorkspaceMode; maintenance?: MaintenancePlan; nodeSettings?: NodeSettings }) {
+  async update(input: { id: string; revision: number; script: string; args: unknown; allowWrite?: boolean; networkAccess?: boolean; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; workspaceMode?: WorkspaceMode; approvalMode?: ApprovalMode; maintenance?: MaintenancePlan; nodeSettings?: NodeSettings }) {
     let run = await this.load(input.id);
     this.assertActionAvailable(run);
     if (this.active.has(run.id)) throw new Error("This workflow is running");
@@ -276,6 +279,7 @@ export class WorkflowEngine {
     const { meta } = validateScript(input.script);
     validateWorkflowArgs(meta, input.args);
     const nodeSettings = validateNodeSettings(input.nodeSettings ?? run.nodeSettings, meta);
+    const approvalMode = resolveApprovalMode(input.approvalMode, resolveApprovalMode(run.approvalMode));
     if (input.allowWrite !== undefined && input.allowWrite !== run.allowWrite && run.workspace) throw new Error("Changing write scope requires a new preview and workspace");
     if (run.meta.description !== meta.description) {
       for (const task of run.tasks) task.status = "interrupted";
@@ -311,6 +315,10 @@ export class WorkflowEngine {
       this.log(run, "Execution permissions changed; saved task results will not be reused.");
     }
     Object.assign(run, scopes);
+    if (input.approvalMode !== undefined) {
+      if (approvalMode !== resolveApprovalMode(run.approvalMode)) this.log(run, `Worker approval mode changed to ${approvalMode}; file, network and MCP tool scope remain unchanged.`);
+      run.approvalMode = approvalMode;
+    }
     run.execution = "draft"; run.review = "unavailable";
     delete run.result; delete run.diff; delete run.error; delete run.failureContext; delete run.stopReason;
     delete run.preparation; delete run.startedAt; delete run.endedAt;
@@ -349,8 +357,10 @@ export class WorkflowEngine {
     }
     return task.index;
   }
-  async start(input: { id: string; revision: number; leaseId?: string; retryFromTaskId?: string }, resume = false) {
+  async start(input: { id: string; revision: number; leaseId?: string; retryFromTaskId?: string; approvalMode?: ApprovalMode }, resume = false) {
     if (this.closing) throw new Error("Workflow execution service is closing");
+    if (!resume && input.approvalMode !== undefined) throw new Error("Choose worker approval mode in the preview before workflow_start");
+    if (input.approvalMode !== undefined) resolveApprovalMode(input.approvalMode);
     let run = await this.load(input.id);
     this.assertActionAvailable(run);
     this.assertRevision(run, input.revision);
@@ -369,6 +379,7 @@ export class WorkflowEngine {
       this.assertRevision(run, input.revision);
       if (resume ? !["stopped", "failed"].includes(run.execution) : run.execution !== "draft") throw new Error("Workflow state changed before start");
       const retryFrom = this.retryBoundary(run, input.retryFromTaskId, resume);
+      const approvalMode = resolveApprovalMode(input.approvalMode, resolveApprovalMode(run.approvalMode));
       const { meta, mayUseAgent } = validateScript(run.script);
       validateWorkflowArgs(meta, run.args);
       run.meta = meta;
@@ -377,6 +388,10 @@ export class WorkflowEngine {
       if (this.closing) throw new Error("Workflow execution service is closing");
       const explicitSettings = settings.model || settings.reasoningEffort || run.executionSettings?.model || run.executionSettings?.reasoningEffort || Object.values(run.nodeSettings).some(settings => settings.model || settings.reasoningEffort);
       if (!this.adapter.executionEnvironment && explicitSettings) throw new Error("This worker adapter cannot validate configured model settings.");
+      if (input.approvalMode !== undefined) {
+        if (approvalMode !== resolveApprovalMode(run.approvalMode)) this.log(run, `Manual resume selected worker approval mode ${approvalMode}; file, network and MCP tool scope remain unchanged.`);
+        run.approvalMode = approvalMode;
+      }
       if (retryFrom !== undefined) {
         for (const task of run.tasks) if (task.index >= retryFrom) task.cacheInvalidated = true;
         this.log(run, `Explicit retry from ${input.retryFromTaskId}: preserving earlier results and invalidating this task and its following results.`);
@@ -625,6 +640,7 @@ export class WorkflowEngine {
                 const report = await this.adapter.run({
                   id: attempt.id, prompt: buildWorkerPrompt({ description: run.meta.description, phaseTitles: run.meta.phases?.map(item => item.title) ?? [], ...(task.phase !== undefined ? { phase: task.phase } : {}), mode, ...(run.workspaceMode !== undefined ? { workspaceMode: run.workspaceMode } : {}), prompt }),
                   cwd: run.workspacePath ?? run.projectPath, mode, networkAccess: run.networkAccess ?? false, mcpServers: run.allowedMcpServers ?? [], mcpTools: run.allowedMcpTools ?? {},
+                  approvalMode: resolveApprovalMode(run.approvalMode),
                   ...(run.workspaceMode === "local" && run.localGitWrite === true && mode === "write" ? { localGitWrite: true } : {}),
                   ...(executionSettings?.model ? { model: executionSettings.model } : {}),
                   ...(executionSettings?.reasoningEffort ? { reasoningEffort: executionSettings.reasoningEffort } : {}),

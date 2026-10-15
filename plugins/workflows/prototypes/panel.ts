@@ -7,6 +7,7 @@ import type { WorkflowStopReason } from "../src/stop-context.ts";
 import type { WorkflowFailureContext } from "../src/failure-context.ts";
 
 export type WorkspaceMode = "snapshot" | "git-worktree" | "local";
+export type ApprovalMode = "auto-review" | "never";
 
 export interface ExecutionChoice { model?: string; reasoningEffort?: string }
 export interface NodeExecutionChoice extends ExecutionChoice { identity?: string }
@@ -99,7 +100,7 @@ export interface WorkflowRun {
   networkAccess?: boolean;
   allowedMcpServers?: string[];
   allowedMcpTools?: Record<string, string[]>;
-  workspaceMode?: WorkspaceMode;
+  workspaceMode?: WorkspaceMode; approvalMode?: ApprovalMode;
   maintenance?: MaintenancePlan;
   nodeSettings?: NodeSettings;
   executionSettings?: ExecutionSettings;
@@ -142,7 +143,7 @@ export interface TemplateDefinition extends TemplateSummary {
   networkAccess?: boolean;
   allowedMcpServers?: string[];
   allowedMcpTools?: Record<string, string[]>;
-  workspaceMode?: WorkspaceMode;
+  workspaceMode?: WorkspaceMode; approvalMode?: ApprovalMode;
   maintenance?: MaintenancePlan;
   nodeSettings?: NodeSettings;
   limits?: WorkflowRun["limits"];
@@ -150,7 +151,7 @@ export interface TemplateDefinition extends TemplateSummary {
 
 export type PanelTab = "overview" | "tasks" | "diff" | "logs";
 export type UserAction = "start" | "resume" | "stop" | "apply" | "cancel";
-export interface WorkflowInput { sourceDefinition?: { id: string; revision?: number }; projectPath: string; script: string; args: unknown; allowWrite: boolean; networkAccess?: boolean; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; workspaceMode?: WorkspaceMode; maintenance?: MaintenancePlan; nodeSettings?: NodeSettings; limits?: WorkflowRun["limits"] }
+export interface WorkflowInput { sourceDefinition?: { id: string; revision?: number }; projectPath: string; script: string; args: unknown; allowWrite: boolean; networkAccess?: boolean; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; workspaceMode?: WorkspaceMode; approvalMode?: ApprovalMode; maintenance?: MaintenancePlan; nodeSettings?: NodeSettings; limits?: WorkflowRun["limits"] }
 export interface PanelState {
   connection: "offline" | "connecting" | "connected" | "degraded" | "closed";
   reconnecting: boolean;
@@ -745,7 +746,7 @@ export class WorkflowPanelController {
     }
   }
 
-  async saveTemplate(input: Pick<WorkflowInput, "script" | "args" | "allowWrite" | "limits" | "networkAccess" | "allowedMcpServers" | "allowedMcpTools" | "workspaceMode" | "maintenance" | "nodeSettings">, revision?: number): Promise<TemplateSummary | undefined> {
+  async saveTemplate(input: Pick<WorkflowInput, "script" | "args" | "allowWrite" | "limits" | "networkAccess" | "allowedMcpServers" | "allowedMcpTools" | "workspaceMode" | "approvalMode" | "maintenance" | "nodeSettings">, revision?: number): Promise<TemplateSummary | undefined> {
     if (!this.canAct) return undefined;
     this.state.busy = true;
     this.state.error = "";
@@ -826,7 +827,7 @@ export class WorkflowPanelController {
     this.state.error = "";
     this.changed();
     try {
-      const args: Record<string, unknown> = edit ? { id: edit.id, revision: edit.revision, script: input.script, args: input.args, allowWrite: input.allowWrite, ...(input.networkAccess !== undefined ? { networkAccess: input.networkAccess } : {}), ...(input.allowedMcpServers ? { allowedMcpServers: input.allowedMcpServers } : {}), ...(input.allowedMcpTools ? { allowedMcpTools: input.allowedMcpTools } : {}), ...(input.workspaceMode ? { workspaceMode: input.workspaceMode } : {}), ...(input.maintenance ? { maintenance: input.maintenance } : {}), ...(input.nodeSettings ? { nodeSettings: input.nodeSettings } : {}) } : { ...input };
+      const args: Record<string, unknown> = edit ? { id: edit.id, revision: edit.revision, script: input.script, args: input.args, allowWrite: input.allowWrite, ...(input.networkAccess !== undefined ? { networkAccess: input.networkAccess } : {}), ...(input.allowedMcpServers ? { allowedMcpServers: input.allowedMcpServers } : {}), ...(input.allowedMcpTools ? { allowedMcpTools: input.allowedMcpTools } : {}), ...(input.workspaceMode ? { workspaceMode: input.workspaceMode } : {}), ...(input.approvalMode !== undefined ? { approvalMode: input.approvalMode } : {}), ...(input.maintenance ? { maintenance: input.maintenance } : {}), ...(input.nodeSettings ? { nodeSettings: input.nodeSettings } : {}) } : { ...input };
       const run = await this.mutationRun(await this.request(edit ? "workflow_update" : "workflow_preview", args), true);
       if (!run) return undefined;
       this.useRunProject(run);
@@ -850,21 +851,21 @@ export class WorkflowPanelController {
     const scope = (value: WorkflowInput | WorkflowRun) => ({ projectPath: value.projectPath, script: value.script, args: value.args, sourceDefinition: value.sourceDefinition, allowWrite: value.allowWrite, networkAccess: value.networkAccess ?? false, allowedMcpServers: value.allowedMcpServers ?? [], allowedMcpTools: value.allowedMcpTools ?? {}, workspaceMode: value.workspaceMode ?? "snapshot", maintenance: value.maintenance, nodeSettings: value.nodeSettings ?? {} });
     const sameLimits = !current || !input.limits || Object.entries(input.limits).every(([key, value]) => current.limits[key as keyof WorkflowRun["limits"]] === value);
     if (current && sameLimits && JSON.stringify(scope(current)) === JSON.stringify(scope(input))) {
-      if (current.execution === "draft") { await this.perform("start", true); return; }
+      if (current.execution === "draft" && (input.approvalMode === undefined || input.approvalMode === (current.approvalMode ?? "never"))) { await this.perform("start", true); return; }
       if (resultCheckFailure(current)) { this.state.error = "结果检查未通过。请查看失败原因，明确选择需要重新执行的节点。"; this.changed(); return; }
-      if (["stopped", "failed"].includes(current.execution)) { await this.perform("resume", true); return; }
+      if (["stopped", "failed"].includes(current.execution)) { await this.perform("resume", true, undefined, input.approvalMode); return; }
     }
     const sameNodes = !current || JSON.stringify(current.nodeSettings ?? {}) === JSON.stringify(input.nodeSettings ?? {});
     const saved = await this.save(input, current?.execution === "draft" && current.projectPath === input.projectPath && sameLimits && (sameNodes || !current.workspacePath) ? { id: current.id, revision: current.revision } : undefined);
     if (saved) await this.perform("start", true);
   }
 
-  async recheckFromCurrent(): Promise<WorkflowRun | undefined> {
+  async recheckFromCurrent(approvalMode?: ApprovalMode): Promise<WorkflowRun | undefined> {
     const current = this.selected;
     if (!this.canAct || !current || !requiresNewLocalPreview(current) || current.deletionPending || current.application === "applying") return undefined;
     const input = structuredClone({
       projectPath: current.projectPath, script: current.script, args: current.args, allowWrite: current.allowWrite,
-      workspaceMode: "local" as const, networkAccess: current.networkAccess ?? false,
+      workspaceMode: "local" as const, approvalMode: approvalMode ?? current.approvalMode ?? "never", networkAccess: current.networkAccess ?? false,
       allowedMcpServers: current.allowedMcpServers ?? [], allowedMcpTools: current.allowedMcpTools ?? {},
       nodeSettings: current.nodeSettings ?? {}, limits: current.limits,
       ...(current.maintenance ? { maintenance: current.maintenance } : {}),
@@ -878,7 +879,7 @@ export class WorkflowPanelController {
     return saved;
   }
 
-  async perform(action: UserAction, _userGesture = false, taskId?: string): Promise<void> {
+  async perform(action: UserAction, _userGesture = false, taskId?: string, approvalMode?: ApprovalMode): Promise<void> {
     const detail = this.selected, run = action === "stop" ? this.stopTarget : detail;
     const allowed = action === "stop" ? this.projectBound && this.state.connection === "connected" && !this.state.reconnecting && !this.state.busy && !this.closing : this.canAct;
     if (!run || !allowed || run.deletionPending) return;
@@ -897,6 +898,10 @@ export class WorkflowPanelController {
     }
     if (action === "cancel") args.taskId = taskId;
     if (action === "resume" && taskId) args.retryFromTaskId = taskId;
+    if (action === "resume" && approvalMode !== undefined) {
+      if (!["auto-review", "never"].includes(approvalMode)) { this.state.error = "不支持的审批模式。"; this.changed(); return; }
+      args.approvalMode = approvalMode;
+    }
     if (action === "start" || action === "resume") this.ownedRuns.add(run.id);
     this.state.busy = true;
     this.state.error = "";
@@ -1137,6 +1142,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   const parameterError = element("#wf-parameter-error");
   const parameterDialog = element<HTMLDialogElement>("#wf-parameters-dialog");
   const workspaceModeSelect = element<HTMLSelectElement>("#wf-workspace-mode-select");
+  const approvalModeSelect = element<HTMLSelectElement>("#wf-approval-mode-select");
   const settingsDialog = element<HTMLDialogElement>("#wf-settings-dialog");
   const nodeDialog = element<HTMLDialogElement>("#wf-node-settings-dialog");
   const processDialog = element<HTMLDialogElement>("#wf-process-dialog");
@@ -1153,6 +1159,8 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   let argsValue: unknown = {}, nodeSettings: NodeSettings = {}, nodeKey = "", nodeNotice = "", nodeDirty = false;
   let parameterSnapshot: unknown, parametersSaved = false, nodeSignature = "", zoom = 1;
   let workspaceModeValue: WorkspaceMode = "snapshot", workspaceModeSnapshot: WorkspaceMode = "snapshot", workspaceSourceMode: WorkspaceMode = "snapshot";
+  let approvalModeValue: ApprovalMode = "auto-review", approvalModeSnapshot: ApprovalMode = "auto-review", approvalSnapshotSource: ApprovalMode = "auto-review", approvalSourceMode: ApprovalMode = "auto-review";
+  const sourceApprovalMode = (value?: WorkflowRun | TemplateDefinition): ApprovalMode => value?.approvalMode ?? (value && ("execution" in value || value.source === "saved") ? "never" : "auto-review");
   let processTarget: NodeProcessTarget | undefined;
   let processSignature = "", developerRequested = false;
   let reviewSignature = "";
@@ -1186,7 +1194,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const values = new Map(Array.from(parameterFields.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-parameter]")).map(control => [control.dataset.parameter!, control.dataset.parameterType === "boolean" ? (control as HTMLInputElement).checked : control.value]));
     const definition = currentDefinition();
     return { projectPath: path, script: input.script, args: parameters()?.length ? readParameters(parameters()!, values, argsValue) : argsValue,
-      allowWrite: input.allowWrite ?? false, networkAccess: input.networkAccess ?? false, allowedMcpServers: input.allowedMcpServers ?? [], allowedMcpTools: input.allowedMcpTools ?? {}, workspaceMode: workspaceModeValue, nodeSettings: structuredClone(nodeSettings), ...(input.maintenance ? { maintenance: input.maintenance } : {}), ...(input.limits ? { limits: input.limits } : {}),
+      allowWrite: input.allowWrite ?? false, networkAccess: input.networkAccess ?? false, allowedMcpServers: input.allowedMcpServers ?? [], allowedMcpTools: input.allowedMcpTools ?? {}, workspaceMode: workspaceModeValue, approvalMode: approvalModeValue, nodeSettings: structuredClone(nodeSettings), ...(input.maintenance ? { maintenance: input.maintenance } : {}), ...(input.limits ? { limits: input.limits } : {}),
       ...(controller.selected?.sourceDefinition ? { sourceDefinition: controller.selected.sourceDefinition } : definition ? { sourceDefinition: { id: definition.id, revision: definition.revision ?? 0 } } : {}),
     };
   };
@@ -1314,7 +1322,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const currentArtifactOwner = JSON.stringify([run?.id, run?.revision]);
     if (artifactOwner !== currentArtifactOwner) { artifactPage = undefined; artifactOwner = currentArtifactOwner; artifactRequest++; artifactLoading = false; }
     if (nextOwner !== owner) {
-      owner = nextOwner; argsValue = structuredClone(input?.args ?? {}); nodeSettings = structuredClone(input?.nodeSettings ?? {}); workspaceModeValue = workspaceSourceMode = input?.workspaceMode ?? "snapshot";
+      owner = nextOwner; argsValue = structuredClone(input?.args ?? {}); nodeSettings = structuredClone(input?.nodeSettings ?? {}); workspaceModeValue = workspaceSourceMode = input?.workspaceMode ?? "snapshot"; approvalModeValue = approvalSourceMode = sourceApprovalMode(input);
       parametersSignature = ""; parameterSnapshot = undefined; nodeDirty = false; nodeKey = "";
       if (nodeDialog.open) nodeDialog.close();
       if (processDialog.open) processDialog.close();
@@ -1328,6 +1336,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     }
     const live = executing();
     if (workspaceSourceMode !== (input?.workspaceMode ?? "snapshot") || !canChangeWorkspaceMode(input)) workspaceModeValue = workspaceSourceMode = input?.workspaceMode ?? "snapshot";
+    if (approvalSourceMode !== sourceApprovalMode(input) || live) approvalModeValue = approvalSourceMode = sourceApprovalMode(input);
     const stale = state.connection !== "connected" || state.reconnecting;
     root.dataset.connection = state.connection;
     root.dataset.reconnecting = String(state.reconnecting);
@@ -1404,6 +1413,9 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     for (const option of Array.from(workspaceModeSelect.options)) option.disabled = !!workspaceModeRestriction(input, option.value as WorkspaceMode);
     workspaceModeSelect.value = workspaceModeValue;
     workspaceModeSelect.disabled = !controller.canAct || !input?.allowWrite || !canChangeWorkspaceMode(input);
+    approvalModeSelect.value = approvalModeValue;
+    approvalModeSelect.disabled = !controller.canAct || !input || live || !!run?.deletionPending || run?.application === "applying";
+    element("#wf-approval-mode-help").textContent = approvalModeValue === "auto-review" ? "需要审批的操作交由 Codex 独立审核；拒绝或审核异常会停止当前任务。启动或继续时生效。" : "禁止审批：需要审批的操作会被拒绝。启动或继续时生效。";
     element("#wf-workspace-mode-help").textContent = `${workspaceModeDescription(workspaceModeValue, input?.allowWrite ?? false)}${input && !canChangeWorkspaceMode(input) ? " 工作方式已固定；请从工作流库创建新运行以更改。" : input?.maintenance ? " 维护操作需要 Git 隔离工作区。" : !input?.allowWrite ? " 本地修改需要写入授权，请在对话中让 AI 调整执行范围。" : " 工作方式将在启动后固定。"}`;
     element("#wf-parameter-status").textContent = live ? "运行期间参数固定。" : "保存后用于下次启动；已执行的记录不会被改写。";
     element<HTMLButtonElement>("#wf-save-parameters").disabled = !controller.canAct || live || !!run?.deletionPending;
@@ -1481,7 +1493,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   for (const dialog of Array.from(root.querySelectorAll<HTMLDialogElement>("dialog"))) {
     dialog.addEventListener("close", () => {
       if (dialog.open) return;
-      if (dialog === parameterDialog && !parametersSaved && parameterSnapshot !== undefined) { argsValue = parameterSnapshot; workspaceModeValue = workspaceModeSnapshot; parametersSignature = ""; render(); }
+      if (dialog === parameterDialog && !parametersSaved && parameterSnapshot !== undefined) { argsValue = parameterSnapshot; workspaceModeValue = workspaceModeSnapshot; approvalModeValue = approvalSnapshotSource === approvalSourceMode ? approvalModeSnapshot : approvalSourceMode; parametersSignature = ""; render(); }
       if (dialog === nodeDialog) { nodeDirty = false; nodeSignature = ""; }
       if (dialog === settingsDialog) { settingsSignature = ""; render(); }
       if (dialog === processDialog) { processTarget = undefined; processReader.close(); developerLogs.open = false; developerRequested = false; element("#wf-process-developer").textContent = ""; }
@@ -1510,10 +1522,10 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   project.addEventListener("change", () => { void controller.selectProject(project.value); });
   element("#wf-refresh-projects").addEventListener("click", () => { void controller.refreshProjects(); });
   element<HTMLSelectElement>("#wf-template-select").addEventListener("change", event => { const value = (event.target as HTMLSelectElement).value; templateRequest = ""; void controller.selectWorkflow(value).finally(render); });
-  element("#wf-parameters-toggle").addEventListener("click", event => { parameterSnapshot = structuredClone(argsValue); workspaceModeSnapshot = workspaceModeValue; parametersSaved = false; parameterError.hidden = true; openDialog(parameterDialog, event.currentTarget as HTMLElement); });
+  element("#wf-parameters-toggle").addEventListener("click", event => { parameterSnapshot = structuredClone(argsValue); workspaceModeSnapshot = workspaceModeValue; approvalModeSnapshot = approvalModeValue; approvalSnapshotSource = approvalSourceMode; parametersSaved = false; parameterError.hidden = true; openDialog(parameterDialog, event.currentTarget as HTMLElement); });
   element<HTMLFormElement>("#wf-parameters-form").addEventListener("submit", event => {
     event.preventDefault();
-    try { const input = readInput(); argsValue = input.args; workspaceModeValue = input.workspaceMode ?? "snapshot"; parametersSaved = true; parameterError.hidden = true; parameterDialog.close(); controller.state.error = ""; render(); }
+    try { const input = readInput(); argsValue = input.args; workspaceModeValue = input.workspaceMode ?? "snapshot"; approvalModeValue = input.approvalMode ?? approvalModeValue; parametersSaved = true; parameterError.hidden = true; parameterDialog.close(); controller.state.error = ""; render(); }
     catch (error) { parameterError.textContent = errorMessage(error); parameterError.hidden = false; }
   });
   parameterFields.addEventListener("input", () => { parameterError.hidden = true; });
@@ -1525,6 +1537,10 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (restriction) { parameterError.textContent = restriction; parameterError.hidden = false; render(); return; }
     workspaceModeValue = mode;
     parameterError.hidden = true; render();
+  });
+  approvalModeSelect.addEventListener("change", () => {
+    if (approvalModeSelect.disabled || !["auto-review", "never"].includes(approvalModeSelect.value)) return;
+    approvalModeValue = approvalModeSelect.value as ApprovalMode; parameterError.hidden = true; render();
   });
   element("#wf-settings-toggle").addEventListener("click", event => { openDialog(settingsDialog, event.currentTarget as HTMLElement); if (!controller.state.settings || controller.state.settingsError) void controller.refreshExecutionSettings(controller.selected?.projectPath ?? activeProject()?.path); });
   element("#wf-refresh-settings").addEventListener("click", () => { settingsSignature = ""; void controller.refreshExecutionSettings(); });
@@ -1578,7 +1594,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   });
   element("#wf-cancel-task").addEventListener("click", () => { if (processTarget?.taskId) void controller.perform("cancel", true, processTarget.taskId); });
   element("#wf-error-details").addEventListener("click", event => openFailureProcess(event.currentTarget as HTMLElement));
-  element("#wf-retry-task").addEventListener("click", () => { if (processTarget?.taskId) { const taskId = processTarget.taskId; processDialog.close(); void controller.perform("resume", true, taskId); } });
+  element("#wf-retry-task").addEventListener("click", () => { if (processTarget?.taskId) { const taskId = processTarget.taskId; processDialog.close(); void controller.perform("resume", true, taskId, approvalModeValue); } });
   developerLogs.addEventListener("toggle", () => { if (developerLogs.open) { if (!developerRequested) element("#wf-process-developer").textContent = "正在读取开发日志…"; developerRequested = true; fetchProcess(true); } else processReader.cancel("developer"); });
   nodeModel.addEventListener("change", () => { nodeDirty = true; nodeEffort.innerHTML = effortSelectOptions(controller.state.settings?.models ?? [], nodeModel.value || inheritedChoice().model, nodeEffort.value, "继承上级配置"); nodeNotice = ""; });
   nodeEffort.addEventListener("change", () => { nodeDirty = true; nodeNotice = ""; });
@@ -1638,11 +1654,11 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (!action || action.disabled) return;
     if (action.dataset.action === "stop") { void controller.perform("stop", true); return; }
     if (action.dataset.action === "inspect-failure") { openFailureProcess(action); return; }
-    if (action.dataset.action === "retry-review") { void controller.perform("resume", true); return; }
-    if (action.dataset.action === "recheck") { void controller.recheckFromCurrent(); return; }
+    if (action.dataset.action === "retry-review") { void controller.perform("resume", true, undefined, approvalModeValue); return; }
+    if (action.dataset.action === "recheck") { void controller.recheckFromCurrent(approvalModeValue); return; }
     if (action.dataset.action === "start") {
       try { const input = readInput(); argsValue = input.args; parameterError.hidden = true; void controller.startWithInput(input); }
-      catch (error) { parameterSnapshot = structuredClone(argsValue); workspaceModeSnapshot = workspaceModeValue; parametersSaved = false; parameterError.textContent = errorMessage(error); parameterError.hidden = false; openDialog(parameterDialog, element("#wf-parameters-toggle")); }
+      catch (error) { parameterSnapshot = structuredClone(argsValue); workspaceModeSnapshot = workspaceModeValue; approvalModeSnapshot = approvalModeValue; approvalSnapshotSource = approvalSourceMode; parametersSaved = false; parameterError.textContent = errorMessage(error); parameterError.hidden = false; openDialog(parameterDialog, element("#wf-parameters-toggle")); }
     }
   });
   render();

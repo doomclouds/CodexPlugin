@@ -13,10 +13,11 @@
 | `workflow_get_execution_settings` | 可选 `projectPath`；返回默认配置、实际模型目录及其深度选项。无效默认配置保留原因与目录，供用户修正 |
 | `workflow_update_execution_settings` | 当前 `revision`；可选 `model`、`reasoningEffort`；全量替换插件自己的默认设置，省略字段清除对应覆盖 |
 | `workflow_list_templates`、`workflow_get_template` | 列出或读取独立工作流定义 |
-| `workflow_save_template` | `script`；可选 `args`、`allowWrite`、`networkAccess`、`allowedMcpServers`、`allowedMcpTools`、`workspaceMode`、`maintenance`、`limits`；更新已有定义需 `revision` |
-| `workflow_preview` | `projectPath`、`script`；可选输入、执行范围、`sourceDefinition: { id, revision }`；服务端校验来源版本与实际脚本，返回未执行的 `run` |
-| `workflow_update` | `id`、当前 `revision`、`script`、`args`；可选执行范围；已有工作区时不能改变范围 |
-| `workflow_start`、`workflow_resume` | `id`、当前 `revision`；已授权聊天调用不传 `leaseId`，面板调用传活跃租约 |
+| `workflow_save_template` | `script`；可选 `args`、`allowWrite`、`networkAccess`、`allowedMcpServers`、`allowedMcpTools`、`workspaceMode`、`approvalMode`、`maintenance`、`limits`；更新已有定义需 `revision` |
+| `workflow_preview` | `projectPath`、`script`；可选输入、执行范围、`approvalMode`、`sourceDefinition: { id, revision }`；服务端校验来源版本与实际脚本，返回未执行的 `run` |
+| `workflow_update` | `id`、当前 `revision`、`script`、`args`；可选执行范围及 `approvalMode`；已有工作区时不能改变文件、网络和 MCP 范围 |
+| `workflow_start` | `id`、当前 `revision`；使用预览已保存的审批方式，不接受模式覆盖；已授权聊天调用不传 `leaseId`，面板调用传活跃租约 |
+| `workflow_resume` | `id`、当前 `revision`；可选 `retryFromTaskId` 显式重跑节点、`approvalMode` 显式选择后续 worker 的审批方式；省略模式保留旧行为；租约规则同启动 |
 | `workflow_list_runs` | 可选 `projectPath`、`offset`、`limit`（默认 100、最多 200）；返回 `listSummary: true`、`totalRuns`、`nextOffset` 和轻量运行摘要，不包含完整控制范围 |
 | `workflow_get_run` | `id`；返回保留完整脚本、输入和授权范围的有界详情；可选 `artifactOffset`、`artifactLimit`（默认 20、最多 200）读取维护产物页 |
 | `workflow_get_node_process` | `id`；以 `taskId`、`phase` 或 `scope: "workflow" | "unphased"` 选择过程，默认 `detail: "brief"`；开发详情显式传 `"developer"` |
@@ -40,6 +41,16 @@
 跨项目复用时，从目标项目聊天读取定义并创建独立运行。读取定义后传入其实际 `id`、`revision` 和脚本作为来源；改写脚本后先保存新定义版本，再关联。新定义使用随机初始版本，更新递增；删除后重建须重新读取版本，不沿用旧预览。
 
 主界面是工具栏和横向执行图，参数、设置、历史、差异审查及节点过程放在弹窗中。阶段连线展示阶段顺序，不自动还原脚本的条件分支、循环回边或完整依赖图。分支和有限循环仍由 JavaScript 执行。
+
+## 审批方式
+
+`approvalMode` 接受 `"auto-review"` 或 `"never"`。新建预览与新建定义默认自动审核；旧记录或定义没有字段时保持 `never`，更新定义或恢复运行省略字段不会切换。面板“参数”弹窗中的“审批方式”可选择“自动审核”或“禁止审批”，保存后在启动或明确继续时生效。更改此项不改业务脚本，也不重跑已完成任务；确需重跑节点时另传实际 `retryFromTaskId`。复用定义时把已保存的审批方式一并传入新预览。
+
+自动审核通过 Codex 官方 app-server 的 `approvalPolicy: "on-request"` 与 `approvalsReviewer: "auto_review"` 路由给独立审核器，执行前必须核对原生返回的有效策略。它保留原文件沙箱、网络授权、MCP 白名单和逐工具审批配置；不修改用户全局配置、不设置永久预批准，不等于把所有工具自动放行。原生版本或受管要求不支持时执行失败，不回退为绕过审核的模式。普通沙箱内已允许的动作可能不触发审核。
+
+审核状态作为节点的简要活动展示；有界脱敏理由保留在 `detail: "developer"` 的日志中，不记录审核动作的原始参数。拒绝、超时或中止立即停止当前 worker，不自动重试或绕过决定；脚本仍按原有任务异常处理执行。现场人工审批与用户输入请求继续拒绝并停止；`never` 模式没有审核器可处理的审批请求。确定性 `operation()` 命令保持禁止审批，不受此设置影响。
+
+例如，用户明确选择自动审核后，可用 `workflow_resume({ id, revision, approvalMode: "auto-review", retryFromTaskId: "task_2" })` 重新执行真实的第二个节点。调用前读取详情并核对旧操作是否已生效；不能用模式更换绕过项目检查点、重放保护或不确定的外部副作用。
 
 ## 准备与节点过程
 

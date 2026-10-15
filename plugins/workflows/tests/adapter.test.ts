@@ -74,6 +74,116 @@ test("temporary-file command guidance is scoped to the enforced read-only sandbo
   }
 });
 
+test("automatic approval review is scoped to the worker and preserves exact sandbox and MCP grants", async () => {
+  for (const mode of ["read", "write"] as const) {
+    const context = await setup("auto-review-approved");
+    try {
+      const result = await context.adapter.run({ ...context.request, mode, approvalMode: "auto-review", networkAccess: false, mcpServers: ["fixture"], mcpTools: { fixture: [mode === "read" ? "read_tool" : "write_tool"] } }, context.controller.signal, event => context.events.push(event));
+      assert.equal(result.output, "automatic review complete");
+      const transcript = await context.transcript();
+      const thread = transcript.find(message => message.method === "thread/start")!;
+      const turn = transcript.find(message => message.method === "turn/start")!;
+      for (const message of [thread, turn]) {
+        assert.equal(message.params.approvalPolicy, "on-request");
+        assert.equal(message.params.approvalsReviewer, "auto_review");
+      }
+      assert.equal(thread.params.config.approval_policy, "on-request");
+      assert.equal(thread.params.config.approvals_reviewer, "auto_review");
+      assert.equal(thread.params.config["agents.enabled"], false);
+      assert.equal(thread.params.config["features.multi_agent"], false);
+      assert.equal(thread.params.config.mcp_servers.fixture.tools.write_tool.approval_mode, "prompt");
+      assert.deepEqual(thread.params.config.mcp_servers.fixture.enabled_tools, [mode === "read" ? "read_tool" : "write_tool"]);
+      assert.deepEqual(turn.params.sandboxPolicy, mode === "read" ? { type: "readOnly", networkAccess: false } : { type: "workspaceWrite", writableRoots: [context.request.cwd], networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true });
+      assert.match(thread.params.developerInstructions, /do not retry, work around the decision or ask for persistent preapproval/);
+      assert.equal(transcript.some(message => ["config/value/write", "config/batchWrite", "thread/approveGuardianDeniedAction"].includes(message.method)), false);
+      const reviewActivities = context.events.filter((event): event is Extract<WorkerEvent, { type: "activity" }> => event.type === "activity" && event.activity.id.startsWith("review:"));
+      assert.equal(reviewActivities.at(-1)?.activity.status, "completed");
+      const logs = context.events.filter((event): event is Extract<WorkerEvent, { type: "log" }> => event.type === "log").map(event => event.message);
+      assert.equal(logs.filter(message => message.startsWith("Codex automatic approval review approved")).length, 1);
+      assert.equal(logs.filter(message => message === "Codex automatic approval review started.").length, 1);
+      assert.match(logs.join("\n"), /stricter review/);
+      assert.doesNotMatch(JSON.stringify(context.events), /PRIVATE_REVIEW_|PRIVATE_UNRELATED_REVIEW|private-review-id|credential-pass|credential-token|fragment-secret|\x1b/);
+    } finally { await context.cleanup(); }
+  }
+});
+
+for (const scenario of ["reviewer-ignored", "reviewer-missing", "reviewer-alias", "policy-ignored"] as const) {
+  test(`automatic approval review refuses an unverified effective setting: ${scenario}`, async () => {
+    const context = await setup(`auto-review-${scenario}`);
+    try {
+      await assert.rejects(context.adapter.run({ ...context.request, approvalMode: "auto-review" }, context.controller.signal, event => context.events.push(event)), /did not enforce the requested worker approval policy and reviewer/);
+      assert.equal((await context.transcript()).some(message => message.method === "turn/start"), false);
+    } finally { await context.cleanup(); }
+  });
+}
+
+for (const [scenario, status] of [["denied", "denied"], ["timeout", "timedOut"], ["aborted", "aborted"]] as const) {
+  test(`automatic approval ${scenario} interrupts once without retries or preapproval`, async () => {
+    const context = await setup(`auto-review-${scenario}`);
+    try {
+      await assert.rejects(context.adapter.run({ ...context.request, approvalMode: "auto-review" }, context.controller.signal, event => context.events.push(event)), new RegExp(`automatic approval review ${status}`));
+      const transcript = await context.transcript();
+      assert.equal(transcript.filter(message => message.method === "turn/start").length, 1);
+      assert.equal(transcript.filter(message => message.method === "turn/interrupt").length, 1);
+      assert.equal(transcript.some(message => message.id === "server-approval" && message.result), false);
+      assert.doesNotMatch(JSON.stringify(context.events), /PRIVATE_REVIEW_|PRIVATE_UNRELATED_REVIEW|credential-pass|credential-token|fragment-secret|\x1b/);
+      const final = context.events.findLast(event => event.type === "activity" && event.activity.id.startsWith("review:"));
+      assert.equal(final?.type === "activity" ? final.activity.status : undefined, scenario === "aborted" ? "interrupted" : "failed");
+    } finally { await context.cleanup(); }
+  });
+}
+
+test("automatic review rationale is bounded and valid UTF-8", async () => {
+  const context = await setup("auto-review-large-rationale");
+  try {
+    await context.adapter.run({ ...context.request, approvalMode: "auto-review" }, context.controller.signal, event => context.events.push(event));
+    const log = context.events.find(event => event.type === "log" && event.message.startsWith("Codex automatic approval review approved"));
+    assert.equal(log?.type, "log");
+    if (log?.type !== "log") return;
+    assert.ok(Buffer.byteLength(log.message) < 1024);
+    assert.doesNotMatch(log.message, /\ufffd|PRIVATE_REVIEW_TAIL/);
+    assert.match(log.message, /Review rationale truncated/);
+  } finally { await context.cleanup(); }
+});
+
+test("automatic review does not require a review for ordinary allowed actions", async () => {
+  const context = await setup("auto-review-no-request");
+  try {
+    const result = await context.adapter.run({ ...context.request, approvalMode: "auto-review" }, context.controller.signal, event => context.events.push(event));
+    assert.equal(result.output, "no review necessary");
+    assert.equal(context.events.some(event => event.type === "activity" && event.activity.id.startsWith("review:")), false);
+  } finally { await context.cleanup(); }
+});
+
+test("automatic review still rejects human approval requests and unknown native review states", async () => {
+  for (const [scenario, error] of [["host-request", /unsupported host interaction/], ["unknown-state", /unsupported automatic approval review state/], ["unknown-source", /agent-produced automatic approval review decision/], ["missing-turn", /invalid automatic approval review thread or turn identity/]] as const) {
+    const context = await setup(`auto-review-${scenario}`);
+    try {
+      await assert.rejects(context.adapter.run({ ...context.request, approvalMode: "auto-review" }, context.controller.signal, event => context.events.push(event)), error);
+      assert.equal((await context.transcript()).some(message => message.id === "server-approval" && message.result), false);
+    } finally { await context.cleanup(); }
+  }
+});
+
+test("stopping a worker while automatic review is pending interrupts the owned turn", async () => {
+  const context = await setup("auto-review-interrupt");
+  try {
+    await assert.rejects(context.adapter.run({ ...context.request, approvalMode: "auto-review" }, context.controller.signal, event => {
+      context.events.push(event);
+      if (event.type === "activity" && event.activity.id.startsWith("review:") && event.activity.status === "running") context.controller.abort();
+    }), { name: "AbortError" });
+    assert.equal((await context.transcript()).filter(message => message.method === "turn/interrupt").length, 1);
+  } finally { await context.cleanup(); }
+});
+
+test("invalid approval modes fail before starting a worker process", async () => {
+  const context = await setup("complete");
+  try {
+    await assert.rejects(context.adapter.run({ ...context.request, approvalMode: "approve-all" as any }, context.controller.signal, () => {}), /approval mode/);
+    await assert.rejects(access(path.join(context.request.cwd, "protocol.jsonl")), { code: "ENOENT" });
+  } finally { await context.cleanup(); }
+});
+
 for (const [scenario, expected] of [
   ["transport", /MCP error -32000: unavailable/],
   ["payload", /TARGET_MISSING.*No active REA context/],

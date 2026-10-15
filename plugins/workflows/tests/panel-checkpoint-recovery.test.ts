@@ -56,7 +56,7 @@ function fixture(initial = run(), previewError?: string, previewGate?: Promise<v
 function inputFor(value: WorkflowRun): WorkflowInput {
   return {
     projectPath: value.projectPath, script: value.script, args: value.args, allowWrite: value.allowWrite,
-    workspaceMode: value.workspaceMode, networkAccess: value.networkAccess,
+    workspaceMode: value.workspaceMode, approvalMode: value.approvalMode ?? "never", networkAccess: value.networkAccess,
     allowedMcpServers: value.allowedMcpServers, allowedMcpTools: value.allowedMcpTools,
     nodeSettings: value.nodeSettings, sourceDefinition: value.sourceDefinition, limits: value.limits,
   };

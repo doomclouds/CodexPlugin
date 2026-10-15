@@ -68,6 +68,7 @@ createInterface({ input: process.stdin }).on("line", line => {
       symlinkSync(path.join(process.cwd(), "original-git"), path.join(process.cwd(), ".git"), process.platform === "win32" ? "junction" : "dir");
     }
     let config = { model: scenario === "config-invalid-defaults" ? "removed-model" : "test-inherited-model", model_reasoning_effort: scenario === "config-invalid-defaults" ? "unsupported" : "medium", mcp_servers: { [configuredName]: { command: "must-never-start", enabled: scenario !== "mcp-user-disabled", tool_timeout_sec: null, ...(scenario === "mcp-user-filter" ? { enabled_tools: ["read_tool"], disabled_tools: ["write_tool"], tools: { read_tool: { approval_mode: "prompt" } } } : {}) } } };
+    if (scenario.startsWith("auto-review-")) config.mcp_servers[configuredName].tools = { write_tool: { approval_mode: "prompt" } };
     if (scenario.startsWith("catalog-cache-")) {
       const reads = readFileSync(traceFile, "utf8").split("\n").filter(line => line.includes('"method":"config/read"')).length;
       const selected = config.mcp_servers[configuredName];
@@ -109,7 +110,7 @@ createInterface({ input: process.stdin }).on("line", line => {
       renameSync(path.join(params.cwd, ".git"), path.join(params.cwd, "original-git"));
       symlinkSync(path.join(params.cwd, "original-git"), path.join(params.cwd, ".git"), process.platform === "win32" ? "junction" : "dir");
     }
-    response(id, { thread: { id: threadId, ...(scenario === "worker-missing-cwd" ? {} : { cwd: scenario === "worker-wrong-cwd" ? path.dirname(params.cwd) : params.cwd }) }, model: params.model ?? "test-inherited-model", reasoningEffort: params.config.model_reasoning_effort ?? "medium", sandbox: scenario === "unsafe-sandbox" ? { type: "dangerFullAccess" } : sandbox });
+    response(id, { thread: { id: threadId, ...(scenario === "worker-missing-cwd" ? {} : { cwd: scenario === "worker-wrong-cwd" ? path.dirname(params.cwd) : params.cwd }) }, model: params.model ?? "test-inherited-model", reasoningEffort: params.config.model_reasoning_effort ?? "medium", approvalPolicy: scenario === "auto-review-policy-ignored" ? "never" : params.approvalPolicy, ...(scenario === "auto-review-reviewer-missing" ? {} : { approvalsReviewer: scenario === "auto-review-reviewer-ignored" ? "user" : scenario === "auto-review-reviewer-alias" ? "guardian_subagent" : params.approvalsReviewer ?? "user" }), sandbox: scenario === "unsafe-sandbox" ? { type: "dangerFullAccess" } : sandbox });
   } else if (method === "mcpServerStatus/list") {
     if (scenario === "worker-swap-git-inventory" && params.threadId) {
       renameSync(path.join(threadParams.cwd, ".git"), path.join(threadParams.cwd, "original-git"));
@@ -123,7 +124,7 @@ createInterface({ input: process.stdin }).on("line", line => {
     const data = scenario === "enabled-mcp" ? [{ name: configuredName, runtimeStatus: "connected", tools: { unsafe: {} } }] : [{ name: configuredName, runtimeStatus: params.threadId ? selected?.enabled ? "connected" : "disabled" : null, tools, serverInfo: { name: scenario === "recursive-mcp" ? "workflows" : "fixture-server" } }];
     response(id, { data, nextCursor: null });
   } else if (method === "turn/start") {
-    if (!threadParams || params.approvalPolicy !== "never" || params.sandboxPolicy.networkAccess !== threadParams.config["sandbox_workspace_write.network_access"] || params.sandboxPolicy.type !== (threadParams.sandbox === "read-only" ? "readOnly" : "workspaceWrite")) process.exit(6);
+    if (!threadParams || params.approvalPolicy !== threadParams.approvalPolicy || params.approvalsReviewer !== threadParams.approvalsReviewer || params.sandboxPolicy.networkAccess !== threadParams.config["sandbox_workspace_write.network_access"] || params.sandboxPolicy.type !== (threadParams.sandbox === "read-only" ? "readOnly" : "workspaceWrite")) process.exit(6);
     notify("turn/started", { threadId, turn: { id: turnId, status: "inProgress" } });
     if (scenario === "cancel-before-ack") return;
     if (scenario === "completion-before-ack") {
@@ -132,6 +133,25 @@ createInterface({ input: process.stdin }).on("line", line => {
       return;
     }
     response(id, { turn: { id: turnId, status: "inProgress" } });
+    if (scenario.startsWith("auto-review-")) {
+      if (scenario === "auto-review-host-request") { send({ id: "server-approval", method: "item/permissions/requestApproval", params: { threadId, turnId, permissions: { network: true } } }); return; }
+      if (scenario === "auto-review-no-request") { finish("no review necessary"); return; }
+      const base = { threadId, turnId, reviewId: "private-review-id", startedAtMs: Date.now(), targetItemId: "review-target", action: { type: "mcpToolCall", server: configuredName, toolName: "write_tool", arguments: { prompt: "PRIVATE_REVIEW_ACTION" } }, review: { status: "inProgress", riskLevel: null, userAuthorization: null, rationale: null } };
+      notify("item/autoApprovalReview/completed", { ...base, threadId: "unrelated-thread", review: { status: "denied", rationale: "PRIVATE_UNRELATED_REVIEW" } });
+      notify("item/autoApprovalReview/completed", { ...base, turnId: "unrelated-turn", review: { status: "denied", rationale: "PRIVATE_UNRELATED_REVIEW" } });
+      notify("item/autoApprovalReview/started", base);
+      notify("item/autoApprovalReview/started", base);
+      notify("autoApprovalReview/strictReviewRequired", { threadId, turnId, startedAtMs: base.startedAtMs });
+      if (scenario === "auto-review-interrupt") return;
+      const status = scenario === "auto-review-denied" ? "denied" : scenario === "auto-review-timeout" ? "timedOut" : scenario === "auto-review-aborted" ? "aborted" : scenario === "auto-review-unknown-state" ? "unsafeFallback" : "approved";
+      const rationale = scenario === "auto-review-large-rationale" ? "解释".repeat(5000) + "PRIVATE_REVIEW_TAIL" : `Authorized local fixture check; \u001b[31m"password"\u001b[0m: "PRIVATE_REVIEW_SECRET with spaces\nand multiline"; ${credentialSource}; arguments: {"prompt":"PRIVATE_REVIEW_ARGUMENT"}`;
+      const completed = { ...base, ...(scenario === "auto-review-missing-turn" ? { turnId: null } : {}), completedAtMs: Date.now(), decisionSource: scenario === "auto-review-unknown-source" ? "user" : "agent", review: { status, riskLevel: "low", userAuthorization: "high", rationale } };
+      notify("item/autoApprovalReview/completed", completed);
+      notify("item/autoApprovalReview/completed", completed);
+      if (["denied", "timedOut", "aborted", "unsafeFallback"].includes(status)) return;
+      finish("automatic review complete");
+      return;
+    }
     if (scenario === "interrupt" || scenario === "stubborn") return;
     if (scenario === "exit") { process.exit(7); return; }
     if (scenario === "host-request") {
