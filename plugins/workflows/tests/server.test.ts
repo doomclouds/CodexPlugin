@@ -62,7 +62,7 @@ test("oversized plans are rejected before creating, updating or saving a definit
     assert.deepEqual(calls, []);
     assert.deepEqual(await store.list(), []);
     const templates = (await client.callTool({ name: "workflow_list_templates", arguments: {} })).structuredContent?.templates as Array<{ source: string }>;
-    assert.ok(templates.every(template => template.source !== "saved"));
+    assert.deepEqual(templates, []);
   } finally { await close(); }
 });
 
@@ -248,13 +248,21 @@ test("template tools expose authoritative phase and parameter metadata without p
   try {
     const tools = (await client.listTools()).tools;
     assert.equal(tools.some(tool => tool.name === "workflow_plan"), false);
-    const builtin = await client.callTool({ name: "workflow_get_template", arguments: { id: "review-changes" } });
-    const meta = builtin.structuredContent?.meta as Record<string, unknown>;
-    assert.deepEqual(meta.phases, [{ title: "审查" }, { title: "核实" }, { title: "汇总" }]);
-    assert.equal((meta.parameters as Array<Record<string, unknown>>)[0]?.name, "files");
+    assert.deepEqual((await client.callTool({ name: "workflow_list_templates", arguments: {} })).structuredContent?.templates, []);
+    for (const sourceId of ["review-changes", "builtin:review-changes"]) {
+      const builtin = await client.callTool({ name: "workflow_get_template", arguments: { id: sourceId } });
+      assert.equal(builtin.isError, true);
+      assert.match(JSON.stringify(builtin.content), /Unknown workflow template/);
+      const rejected = await client.callTool({ name: "workflow_preview", arguments: { projectPath: tmpdir(), script: 'export const meta={name:"removed-source",description:"Reject removed source"}; return true;', sourceDefinition: { id: sourceId, revision: 0 } } });
+      assert.equal(rejected.isError, true);
+    }
+    assert.deepEqual(calls, [], "Removed definitions must be rejected before reaching the execution engine.");
     const script = 'export const meta={name:"bug-args",description:"Variable workflow input",phases:[{title:"读取 Bug"}],parameters:[{name:"bug",label:"Bug 编号或 URL",type:"string",required:true}]}; return await agent(args.bug);';
     const saved = await client.callTool({ name: "workflow_save_template", arguments: { script, args: { bug: "123" } } });
     const definition = saved.structuredContent?.template as Record<string, unknown>;
+    const meta = definition.meta as Record<string, unknown>;
+    assert.deepEqual(meta.phases, [{ title: "读取 Bug" }]);
+    assert.equal((meta.parameters as Array<Record<string, unknown>>)[0]?.name, "bug");
     const loaded = await client.callTool({ name: "workflow_get_template", arguments: { id: definition.id } });
     assert.deepEqual(loaded.structuredContent?.meta, definition.meta);
     const listed = await client.callTool({ name: "workflow_list_templates", arguments: {} });
@@ -314,7 +322,7 @@ test("malformed protected path declarations fail the MCP boundary for preview, u
     }
     assert.deepEqual(calls, []);
     const definitions = (await client.callTool({ name: "workflow_list_templates", arguments: {} })).structuredContent?.templates as Array<{ source: string }>;
-    assert.ok(definitions.every(definition => definition.source !== "saved"));
+    assert.deepEqual(definitions, []);
   } finally { await close(); }
 });
 

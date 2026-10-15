@@ -1,31 +1,6 @@
-import { readFileSync } from "node:fs";
-import { validateScript } from "./script.ts";
-
-const reviewScript = readFileSync(new URL("../workflows/review-changes.workflow.js", import.meta.url), "utf8");
-const reviewMeta = validateScript(reviewScript).meta;
-
-const template = {
-  id: "review-changes",
-  name: "审查改动并核实发现",
-  description: "每个文件独立审查，流水线核实发现，最后汇总。",
-  status: "executable",
-  scriptFormat: "workflow-javascript-v1",
-  source: "builtin",
-  meta: reviewMeta,
-} as const;
-
-export function listTemplates() {
-  return [template];
-}
-
-export async function getTemplate(id: string) {
-  if (id !== template.id) return undefined;
-  return { ...template, script: reviewScript };
-}
-
 export function getCapabilities() {
   return {
-    version: "0.9.0",
+    version: "0.9.1",
     stage: "runtime-v2",
     controlFlow: { available: true, plan: "bounded-source-structure-v1", observed: ["condition-result", "loop-iteration", "task-callsite"], maxPlanBlocks: 200, maxTraceEvents: 2000, historyScope: "current-execution", unsupportedCode: "actual-task-fallback", dynamicCodeInstrumented: false, optionalLabels: "adjacent-flow-label-comment", completeDependencyGraphClaimed: false },
     runtimeLifecycle: { transport: "stdio", instanceScope: "host-connection", globalSingleton: false, processId: process.pid, parentProcessId: process.ppid, entrypointParentExitCleanup: true, executionEnvironmentDiscovery: "one-in-flight-session-per-canonical-directory", completedConfigurationCached: false },

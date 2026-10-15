@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Icon, ListToolsResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { getCapabilities, getTemplate, listTemplates } from "./catalog.ts";
+import { getCapabilities } from "./catalog.ts";
 import type { WorkflowEngine } from "./engine.ts";
 import { TemplateStore } from "./templates.ts";
 import { modelSettingsSchema, nodeModelSettingsSchema } from "./execution-settings.ts";
@@ -100,7 +100,7 @@ function registerPanelToolWithIcons(server: McpServer, register: () => void) {
 }
 
 export function createServer(engine: WorkflowEngine, options: { projects?: ProjectsProvider; readDeletionConfig?: (projectPaths: string[]) => Promise<Record<string, unknown>> } = {}) {
-  const serverInfo = { name: "workflows", version: "0.9.0", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.9.1", icons: panelIcons };
   const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server = new McpServer(serverInfo);
   const templates = new TemplateStore(engine.store);
@@ -139,18 +139,18 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
 
   server.registerTool("workflow_list_templates", {
     title: "查看工作流模板目录",
-    description: "List bundled workflow scripts. Listing does not start execution.",
+    description: "List the user's saved workflow definitions. Listing does not start execution.",
     inputSchema: {},
     annotations,
-  }, async () => result({ templates: [...listTemplates(), ...(await templates.list()).map(({ id, name, description, source, revision, meta }) => ({ id, name, description, source, revision, meta }))] }));
+  }, async () => result({ templates: (await templates.list()).map(({ id, name, description, source, revision, meta }) => ({ id, name, description, source, revision, meta })) }));
 
   server.registerTool("workflow_get_template", {
-    title: "读取工作流示例",
-    description: "Read a bundled workflow script by catalog ID, for previewing with explicit project input.",
+    title: "读取工作流定义",
+    description: "Read a saved workflow definition by ID, for previewing with explicit project input.",
     inputSchema: { id: z.string().min(1).max(80) },
     annotations,
   }, async ({ id }) => {
-    const template = id.startsWith("saved:") ? await templates.get(id) : await getTemplate(id.replace(/^builtin:/, ""));
+    const template = id.startsWith("saved:") ? await templates.get(id) : undefined;
     return template ? result({ ...template, flowPlan: validateScript(template.script).flowPlan }) : {
       isError: true,
       content: [{ type: "text", text: `Unknown workflow template: ${id}` }],
@@ -171,9 +171,9 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
   };
   const verifiedDefinition = async (source: { id: string; revision: number } | undefined, script: string) => {
     if (!source) return undefined;
-    const template = source.id.startsWith("saved:") ? await templates.get(source.id) : await getTemplate(source.id.replace(/^builtin:/, ""));
-    if (!template || ("revision" in template ? template.revision : 0) !== source.revision || template.script !== script) throw new Error("Workflow definition changed or does not match the planned script; reload it before creating a run.");
-    return { id: template.source === "builtin" ? `builtin:${template.id}` : template.id, revision: source.revision };
+    const template = source.id.startsWith("saved:") ? await templates.get(source.id) : undefined;
+    if (!template || template.revision !== source.revision || template.script !== script) throw new Error("Workflow definition changed or does not match the planned script; reload it before creating a run.");
+    return { id: template.id, revision: source.revision };
   };
   const nodeSettings = z.record(z.string().min(1).max(256), nodeModelSettingsSchema).optional();
   const limits = z.object({ maxReadWorkers: z.number().int().min(1).max(16).optional(), maxCalls: z.number().int().min(1).max(1000).optional(), timeoutMs: z.number().int().min(100).max(86400000).optional(), maxTokens: z.number().int().nonnegative().optional() }).optional();

@@ -38382,14 +38382,14 @@ var McpServer = class {
     return createCompletionResult(suggestions);
   }
   async handleResourceCompletion(request, ref2) {
-    const template2 = Object.values(this._registeredResourceTemplates).find((t) => t.resourceTemplate.uriTemplate.toString() === ref2.uri);
-    if (!template2) {
+    const template = Object.values(this._registeredResourceTemplates).find((t) => t.resourceTemplate.uriTemplate.toString() === ref2.uri);
+    if (!template) {
       if (this._registeredResources[ref2.uri]) {
         return EMPTY_COMPLETION_RESULT;
       }
       throw new McpError(ErrorCode.InvalidParams, `Resource template ${request.params.ref.uri} not found`);
     }
-    const completer = template2.resourceTemplate.completeCallback(request.params.argument.name);
+    const completer = template.resourceTemplate.completeCallback(request.params.argument.name);
     if (!completer) {
       return EMPTY_COMPLETION_RESULT;
     }
@@ -38415,14 +38415,14 @@ var McpServer = class {
         ...resource.metadata
       }));
       const templateResources = [];
-      for (const template2 of Object.values(this._registeredResourceTemplates)) {
-        if (!template2.resourceTemplate.listCallback) {
+      for (const template of Object.values(this._registeredResourceTemplates)) {
+        if (!template.resourceTemplate.listCallback) {
           continue;
         }
-        const result2 = await template2.resourceTemplate.listCallback(extra);
+        const result2 = await template.resourceTemplate.listCallback(extra);
         for (const resource of result2.resources) {
           templateResources.push({
-            ...template2.metadata,
+            ...template.metadata,
             // the defined resource metadata should override the template metadata if present
             ...resource
           });
@@ -38431,10 +38431,10 @@ var McpServer = class {
       return { resources: [...resources, ...templateResources] };
     });
     this.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
-      const resourceTemplates = Object.entries(this._registeredResourceTemplates).map(([name, template2]) => ({
+      const resourceTemplates = Object.entries(this._registeredResourceTemplates).map(([name, template]) => ({
         name,
-        uriTemplate: template2.resourceTemplate.uriTemplate.toString(),
-        ...template2.metadata
+        uriTemplate: template.resourceTemplate.uriTemplate.toString(),
+        ...template.metadata
       }));
       return { resourceTemplates };
     });
@@ -38447,10 +38447,10 @@ var McpServer = class {
         }
         return resource.readCallback(uri, extra);
       }
-      for (const template2 of Object.values(this._registeredResourceTemplates)) {
-        const variables = template2.resourceTemplate.uriTemplate.match(uri.toString());
+      for (const template of Object.values(this._registeredResourceTemplates)) {
+        const variables = template.resourceTemplate.uriTemplate.match(uri.toString());
         if (variables) {
-          return template2.readCallback(uri, variables, extra);
+          return template.readCallback(uri, variables, extra);
         }
       }
       throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
@@ -38579,9 +38579,9 @@ var McpServer = class {
     this._registeredResources[uri] = registeredResource;
     return registeredResource;
   }
-  _createRegisteredResourceTemplate(name, title, template2, metadata, readCallback) {
+  _createRegisteredResourceTemplate(name, title, template, metadata, readCallback) {
     const registeredResourceTemplate = {
-      resourceTemplate: template2,
+      resourceTemplate: template,
       title,
       metadata,
       readCallback,
@@ -38609,8 +38609,8 @@ var McpServer = class {
       }
     };
     this._registeredResourceTemplates[name] = registeredResourceTemplate;
-    const variableNames = template2.uriTemplate.variableNames;
-    const hasCompleter = Array.isArray(variableNames) && variableNames.some((v2) => !!template2.completeCallback(v2));
+    const variableNames = template.uriTemplate.variableNames;
+    const hasCompleter = Array.isArray(variableNames) && variableNames.some((v2) => !!template.completeCallback(v2));
     if (hasCompleter) {
       this.setCompletionRequestHandler();
     }
@@ -38991,10 +38991,29 @@ function N3(Z, $, J, X, V) {
 }
 
 // src/server.ts
-import { readFileSync as readFileSync3 } from "node:fs";
+import { readFileSync as readFileSync2 } from "node:fs";
 
 // src/catalog.ts
-import { readFileSync as readFileSync2 } from "node:fs";
+function getCapabilities() {
+  return {
+    version: "0.9.1",
+    stage: "runtime-v2",
+    controlFlow: { available: true, plan: "bounded-source-structure-v1", observed: ["condition-result", "loop-iteration", "task-callsite"], maxPlanBlocks: 200, maxTraceEvents: 2e3, historyScope: "current-execution", unsupportedCode: "actual-task-fallback", dynamicCodeInstrumented: false, optionalLabels: "adjacent-flow-label-comment", completeDependencyGraphClaimed: false },
+    runtimeLifecycle: { transport: "stdio", instanceScope: "host-connection", globalSingleton: false, processId: process.pid, parentProcessId: process.ppid, entrypointParentExitCleanup: true, executionEnvironmentDiscovery: "one-in-flight-session-per-canonical-directory", completedConfigurationCached: false },
+    checkpoints: { available: true, tools: ["workflow_preview_recovery", "workflow_get_checkpoints", "workflow_get_task_history"], nodeAttemptDiagnostics: true, historyPagination: true, includedInRunDeletion: true },
+    available: ["host-thread-directory-binding", "bounded-run-transport", "artifact-pagination", "paged-run-summaries", "bounded-diff-preview", "declared-protected-command-paths", "explicit-task-retry", "snapshot-checkpoint", "git-context-cache", "preparation-progress", "node-activity", "node-process", "bounded-mcp-error-diagnostics", "native-auto-review", "native-tool-error-diagnostics", "task-output-validation", "same-thread-result-recovery", "typed-task-failure-origin", "writable-workspace-operations", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "local-project-writing", "local-project-git-writing", "project-writer-serialization", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
+    execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, interactiveToolApprovalsAvailable: false, nativeAutomaticApprovalReviewAvailable: true, defaultApprovalMode: "auto-review", legacyMissingApprovalMode: "never", approvalModes: ["auto-review", "never"], approvalReview: { appliesTo: "agent-workers", reviewer: "auto_review", policy: "on-request", requiresNativeConfirmation: true, preservesSandboxScope: true, preservesMcpToolApprovals: true, persistentPreapproval: false, onDenied: "stop-worker", onTimeout: "stop-worker", humanFallback: false }, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: false, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree", "local"], localMode: { requiresAllowWrite: true, writesOriginalProject: true, requiresApply: false, automaticRollback: false, deletionOwnsProject: false, maintenanceSupported: true, projectGitMetadataWrite: true, gitMetadataScope: "canonical-project-contained-only", legacyRunsKeepRecordedWriteScope: true, protectedInstructionDirectoriesAutoGranted: false, maxConcurrentProjectWriters: 1, coordinationScope: "shared-workflows-data-directory", externalEditorsSerialized: false }, submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
+    workerRecovery: { toolErrors: "native-agent-loop", defaultMaxResultRecoveryAttempts: 0, maxResultRecoveryAttempts: 2, scope: "same-ephemeral-thread", totalTimeoutShared: true, permissionsUnchanged: true, requiresExplicitAcceptForBusinessSuccess: true, forbidden: ["approval-denial-bypass", "unknown-side-effect-replay", "automatic-whole-workflow-restart"] },
+    ui: { available: true, stage: "live", hostIntegration: "requires-version-specific-verification", exampleDataOnly: false, entrypoints: ["thread"], projectChatRequired: true, projectSelection: "fixed-current-chat-project", unassignedContext: "project-guidance-with-actions-disabled", programmaticProjectPath: "explicit-user-authorized-target" },
+    recovery: { automatic: false, mode: "launch-order-replay", stoppedAgentsRestart: true, previewAvailable: true, confirmationFingerprintSupported: true, checkpoint: { format: "hash-linked-node-manifest-v1", boundary: "no-active-workers", persistence: "durable-manifest-and-run-pointer", authority: "committed-pointer", preservesCurrentFiles: true, automaticFileRollback: false, externalEffectsReverted: false, vmStateRestored: false, exactlyOnce: false, oldAttemptsRetained: true, uncommittedWriteResults: "block-for-effect-review", readonlyProjectDrift: "revalidate-all" } },
+    pendingDesign: ["multiple-concurrent-writing-workers"]
+  };
+}
+
+// src/templates.ts
+import { readFile as readFile5, readdir as readdir4, rename as rename4, writeFile as writeFile4, lstat as lstat6, rm as rm4 } from "node:fs/promises";
+import path8 from "node:path";
+import { randomBytes as randomBytes5 } from "node:crypto";
 
 // ../../node_modules/acorn/dist/acorn.mjs
 var astralIdentifierCodes = [509, 0, 227, 0, 150, 4, 294, 9, 1368, 2, 2, 1, 6, 3, 41, 2, 5, 0, 166, 1, 574, 3, 9, 9, 7, 9, 32, 4, 318, 1, 31, 4, 33, 15, 71, 10, 50, 3, 123, 2, 54, 14, 32, 10, 3, 1, 11, 3, 46, 10, 8, 0, 46, 9, 7, 2, 37, 13, 2, 9, 6, 1, 45, 0, 13, 2, 49, 13, 9, 3, 2, 11, 83, 11, 7, 0, 3, 0, 158, 11, 6, 9, 7, 3, 56, 1, 2, 6, 3, 1, 3, 2, 10, 0, 11, 1, 3, 6, 4, 4, 68, 8, 2, 0, 3, 0, 2, 3, 2, 4, 2, 0, 15, 1, 83, 17, 10, 9, 5, 0, 82, 19, 13, 9, 214, 6, 3, 8, 28, 1, 83, 16, 16, 9, 82, 12, 9, 9, 7, 19, 58, 14, 5, 9, 243, 14, 166, 9, 71, 5, 2, 1, 3, 3, 2, 0, 2, 1, 13, 9, 120, 6, 3, 6, 4, 0, 29, 9, 41, 6, 2, 3, 9, 0, 10, 10, 47, 15, 199, 7, 137, 9, 54, 7, 2, 7, 17, 9, 57, 21, 2, 13, 123, 5, 4, 0, 2, 1, 2, 6, 2, 0, 9, 9, 49, 4, 2, 1, 2, 4, 9, 9, 55, 9, 7, 0, 259, 3, 10, 1, 2, 0, 49, 6, 4, 4, 14, 10, 5350, 0, 7, 14, 11465, 27, 2343, 9, 87, 9, 39, 4, 60, 6, 26, 9, 535, 9, 470, 0, 2, 54, 8, 3, 82, 0, 12, 1, 19628, 1, 4178, 9, 519, 45, 3, 22, 481, 1, 61, 4, 4, 5, 9, 7, 3, 6, 31, 3, 149, 2, 12, 2, 9, 1, 3, 0, 33, 1, 1357, 49, 513, 54, 5, 49, 9, 0, 15, 0, 23, 4, 2, 14, 1361, 6, 2, 16, 3, 6, 2, 1, 2, 4, 101, 0, 161, 6, 10, 9, 357, 0, 62, 13, 499, 13, 245, 1, 2, 9, 233, 0, 3, 0, 8, 1, 6, 0, 475, 6, 110, 6, 6, 9, 4759, 9, 787719, 239];
@@ -45286,46 +45305,6 @@ async function executeScript(source, args, hooks, signal, limits = {}) {
   });
 }
 
-// src/catalog.ts
-var reviewScript = readFileSync2(new URL("../workflows/review-changes.workflow.js", import.meta.url), "utf8");
-var reviewMeta = validateScript(reviewScript).meta;
-var template = {
-  id: "review-changes",
-  name: "\u5BA1\u67E5\u6539\u52A8\u5E76\u6838\u5B9E\u53D1\u73B0",
-  description: "\u6BCF\u4E2A\u6587\u4EF6\u72EC\u7ACB\u5BA1\u67E5\uFF0C\u6D41\u6C34\u7EBF\u6838\u5B9E\u53D1\u73B0\uFF0C\u6700\u540E\u6C47\u603B\u3002",
-  status: "executable",
-  scriptFormat: "workflow-javascript-v1",
-  source: "builtin",
-  meta: reviewMeta
-};
-function listTemplates() {
-  return [template];
-}
-async function getTemplate(id) {
-  if (id !== template.id) return void 0;
-  return { ...template, script: reviewScript };
-}
-function getCapabilities() {
-  return {
-    version: "0.9.0",
-    stage: "runtime-v2",
-    controlFlow: { available: true, plan: "bounded-source-structure-v1", observed: ["condition-result", "loop-iteration", "task-callsite"], maxPlanBlocks: 200, maxTraceEvents: 2e3, historyScope: "current-execution", unsupportedCode: "actual-task-fallback", dynamicCodeInstrumented: false, optionalLabels: "adjacent-flow-label-comment", completeDependencyGraphClaimed: false },
-    runtimeLifecycle: { transport: "stdio", instanceScope: "host-connection", globalSingleton: false, processId: process.pid, parentProcessId: process.ppid, entrypointParentExitCleanup: true, executionEnvironmentDiscovery: "one-in-flight-session-per-canonical-directory", completedConfigurationCached: false },
-    checkpoints: { available: true, tools: ["workflow_preview_recovery", "workflow_get_checkpoints", "workflow_get_task_history"], nodeAttemptDiagnostics: true, historyPagination: true, includedInRunDeletion: true },
-    available: ["host-thread-directory-binding", "bounded-run-transport", "artifact-pagination", "paged-run-summaries", "bounded-diff-preview", "declared-protected-command-paths", "explicit-task-retry", "snapshot-checkpoint", "git-context-cache", "preparation-progress", "node-activity", "node-process", "bounded-mcp-error-diagnostics", "native-auto-review", "native-tool-error-diagnostics", "task-output-validation", "same-thread-result-recovery", "typed-task-failure-origin", "writable-workspace-operations", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "local-project-writing", "local-project-git-writing", "project-writer-serialization", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
-    execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, interactiveToolApprovalsAvailable: false, nativeAutomaticApprovalReviewAvailable: true, defaultApprovalMode: "auto-review", legacyMissingApprovalMode: "never", approvalModes: ["auto-review", "never"], approvalReview: { appliesTo: "agent-workers", reviewer: "auto_review", policy: "on-request", requiresNativeConfirmation: true, preservesSandboxScope: true, preservesMcpToolApprovals: true, persistentPreapproval: false, onDenied: "stop-worker", onTimeout: "stop-worker", humanFallback: false }, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: false, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree", "local"], localMode: { requiresAllowWrite: true, writesOriginalProject: true, requiresApply: false, automaticRollback: false, deletionOwnsProject: false, maintenanceSupported: true, projectGitMetadataWrite: true, gitMetadataScope: "canonical-project-contained-only", legacyRunsKeepRecordedWriteScope: true, protectedInstructionDirectoriesAutoGranted: false, maxConcurrentProjectWriters: 1, coordinationScope: "shared-workflows-data-directory", externalEditorsSerialized: false }, submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
-    workerRecovery: { toolErrors: "native-agent-loop", defaultMaxResultRecoveryAttempts: 0, maxResultRecoveryAttempts: 2, scope: "same-ephemeral-thread", totalTimeoutShared: true, permissionsUnchanged: true, requiresExplicitAcceptForBusinessSuccess: true, forbidden: ["approval-denial-bypass", "unknown-side-effect-replay", "automatic-whole-workflow-restart"] },
-    ui: { available: true, stage: "live", hostIntegration: "requires-version-specific-verification", exampleDataOnly: false, entrypoints: ["thread"], projectChatRequired: true, projectSelection: "fixed-current-chat-project", unassignedContext: "project-guidance-with-actions-disabled", programmaticProjectPath: "explicit-user-authorized-target" },
-    recovery: { automatic: false, mode: "launch-order-replay", stoppedAgentsRestart: true, previewAvailable: true, confirmationFingerprintSupported: true, checkpoint: { format: "hash-linked-node-manifest-v1", boundary: "no-active-workers", persistence: "durable-manifest-and-run-pointer", authority: "committed-pointer", preservesCurrentFiles: true, automaticFileRollback: false, externalEffectsReverted: false, vmStateRestored: false, exactlyOnce: false, oldAttemptsRetained: true, uncommittedWriteResults: "block-for-effect-review", readonlyProjectDrift: "revalidate-all" } },
-    pendingDesign: ["multiple-concurrent-writing-workers"]
-  };
-}
-
-// src/templates.ts
-import { readFile as readFile5, readdir as readdir4, rename as rename4, writeFile as writeFile4, lstat as lstat6, rm as rm4 } from "node:fs/promises";
-import path8 from "node:path";
-import { randomBytes as randomBytes5 } from "node:crypto";
-
 // src/store.ts
 var import_proper_lockfile = __toESM(require_proper_lockfile(), 1);
 import { mkdir, open as open2, readFile, readdir, rename, writeFile, rm, lstat } from "node:fs/promises";
@@ -45538,7 +45517,7 @@ var RunStore = class {
       const source = run.sourceDefinition;
       if (typeof source.id !== "string" || !Number.isSafeInteger(source.revision)) throw new Error("Invalid saved workflow provenance");
       const saved = /^saved:[a-z][a-z0-9-]{0,63}$/.test(source.id) && source.revision >= 1;
-      const legacyBuiltin = source.revision === 0 && listTemplates().some((template2) => template2.id === source.id);
+      const legacyBuiltin = source.revision === 0 && source.id === "review-changes";
       const builtin = /^builtin:[a-z][a-z0-9-]{0,63}$/.test(source.id) && source.revision >= 0;
       if (!saved && !legacyBuiltin && !builtin) throw new Error("Invalid saved workflow provenance");
       if (legacyBuiltin) run.sourceDefinition = { id: `builtin:${source.id}`, revision: source.revision };
@@ -47109,7 +47088,7 @@ var CodexAdapter = class {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.9.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.9.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config2 = object6(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config2, cwd);
@@ -47267,7 +47246,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.9.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.9.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -47599,7 +47578,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.9.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.9.1" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object6(object6(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== void 0 || request.reasoningEffort !== void 0) {
@@ -48362,12 +48341,12 @@ var TemplateStore = class {
       await this.store.ownedDirectory("templates");
       const info = await lstat6(filename2);
       if (!info.isFile() || info.isSymbolicLink() || info.size > 2 * 1024 * 1024) throw new Error("Saved workflow definition must be an owned regular file");
-      const template2 = JSON.parse(await readFile5(filename2, "utf8"));
-      const { meta: meta3 } = validateScript(template2.script);
-      if (template2.id !== id || template2.name !== meta3.name || `saved:${meta3.name}` !== id || template2.source !== "saved" || !Number.isSafeInteger(template2.revision) || template2.revision < 1) throw new Error("Invalid saved workflow definition identity");
-      if (template2.approvalMode !== void 0) resolveApprovalMode(template2.approvalMode);
-      validateMaintenanceScope(template2);
-      return { ...template2, ...template2.nodeSettings !== void 0 ? { nodeSettings: validateNodeSettings(template2.nodeSettings, meta3) } : {}, meta: meta3 };
+      const template = JSON.parse(await readFile5(filename2, "utf8"));
+      const { meta: meta3 } = validateScript(template.script);
+      if (template.id !== id || template.name !== meta3.name || `saved:${meta3.name}` !== id || template.source !== "saved" || !Number.isSafeInteger(template.revision) || template.revision < 1) throw new Error("Invalid saved workflow definition identity");
+      if (template.approvalMode !== void 0) resolveApprovalMode(template.approvalMode);
+      validateMaintenanceScope(template);
+      return { ...template, ...template.nodeSettings !== void 0 ? { nodeSettings: validateNodeSettings(template.nodeSettings, meta3) } : {}, meta: meta3 };
     } catch (error62) {
       if (error62.code === "ENOENT") return void 0;
       throw error62;
@@ -48378,7 +48357,7 @@ var TemplateStore = class {
     await this.store.ownedDirectory("templates", true);
     const files2 = (await readdir4(directory2)).filter((file2) => /^[a-z][a-z0-9-]{0,63}\.json$/.test(file2));
     const templates = await Promise.all(files2.map((file2) => this.get(`saved:${file2.slice(0, -5)}`)));
-    return templates.filter((template2) => Boolean(template2));
+    return templates.filter((template) => Boolean(template));
   }
   async deletedRevision(id) {
     this.filename(id);
@@ -48427,15 +48406,15 @@ var TemplateStore = class {
         if (deletedRevision !== void 0) throw new Error("Saved workflow deletion is pending; finish cleanup before creating a new definition");
         if (input2.revision !== void 0 && (!Number.isSafeInteger(input2.revision) || input2.revision < 1)) throw new Error("Invalid saved workflow revision");
         if (previous && previous.revision >= Number.MAX_SAFE_INTEGER) throw new Error("Saved workflow revision exceeds its safe range");
-        const template2 = { id, name: meta3.name, description: meta3.description, script: input2.script, args: input2.args === void 0 ? {} : input2.args, allowWrite: input2.allowWrite ?? false, source: "saved", revision: previous ? previous.revision + 1 : randomBytes5(6).readUIntBE(0, 6) + 1, updatedAt: (/* @__PURE__ */ new Date()).toISOString(), ...input2.limits ? { limits: input2.limits } : {} };
-        template2.networkAccess = input2.networkAccess ?? false;
-        template2.workspaceMode = input2.workspaceMode ?? "snapshot";
-        template2.approvalMode = resolveApprovalMode(input2.approvalMode, previous ? resolveApprovalMode(previous.approvalMode) : "auto-review");
-        template2.allowedMcpServers = input2.allowedMcpServers ?? [];
-        template2.allowedMcpTools = input2.allowedMcpTools ?? {};
-        if (input2.nodeSettings !== void 0) template2.nodeSettings = nodeSettings;
-        if (maintenance) template2.maintenance = maintenance;
-        const json2 = JSON.stringify(template2);
+        const template = { id, name: meta3.name, description: meta3.description, script: input2.script, args: input2.args === void 0 ? {} : input2.args, allowWrite: input2.allowWrite ?? false, source: "saved", revision: previous ? previous.revision + 1 : randomBytes5(6).readUIntBE(0, 6) + 1, updatedAt: (/* @__PURE__ */ new Date()).toISOString(), ...input2.limits ? { limits: input2.limits } : {} };
+        template.networkAccess = input2.networkAccess ?? false;
+        template.workspaceMode = input2.workspaceMode ?? "snapshot";
+        template.approvalMode = resolveApprovalMode(input2.approvalMode, previous ? resolveApprovalMode(previous.approvalMode) : "auto-review");
+        template.allowedMcpServers = input2.allowedMcpServers ?? [];
+        template.allowedMcpTools = input2.allowedMcpTools ?? {};
+        if (input2.nodeSettings !== void 0) template.nodeSettings = nodeSettings;
+        if (maintenance) template.maintenance = maintenance;
+        const json2 = JSON.stringify(template);
         if (Buffer.byteLength(json2) > 2 * 1024 * 1024) throw new Error("Saved workflow exceeds 2 MiB");
         const filename2 = this.filename(id);
         await this.store.ownedDirectory("templates", true);
@@ -48446,7 +48425,7 @@ var TemplateStore = class {
         } finally {
           await rm4(temporary, { force: true });
         }
-        return { ...template2, meta: meta3 };
+        return { ...template, meta: meta3 };
       });
     } finally {
       await release();
@@ -50027,7 +50006,7 @@ function acceptedRun(run) {
 var annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 var panelResourceUri = "ui://workflows/panel.html";
 var panelIcons = [{
-  src: `data:image/png;base64,${readFileSync3(new URL("../assets/workflows-sidebar-icon.png", import.meta.url)).toString("base64")}`,
+  src: `data:image/png;base64,${readFileSync2(new URL("../assets/workflows-sidebar-icon.png", import.meta.url)).toString("base64")}`,
   mimeType: "image/png",
   sizes: ["128x128"]
 }];
@@ -50056,8 +50035,8 @@ function registerPanelToolWithIcons(server2, register) {
   }
 }
 function createServer(engine2, options = {}) {
-  const serverInfo = { name: "workflows", version: "0.9.0", icons: panelIcons };
-  const panelHtml = readFileSync3(new URL("../runtime/panel.html", import.meta.url), "utf8");
+  const serverInfo = { name: "workflows", version: "0.9.1", icons: panelIcons };
+  const panelHtml = readFileSync2(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);
   const deletion = new DeletionService(engine2.store, templates, { readEffectiveConfig: options.readDeletionConfig ?? readDeletionConfig });
@@ -50090,18 +50069,18 @@ function createServer(engine2, options = {}) {
   }, async () => result({ ...getCapabilities(), version: serverInfo.version }));
   server2.registerTool("workflow_list_templates", {
     title: "\u67E5\u770B\u5DE5\u4F5C\u6D41\u6A21\u677F\u76EE\u5F55",
-    description: "List bundled workflow scripts. Listing does not start execution.",
+    description: "List the user's saved workflow definitions. Listing does not start execution.",
     inputSchema: {},
     annotations
-  }, async () => result({ templates: [...listTemplates(), ...(await templates.list()).map(({ id: id2, name, description, source, revision: revision2, meta: meta3 }) => ({ id: id2, name, description, source, revision: revision2, meta: meta3 }))] }));
+  }, async () => result({ templates: (await templates.list()).map(({ id: id2, name, description, source, revision: revision2, meta: meta3 }) => ({ id: id2, name, description, source, revision: revision2, meta: meta3 })) }));
   server2.registerTool("workflow_get_template", {
-    title: "\u8BFB\u53D6\u5DE5\u4F5C\u6D41\u793A\u4F8B",
-    description: "Read a bundled workflow script by catalog ID, for previewing with explicit project input.",
+    title: "\u8BFB\u53D6\u5DE5\u4F5C\u6D41\u5B9A\u4E49",
+    description: "Read a saved workflow definition by ID, for previewing with explicit project input.",
     inputSchema: { id: external_exports.string().min(1).max(80) },
     annotations
   }, async ({ id: id2 }) => {
-    const template2 = id2.startsWith("saved:") ? await templates.get(id2) : await getTemplate(id2.replace(/^builtin:/, ""));
-    return template2 ? result({ ...template2, flowPlan: validateScript(template2.script).flowPlan }) : {
+    const template = id2.startsWith("saved:") ? await templates.get(id2) : void 0;
+    return template ? result({ ...template, flowPlan: validateScript(template.script).flowPlan }) : {
       isError: true,
       content: [{ type: "text", text: `Unknown workflow template: ${id2}` }]
     };
@@ -50120,9 +50099,9 @@ function createServer(engine2, options = {}) {
   };
   const verifiedDefinition = async (source, script) => {
     if (!source) return void 0;
-    const template2 = source.id.startsWith("saved:") ? await templates.get(source.id) : await getTemplate(source.id.replace(/^builtin:/, ""));
-    if (!template2 || ("revision" in template2 ? template2.revision : 0) !== source.revision || template2.script !== script) throw new Error("Workflow definition changed or does not match the planned script; reload it before creating a run.");
-    return { id: template2.source === "builtin" ? `builtin:${template2.id}` : template2.id, revision: source.revision };
+    const template = source.id.startsWith("saved:") ? await templates.get(source.id) : void 0;
+    if (!template || template.revision !== source.revision || template.script !== script) throw new Error("Workflow definition changed or does not match the planned script; reload it before creating a run.");
+    return { id: template.id, revision: source.revision };
   };
   const nodeSettings = external_exports.record(external_exports.string().min(1).max(256), nodeModelSettingsSchema).optional();
   const limits = external_exports.object({ maxReadWorkers: external_exports.number().int().min(1).max(16).optional(), maxCalls: external_exports.number().int().min(1).max(1e3).optional(), timeoutMs: external_exports.number().int().min(100).max(864e5).optional(), maxTokens: external_exports.number().int().nonnegative().optional() }).optional();

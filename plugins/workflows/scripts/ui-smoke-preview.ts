@@ -68,6 +68,7 @@ const adapter: WorkerAdapter = {
 const engine = new WorkflowEngine({ store, adapter });
 let fixtureLock: () => Promise<void> = async () => {};
 const demonstrateRunning = process.env.WORKFLOWS_PREVIEW_RUNNING === "1";
+const demonstratePreparing = process.env.WORKFLOWS_PREVIEW_PREPARING === "1";
 try {
 if (demonstrateControlFlow) {
   await writeFile(path.join(project, "README.md"), "Disposable control-flow UI fixture. No real build, model or MCP calls.\n");
@@ -109,9 +110,21 @@ const fixture = { ...created, execution: demonstrateRunning ? "running" : "stopp
   tasks: ["工具链已确认", "提交已固定", "正在运行构建"].map((label, index) => ({ id: `task_${index + 1}`, index, label, phase: created.meta.phases![index]!.title, prompt: "Private development fixture prompt", options: {}, mode: "read", status: index === 2 ? "running" : "completed", cached: false, currentActivity: { id: `activity_${index + 1}`, kind: index === 2 ? "command" : "files", label, status: index === 2 ? "running" : "completed", startedAt: time(index === 2 ? 78 : 160 - index * 15), ...(index === 2 ? {} : { endedAt: time(148 - index * 15) }) }, attempts: [{ id: `attempt_${index + 1}`, status: index === 2 ? "running" : "completed", startedAt: time(index === 2 ? 78 : 160 - index * 15), ...(index === 2 ? {} : { endedAt: time(148 - index * 15) }), activities: [{ id: `activity_${index + 1}`, kind: "command", label, status: index === 2 ? "running" : "completed", startedAt: time(78) }] }] })),
   logs: [{ at: time(5), level: "info", taskId: "task_3", message: "Development diagnostic: build started" }],
 } as WorkflowRun;
+if (demonstratePreparing) {
+  fixture.execution = "preparing";
+  fixture.startedAt = fixture.preparation!.startedAt;
+  delete fixture.endedAt;
+  delete fixture.preparation!.endedAt;
+  const validation = fixture.preparation!.stages.at(-1)!;
+  validation.label = "验证工作区与执行范围";
+  validation.status = "running";
+  delete validation.endedAt;
+  fixture.tasks = [];
+  fixture.logs = [{ at: time(5), level: "info", message: "Development UI fixture: preparation validation is displayed as running; no worker, model or command was invoked." }];
+}
 if (!demonstrateRunning) for (const task of fixture.tasks) if (task.status === "running") { task.status = "interrupted"; if (task.currentActivity) { task.currentActivity.status = "interrupted"; task.currentActivity.endedAt = time(0); } const attempt = task.attempts.at(-1)!; attempt.status = "interrupted"; attempt.endedAt = time(0); for (const activity of attempt.activities ?? []) { activity.status = "interrupted"; activity.endedAt = time(0); } }
 await store.save(fixture);
-fixtureLock = demonstrateRunning ? await store.acquire(fixture.id) : async () => {};
+fixtureLock = demonstrateRunning || demonstratePreparing ? await store.acquire(fixture.id) : async () => {};
 }
 } catch (error) {
   fixtureAbort.abort();

@@ -724,8 +724,8 @@ export class WorkflowPanelController {
     } finally { if (request === this.settingsRequest) this.state.settingsBusy = false; this.changed(); }
   }
 
-  async saveExecutionSettings(choice: ExecutionChoice, projectPath = this.selected?.projectPath ?? this.state.projectPath): Promise<void> {
-    if (!this.canAct || this.state.settingsBusy || !this.state.settings || projectPath !== this.currentProject?.path) return;
+  async saveExecutionSettings(choice: ExecutionChoice, projectPath = this.selected?.projectPath ?? this.state.projectPath): Promise<boolean> {
+    if (!this.canAct || this.state.settingsBusy || !this.state.settings || projectPath !== this.currentProject?.path) return false;
     const request = ++this.settingsRequest;
     this.state.settingsBusy = true;
     this.state.settingsError = "";
@@ -737,11 +737,13 @@ export class WorkflowPanelController {
         ...(choice.reasoningEffort ? { reasoningEffort: choice.reasoningEffort } : {}),
         ...(projectPath ? { projectPath } : {}),
       }));
-      if (this.closing || request !== this.settingsRequest) return;
+      if (this.closing || request !== this.settingsRequest) return false;
       this.state.settings = settings;
       this.state.settingsProjectPath = projectPath;
+      return true;
     } catch (error) {
       if (!this.closing && request === this.settingsRequest) this.state.settingsError = `保存默认设置失败：${errorMessage(error)}。请刷新设置并核对当前值后重试。`;
+      return false;
     } finally { if (request === this.settingsRequest) this.state.settingsBusy = false; this.changed(); }
   }
 
@@ -1224,6 +1226,39 @@ export function fullFailureDetails(error: string): string {
   return `<details class="wf-failure-details"><summary>完整错误</summary><pre>${escapeHtml(safe)}</pre></details>`;
 }
 
+export function panelSelectionOwner(state: Pick<PanelState, "selectedRun" | "selectedTemplate">): string {
+  return state.selectedRun ? `run:${state.selectedRun}` : state.selectedTemplate ? `definition:${state.selectedTemplate}` : "";
+}
+
+export function panelInputSignature(value?: WorkflowRun | TemplateDefinition): string {
+  return JSON.stringify(value ? [value.script, value.args, value.meta?.parameters, value.nodeSettings, value.workspaceMode, value.approvalMode, value.allowWrite, value.networkAccess, value.allowedMcpServers, value.allowedMcpTools, value.maintenance, value.limits, "execution" in value ? value.sourceDefinition : value.revision] : null);
+}
+
+type DialogSurface = EventTarget & { readonly open: boolean; close(): void; getBoundingClientRect(): Pick<DOMRect, "left" | "right" | "top" | "bottom"> };
+
+export class PanelDialogLifecycle {
+  private session = 0;
+  private backdropPointer = false;
+  private readonly dialog: DialogSurface;
+  constructor(dialog: DialogSurface) {
+    this.dialog = dialog;
+    const outside = (event: MouseEvent): boolean => {
+      const rect = dialog.getBoundingClientRect();
+      return event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom);
+    };
+    dialog.addEventListener("pointerdown", event => { this.backdropPointer = outside(event as PointerEvent); });
+    dialog.addEventListener("pointercancel", () => { this.backdropPointer = false; });
+    dialog.addEventListener("click", event => {
+      const dismiss = this.backdropPointer && outside(event as MouseEvent);
+      this.backdropPointer = false;
+      if (dismiss) dialog.close();
+    });
+    dialog.addEventListener("close", () => { if (!dialog.open) { this.session++; this.backdropPointer = false; } });
+  }
+  opened(): void { this.session++; this.backdropPointer = false; }
+  current(): () => boolean { const session = this.session; return () => this.dialog.open && this.session === session; }
+}
+
 export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPanelController {
   const element = <T extends HTMLElement>(selector: string): T => { const value = root.querySelector<T>(selector); if (!value) throw new Error(`Missing panel element: ${selector}`); return value; };
   const controller = new WorkflowPanelController(callTool, () => render());
@@ -1248,7 +1283,10 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   const developerLogs = element<HTMLDetailsElement>("#wf-developer-logs");
   const menu = element("#wf-more-menu");
   let owner = "", parametersSignature = "", settingsSignature = "", templateRequest = "";
-  let argsValue: unknown = {}, nodeSettings: NodeSettings = {}, nodeKey = "", nodeNotice = "", nodeDirty = false;
+  let argsValue: unknown = {}, nodeSettings: NodeSettings = {}, nodeKey = "", nodeNotice = "", nodeDirty = false, settingsDirty = false;
+  let retainedInput: WorkflowRun | TemplateDefinition | undefined, inputHydrated = false, inputSignature = "", stagedParameters = false, stagedNodes = false;
+  let parameterContext: { owner: string; signature: string; parameters: WorkflowParameter[] | undefined } | undefined;
+  let nodeInputSignature = "", settingsEditRevision: number | undefined;
   let parameterSnapshot: unknown, parametersSaved = false, nodeSignature = "", zoom = 1;
   let workspaceModeValue: WorkspaceMode = "snapshot", workspaceModeSnapshot: WorkspaceMode = "snapshot", workspaceSourceMode: WorkspaceMode = "snapshot";
   let approvalModeValue: ApprovalMode = "auto-review", approvalModeSnapshot: ApprovalMode = "auto-review", approvalSnapshotSource: ApprovalMode = "auto-review", approvalSourceMode: ApprovalMode = "auto-review";
@@ -1263,11 +1301,19 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   let lastGraph = "", lastGraphOwner = "";
   const returns = new Map<HTMLDialogElement, { id?: string; task?: string; phase?: string; scope?: string; node?: string; flow?: string }>();
   const currentDefinition = (): TemplateDefinition | undefined => controller.state.definition?.id === controller.state.selectedTemplate ? controller.state.definition : undefined;
+  const definitionToUpdate = (): TemplateSummary | undefined => {
+    const definition = currentDefinition(), origin = controller.selected?.sourceDefinition;
+    const linked = controller.state.templates.find(item => item.id === origin?.id);
+    return definition?.source === "saved" ? definition : linked?.source === "saved" && typeof origin?.revision === "number" ? { ...linked, revision: origin.revision } : undefined;
+  };
   const source = (): WorkflowRun | TemplateDefinition | undefined => controller.selected ?? currentDefinition();
   const executing = (): boolean => !!controller.selected && ["preparing", "running", "stopping"].includes(controller.selected.execution);
-  const parameters = (): WorkflowParameter[] | undefined => source()?.meta?.parameters;
+  const parameters = (): WorkflowParameter[] | undefined => parameterDialog.open && parameterContext ? parameterContext.parameters : (source() ?? retainedInput)?.meta?.parameters;
+  const sourceChanged = (): boolean => inputHydrated && inputSignature !== panelInputSignature(source() ?? retainedInput);
+  const parameterContextChanged = (): boolean => !!parameterContext && (parameterContext.owner !== owner || parameterContext.signature !== panelInputSignature(source() ?? retainedInput));
   const activeProject = (): CodexProject | undefined => controller.state.projects.find(item => item.projectId === controller.state.selectedProjectId);
   const closeMenu = (): void => { menu.hidden = true; element("#wf-more-toggle").setAttribute("aria-expanded", "false"); };
+  const dialogLifecycles = new Map(Array.from(root.querySelectorAll<HTMLDialogElement>("dialog")).map(dialog => [dialog, new PanelDialogLifecycle(dialog)]));
   const processView = (detail: "brief" | "developer"): void => {
     element("#wf-process-body").hidden = detail === "developer";
     developerLogs.hidden = detail !== "developer";
@@ -1279,6 +1325,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   };
   const openDialog = (dialog: HTMLDialogElement, trigger?: HTMLElement): void => {
     closeMenu();
+    if (!dialog.open) dialogLifecycles.get(dialog)?.opened();
     if (trigger) returns.set(dialog, { ...(trigger.id ? { id: trigger.id } : {}), ...(trigger.dataset.task ? { task: trigger.dataset.task } : {}), ...(trigger.dataset.phase ?? trigger.dataset.phaseContainer ? { phase: (trigger.dataset.phase ?? trigger.dataset.phaseContainer)! } : {}), ...(trigger.dataset.processScope ? { scope: trigger.dataset.processScope } : {}), ...(trigger.dataset.nodeSettings ? { node: trigger.dataset.nodeSettings } : {}), ...(trigger.dataset.flowInspect ? { flow: trigger.dataset.flowInspect } : {}) });
     if (dialog === processDialog) { processView("brief"); root.dataset.processOpen = "true"; if (!dialog.open) dialog.show(); }
     else if (!dialog.open) dialog.showModal();
@@ -1293,6 +1340,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   const readInput = (): WorkflowInput => {
     const input = source();
     if (!input) throw new Error("请先选择工作流");
+    if (sourceChanged()) throw new Error("工作流已在后台更新，请取消参数或节点设置后重新打开，核对当前版本。");
     const path = controller.selected?.projectPath ?? activeProject()?.path;
     if (!path) throw new Error("请先选择目标项目");
     const values = new Map(Array.from(parameterFields.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-parameter]")).map(control => [control.dataset.parameter!, control.dataset.parameterType === "boolean" ? (control as HTMLInputElement).checked : control.value]));
@@ -1431,16 +1479,23 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   };
   const render = (): void => {
     const state = controller.state, run = controller.selected, summary = controller.selectedSummary, definition = currentDefinition();
-    const input = run ?? definition;
-    const nextOwner = run ? `run:${run.id}` : summary ? `summary:${summary.id}` : definition ? `definition:${definition.id}:${definition.revision ?? 0}` : "";
+    const nextOwner = panelSelectionOwner(state);
+    const input = run ?? definition ?? (nextOwner === owner ? retainedInput : undefined);
     const currentArtifactOwner = JSON.stringify([run?.id, run?.revision]);
     if (artifactOwner !== currentArtifactOwner) { artifactPage = undefined; artifactOwner = currentArtifactOwner; artifactRequest++; artifactLoading = false; }
     if (nextOwner !== owner) {
-      owner = nextOwner; argsValue = structuredClone(input?.args ?? {}); nodeSettings = structuredClone(input?.nodeSettings ?? {}); workspaceModeValue = workspaceSourceMode = input?.workspaceMode ?? "snapshot"; approvalModeValue = approvalSourceMode = sourceApprovalMode(input);
+      owner = nextOwner; retainedInput = undefined; inputHydrated = false; inputSignature = ""; stagedParameters = stagedNodes = false;
       parametersSignature = ""; parameterSnapshot = undefined; nodeDirty = false; nodeKey = "";
       if (nodeDialog.open) nodeDialog.close();
       if (processDialog.open) processDialog.close();
       if (parameterDialog.open) parameterDialog.close();
+    }
+    if (input) retainedInput = input;
+    const observedInputSignature = panelInputSignature(input);
+    const draftMatchesInput = input && JSON.stringify([argsValue, nodeSettings, workspaceModeValue, approvalModeValue]) === JSON.stringify([input.args ?? {}, input.nodeSettings ?? {}, input.workspaceMode ?? "snapshot", sourceApprovalMode(input)]);
+    if (input && (!inputHydrated || inputSignature !== observedInputSignature && !parameterDialog.open && !nodeDialog.open && (!stagedParameters && !stagedNodes || draftMatchesInput))) {
+      inputHydrated = true; inputSignature = observedInputSignature; stagedParameters = stagedNodes = false; parametersSignature = "";
+      argsValue = structuredClone(input.args ?? {}); nodeSettings = structuredClone(input.nodeSettings ?? {}); workspaceModeValue = workspaceSourceMode = input.workspaceMode ?? "snapshot"; approvalModeValue = approvalSourceMode = sourceApprovalMode(input);
     }
     const template = state.templates.find(item => item.id === state.selectedTemplate);
     const templateKey = JSON.stringify([template?.id, template?.revision]);
@@ -1449,8 +1504,10 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       queueMicrotask(() => { if (controller.state.selectedTemplate === template.id && !controller.state.selectedRun) void controller.loadTemplate(template.id); });
     }
     const live = executing();
-    if (workspaceSourceMode !== (input?.workspaceMode ?? "snapshot") || !canChangeWorkspaceMode(input)) workspaceModeValue = workspaceSourceMode = input?.workspaceMode ?? "snapshot";
-    if (approvalSourceMode !== sourceApprovalMode(input) || live) approvalModeValue = approvalSourceMode = sourceApprovalMode(input);
+    if (!parameterDialog.open || !sourceChanged()) {
+      if (workspaceSourceMode !== (input?.workspaceMode ?? "snapshot") || !canChangeWorkspaceMode(input)) workspaceModeValue = workspaceSourceMode = input?.workspaceMode ?? "snapshot";
+      if (approvalSourceMode !== sourceApprovalMode(input) || live) approvalModeValue = approvalSourceMode = sourceApprovalMode(input);
+    }
     const stale = state.connection !== "connected" || state.reconnecting;
     root.dataset.connection = state.connection;
     root.dataset.reconnecting = String(state.reconnecting);
@@ -1481,7 +1538,9 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     reconnectButton.disabled = state.reconnecting || state.connection === "connecting";
     reconnectButton.textContent = state.reconnecting ? "正在同步…" : "重新连接";
     element<HTMLButtonElement>("#wf-review-toggle").disabled = !run;
-    element<HTMLButtonElement>("#wf-save-definition").disabled = !controller.canAct || !input || live || !!run?.deletionPending;
+    element<HTMLButtonElement>("#wf-save-definition").disabled = !controller.canAct || !input || live || !!run?.deletionPending || sourceChanged();
+    const saveDefinitionMarkup = `<span class="wf-icon" data-icon="folder" aria-hidden="true"></span>${definitionToUpdate() ? "更新库中工作流" : "保存到工作流库"}`;
+    if (element("#wf-save-definition").innerHTML !== saveDefinitionMarkup) element("#wf-save-definition").innerHTML = saveDefinitionMarkup;
     element<HTMLButtonElement>("#wf-delete-toggle").disabled = !controller.canAct || !input;
     element("#wf-delete-toggle").innerHTML = `<span class="wf-icon" data-icon="trash" aria-hidden="true"></span>${run?.deletionPending ? "重试删除…" : "删除工作流…"}`;
     element<HTMLButtonElement>("#wf-refresh").disabled = state.connection === "closed" || state.reconnecting;
@@ -1533,23 +1592,25 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     approvalModeSelect.disabled = !controller.canAct || !input || live || !!run?.deletionPending || run?.application === "applying";
     element("#wf-approval-mode-help").textContent = approvalModeValue === "auto-review" ? "需要审批的操作交由 Codex 独立审核；拒绝或审核异常会停止当前任务。启动或继续时生效。" : "禁止审批：需要审批的操作会被拒绝。启动或继续时生效。";
     element("#wf-workspace-mode-help").textContent = `${workspaceModeDescription(workspaceModeValue, input?.allowWrite ?? false)}${input && !canChangeWorkspaceMode(input) ? " 工作方式已固定；请从工作流库创建新运行以更改。" : input?.maintenance ? " 维护操作需要 Git 隔离工作区。" : !input?.allowWrite ? " 本地修改需要写入授权，请在对话中让 AI 调整执行范围。" : " 工作方式将在启动后固定。"}`;
-    element("#wf-parameter-status").textContent = live ? "运行期间参数固定。" : "保存后用于下次启动；已执行的记录不会被改写。";
-    element<HTMLButtonElement>("#wf-save-parameters").disabled = !controller.canAct || live || !!run?.deletionPending;
+    element("#wf-parameter-status").textContent = sourceChanged() || parameterDialog.open && parameterContextChanged() ? "工作流已在后台更新，当前输入已保留；请取消后重新打开，核对新版参数。" : live ? "运行期间参数固定。" : "保存后用于下次启动；已执行的记录不会被改写。";
+    element<HTMLButtonElement>("#wf-save-parameters").disabled = !controller.canAct || live || !!run?.deletionPending || parameterDialog.open && parameterContextChanged();
     element("#wf-execution-scope").textContent = input ? `本工作流范围：${workspaceModeLabel(workspaceModeValue, input.allowWrite ?? false)} · ${input.allowWrite ? workspaceModeValue === "local" ? "允许直接修改当前项目" : "允许在隔离工作区修改文件" : "只读"} · ${input.networkAccess ? "允许联网" : "网络关闭"}${input.allowedMcpServers?.length ? ` · MCP：${input.allowedMcpServers.join("、")}` : ""}${maintenanceProtectedPathsSummary(input.maintenance) ? ` · 命令目录授权：${maintenanceProtectedPathsSummary(input.maintenance)}（仅对应命令）` : ""}。${workspaceModeValue === "local" ? "停止或删除运行不会撤销原项目改动。" : ""}调整执行范围可在对话中告诉 AI。` : "选择工作流后显示已声明的执行范围。";
     const settings = state.settings, models = settings?.models ?? [];
     const signature = JSON.stringify([state.settingsProjectPath, settings?.settings.revision, models]);
-    if (signature !== settingsSignature) { settingsSignature = signature; defaultModel.innerHTML = modelSelectOptions(models, settings?.settings.model ?? "", "继承 Codex 配置"); defaultEffort.innerHTML = effortSelectOptions(models, defaultModel.value || settings?.codexDefaults.model, settings?.settings.reasoningEffort ?? "", "继承 Codex 配置"); }
+    if (signature !== settingsSignature && !settingsDirty) { settingsSignature = signature; defaultModel.innerHTML = modelSelectOptions(models, settings?.settings.model ?? "", "继承 Codex 配置"); defaultEffort.innerHTML = effortSelectOptions(models, defaultModel.value || settings?.codexDefaults.model, settings?.settings.reasoningEffort ?? "", "继承 Codex 配置"); }
     defaultModel.disabled = defaultEffort.disabled = !controller.canAct || state.settingsBusy || !models.length;
-    element<HTMLButtonElement>("#wf-save-settings").disabled = defaultModel.disabled || !!state.settingsError;
+    const settingsChanged = settingsDirty && settingsEditRevision !== settings?.settings.revision;
+    element<HTMLButtonElement>("#wf-save-settings").disabled = defaultModel.disabled || !!state.settingsError || settingsChanged;
     element<HTMLButtonElement>("#wf-refresh-settings").disabled = state.connection !== "connected" || state.settingsBusy;
     element("#wf-settings-error").textContent = state.settingsError; element("#wf-settings-error").hidden = !state.settingsError;
-    element("#wf-settings-status").textContent = state.settingsBusy ? "正在读取或保存配置…" : settings?.effectiveDefaults ? `当前默认：${settings.effectiveDefaults.model} · ${settings.effectiveDefaults.reasoningEffort}` : settings?.defaultsStatus.reason ?? "模型目录尚未读取";
+    element("#wf-settings-status").textContent = settingsChanged ? "默认设置已在后台更新，当前选择已保留；请刷新设置后重新选择。" : state.settingsBusy ? "正在读取或保存配置…" : settings?.effectiveDefaults ? `当前默认：${settings.effectiveDefaults.model} · ${settings.effectiveDefaults.reasoningEffort}` : settings?.defaultsStatus.reason ?? "模型目录尚未读取";
     const inherited = inheritedChoice();
     const nodeVersion = JSON.stringify([owner, nodeKey, nodeSettings[nodeKey], inherited, models]);
     if (nodeVersion !== nodeSignature && !nodeDirty) { nodeSignature = nodeVersion; nodeModel.innerHTML = modelSelectOptions(models, nodeSettings[nodeKey]?.model ?? "", `继承上级配置（${inherited.model ?? "未记录"}）`); nodeEffort.innerHTML = effortSelectOptions(models, nodeModel.value || inherited.model, nodeSettings[nodeKey]?.reasoningEffort ?? "", `继承上级配置（${inherited.reasoningEffort ?? "未记录"}）`); }
     nodeModel.disabled = nodeEffort.disabled = !controller.canAct || state.settingsBusy || !models.length || live || !nodeKey || !!run?.deletionPending;
-    element<HTMLButtonElement>("#wf-save-node-settings").disabled = nodeModel.disabled;
-    element("#wf-node-settings-status").textContent = nodeNotice || state.settingsError || (live ? "执行期间配置固定。" : "保存后用于下次启动。");
+    const nodeChanged = nodeDialog.open && nodeInputSignature !== panelInputSignature(source() ?? retainedInput);
+    element<HTMLButtonElement>("#wf-save-node-settings").disabled = nodeModel.disabled || nodeChanged;
+    element("#wf-node-settings-status").textContent = nodeChanged ? "工作流已在后台更新，当前选择已保留；请取消后重新打开节点设置。" : nodeNotice || state.settingsError || (live ? "执行期间配置固定。" : "保存后用于下次启动。");
     element<HTMLButtonElement>("#wf-refresh-node-settings").hidden = !!models.length && !state.settingsError;
     const graphInput = summary ? undefined : run ? { ...run, stale, nodeSettings, executionSettings: defaultChoice() } : input?.meta ? { meta: input.meta, execution: "draft" as const, tasks: [], logs: [], nodeSettings, executionSettings: defaultChoice(), ...(input.flowPlan ? { flowPlan: input.flowPlan } : {}) } : undefined;
     const graph = renderWorkflowGraph(graphInput, state.task, observedNow);
@@ -1624,18 +1685,13 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   for (const dialog of Array.from(root.querySelectorAll<HTMLDialogElement>("dialog"))) {
     dialog.addEventListener("close", () => {
       if (dialog.open) return;
-      if (dialog === parameterDialog && !parametersSaved && parameterSnapshot !== undefined) { argsValue = parameterSnapshot; workspaceModeValue = workspaceModeSnapshot; approvalModeValue = approvalSnapshotSource === approvalSourceMode ? approvalModeSnapshot : approvalSourceMode; parametersSignature = ""; render(); }
-      if (dialog === nodeDialog) { nodeDirty = false; nodeSignature = ""; }
-      if (dialog === settingsDialog) { settingsSignature = ""; render(); }
+      if (dialog === parameterDialog) { parameterContext = undefined; if (!parametersSaved && parameterSnapshot !== undefined) { argsValue = parameterSnapshot; workspaceModeValue = workspaceModeSnapshot; approvalModeValue = approvalSnapshotSource === approvalSourceMode ? approvalModeSnapshot : approvalSourceMode; if (sourceChanged()) stagedParameters = stagedNodes = false; parametersSignature = ""; render(); } }
+      if (dialog === nodeDialog) { nodeDirty = false; nodeSignature = ""; if (sourceChanged()) { stagedParameters = stagedNodes = false; render(); } }
+      if (dialog === settingsDialog) { settingsDirty = false; settingsEditRevision = undefined; settingsSignature = ""; render(); }
       if (dialog === processDialog) { processTarget = undefined; processFlowId = undefined; processReader.close(); developerLogs.open = false; developerRequested = false; element("#wf-process-developer").textContent = ""; root.dataset.processOpen = "false"; }
       if (dialog === recoveryDialog) { recoveryTaskId = undefined; controller.cancelRecovery(); }
       if (dialog === deleteDialog) { deletionRequest++; deletionPreview = undefined; deletionLoading = false; }
       restoreFocus(dialog);
-    });
-    dialog.addEventListener("click", event => {
-      if (event.target !== dialog) return;
-      const rect = dialog.getBoundingClientRect();
-      if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
     });
   }
   element("#wf-more-toggle").addEventListener("click", () => { menu.hidden = !menu.hidden; element("#wf-more-toggle").setAttribute("aria-expanded", String(!menu.hidden)); if (!menu.hidden) menu.querySelector<HTMLElement>("button:not(:disabled)")?.focus(); });
@@ -1660,10 +1716,10 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   project.addEventListener("change", () => { void controller.selectProject(project.value); });
   element("#wf-refresh-projects").addEventListener("click", () => { void controller.refreshProjects(); });
   element<HTMLSelectElement>("#wf-template-select").addEventListener("change", event => { const value = (event.target as HTMLSelectElement).value; templateRequest = ""; void controller.selectWorkflow(value).finally(render); });
-  element("#wf-parameters-toggle").addEventListener("click", event => { parameterSnapshot = structuredClone(argsValue); workspaceModeSnapshot = workspaceModeValue; approvalModeSnapshot = approvalModeValue; approvalSnapshotSource = approvalSourceMode; parametersSaved = false; parameterError.hidden = true; openDialog(parameterDialog, event.currentTarget as HTMLElement); });
+  element("#wf-parameters-toggle").addEventListener("click", event => { parameterSnapshot = structuredClone(argsValue); workspaceModeSnapshot = workspaceModeValue; approvalModeSnapshot = approvalModeValue; approvalSnapshotSource = approvalSourceMode; parametersSaved = false; parameterContext = { owner, signature: panelInputSignature(source()), parameters: structuredClone(parameters()) }; parameterError.hidden = true; openDialog(parameterDialog, event.currentTarget as HTMLElement); });
   element<HTMLFormElement>("#wf-parameters-form").addEventListener("submit", event => {
     event.preventDefault();
-    try { const input = readInput(); argsValue = input.args; workspaceModeValue = input.workspaceMode ?? "snapshot"; approvalModeValue = input.approvalMode ?? approvalModeValue; parametersSaved = true; parameterError.hidden = true; parameterDialog.close(); controller.state.error = ""; render(); }
+    try { if (!controller.canAct || parameterContextChanged()) throw new Error("工作流或连接状态已变化，请取消后重新打开参数，核对当前版本。"); const input = readInput(); argsValue = input.args; workspaceModeValue = input.workspaceMode ?? "snapshot"; approvalModeValue = input.approvalMode ?? approvalModeValue; parametersSaved = true; stagedParameters = true; parameterError.hidden = true; parameterDialog.close(); controller.state.error = ""; render(); }
     catch (error) { parameterError.textContent = errorMessage(error); parameterError.hidden = false; }
   });
   parameterFields.addEventListener("input", () => { parameterError.hidden = true; });
@@ -1681,12 +1737,14 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     approvalModeValue = approvalModeSelect.value as ApprovalMode; parameterError.hidden = true; render();
   });
   element("#wf-settings-toggle").addEventListener("click", event => { openDialog(settingsDialog, event.currentTarget as HTMLElement); if (!controller.state.settings || controller.state.settingsError) void controller.refreshExecutionSettings(controller.selected?.projectPath ?? activeProject()?.path); });
-  element("#wf-refresh-settings").addEventListener("click", () => { settingsSignature = ""; void controller.refreshExecutionSettings(); });
-  defaultModel.addEventListener("change", () => { defaultEffort.innerHTML = effortSelectOptions(controller.state.settings?.models ?? [], defaultModel.value || controller.state.settings?.codexDefaults.model, defaultEffort.value, "继承 Codex 配置"); controller.state.settingsError = ""; });
+  element("#wf-refresh-settings").addEventListener("click", () => { settingsDirty = false; settingsEditRevision = undefined; settingsSignature = ""; void controller.refreshExecutionSettings(); });
+  const settingsEdited = (): void => { if (!settingsDirty) settingsEditRevision = controller.state.settings?.settings.revision; settingsDirty = true; controller.state.settingsError = ""; };
+  defaultModel.addEventListener("change", () => { settingsEdited(); defaultEffort.innerHTML = effortSelectOptions(controller.state.settings?.models ?? [], defaultModel.value || controller.state.settings?.codexDefaults.model, defaultEffort.value, "继承 Codex 配置"); });
+  defaultEffort.addEventListener("change", settingsEdited);
   element<HTMLFormElement>("#wf-settings-form").addEventListener("submit", event => {
     event.preventDefault();
     const choice = { ...(defaultModel.value ? { model: defaultModel.value } : {}), ...(defaultEffort.value ? { reasoningEffort: defaultEffort.value } : {}) };
-    try { validateChoice(choice, controller.state.settings?.codexDefaults ?? {}); void controller.saveExecutionSettings(choice).then(() => { if (!controller.state.settingsError) settingsDialog.close(); }); }
+    try { if (settingsDirty && settingsEditRevision !== controller.state.settings?.settings.revision) throw new Error("默认设置已更新，请刷新设置后重新选择。"); validateChoice(choice, controller.state.settings?.codexDefaults ?? {}); const current = dialogLifecycles.get(settingsDialog)!.current(); void controller.saveExecutionSettings(choice).then(saved => { if (saved && current()) settingsDialog.close(); }); }
     catch (error) { controller.state.settingsError = errorMessage(error); render(); }
   });
   element("#wf-history-toggle").addEventListener("click", event => { openDialog(historyDialog, event.currentTarget as HTMLElement); render(); });
@@ -1699,13 +1757,10 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     closeMenu();
     void (async () => {
       try {
-        const input = readInput(), definition = currentDefinition();
-        const sourceDefinition = controller.selected?.sourceDefinition;
-        const known = controller.state.templates.find(item => item.id === sourceDefinition?.id);
-        const revision = definition?.source === "saved" ? definition.revision : known?.source === "saved" ? known.revision : undefined;
+        const input = readInput(), revision = definitionToUpdate()?.revision;
         const { projectPath: _path, sourceDefinition: _source, ...value } = input;
         const saved = await controller.saveTemplate(value, revision);
-        if (saved) { controller.state.error = ""; element("#wf-notification").textContent = `已保存到工作流库：${saved.name}`; element("#wf-notification").hidden = false; }
+        if (saved) { controller.state.error = ""; element("#wf-notification").textContent = `${revision === undefined ? "已保存到工作流库" : "已更新库中工作流"}：${saved.name}`; element("#wf-notification").hidden = false; }
       } catch (error) { controller.state.error = `保存失败：${errorMessage(error)}`; render(); }
     })();
   });
@@ -1753,7 +1808,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   element("#wf-refresh-node-settings").addEventListener("click", () => { void controller.refreshExecutionSettings(); });
   element<HTMLFormElement>("#wf-node-settings-form").addEventListener("submit", event => {
     event.preventDefault();
-    try { const choice = { ...(nodeModel.value ? { model: nodeModel.value } : {}), ...(nodeEffort.value ? { reasoningEffort: nodeEffort.value } : {}) }; validateChoice(choice, inheritedChoice()); const bound = bindObservedNodeChoice(nodeKey, choice, controller.selected?.tasks ?? []); if (choice.model || choice.reasoningEffort) nodeSettings[nodeKey] = bound; else delete nodeSettings[nodeKey]; nodeDirty = false; nodeDialog.close(); render(); }
+    try { if (!controller.canAct || nodeInputSignature !== panelInputSignature(source() ?? retainedInput)) throw new Error("工作流或连接状态已变化，请取消后重新打开节点设置。"); const choice = { ...(nodeModel.value ? { model: nodeModel.value } : {}), ...(nodeEffort.value ? { reasoningEffort: nodeEffort.value } : {}) }; validateChoice(choice, inheritedChoice()); const bound = bindObservedNodeChoice(nodeKey, choice, controller.selected?.tasks ?? []); if (choice.model || choice.reasoningEffort) nodeSettings[nodeKey] = bound; else delete nodeSettings[nodeKey]; nodeDirty = false; stagedNodes = true; nodeDialog.close(); render(); }
     catch (error) { nodeNotice = errorMessage(error); render(); }
   });
   root.addEventListener("click", event => {
@@ -1777,7 +1832,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (settingsButton && !settingsButton.disabled) {
       const processReturn = settingsButton.id === "wf-process-node-settings" ? returns.get(processDialog) : undefined;
       if (processReturn) processDialog.close();
-      nodeKey = settingsButton.dataset.nodeSettings!; nodeNotice = ""; nodeDirty = false; nodeSignature = "";
+      nodeKey = settingsButton.dataset.nodeSettings!; nodeNotice = ""; nodeDirty = false; nodeSignature = ""; nodeInputSignature = panelInputSignature(source());
       try { if (nodeKey.startsWith("task:")) bindObservedNodeChoice(nodeKey, {}, controller.selected?.tasks ?? []); element("#wf-node-settings-target").textContent = nodeKey.startsWith("phase:") ? `阶段：${nodeKey.slice(6)}` : controller.selected?.tasks.find(task => `task:${task.index}` === nodeKey)?.label || "任务节点"; render(); openDialog(nodeDialog, settingsButton); if (processReturn) returns.set(nodeDialog, processReturn); }
       catch (error) { controller.state.error = errorMessage(error); render(); }
       return;
@@ -1817,7 +1872,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (action.dataset.action === "recheck") { void controller.recheckFromCurrent(approvalModeValue); return; }
     if (action.dataset.action === "start") {
       try { const input = readInput(); argsValue = input.args; parameterError.hidden = true; void controller.startWithInput(input, () => { recoveryTaskId = undefined; openDialog(recoveryDialog, action); }); }
-      catch (error) { parameterSnapshot = structuredClone(argsValue); workspaceModeSnapshot = workspaceModeValue; approvalModeSnapshot = approvalModeValue; approvalSnapshotSource = approvalSourceMode; parametersSaved = false; parameterError.textContent = errorMessage(error); parameterError.hidden = false; openDialog(parameterDialog, element("#wf-parameters-toggle")); }
+      catch (error) { parameterSnapshot = structuredClone(argsValue); workspaceModeSnapshot = workspaceModeValue; approvalModeSnapshot = approvalModeValue; approvalSnapshotSource = approvalSourceMode; parametersSaved = false; parameterContext = { owner, signature: panelInputSignature(source()), parameters: structuredClone(parameters()) }; parameterError.textContent = errorMessage(error); parameterError.hidden = false; openDialog(parameterDialog, element("#wf-parameters-toggle")); }
     }
   });
   render();

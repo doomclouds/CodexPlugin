@@ -4,7 +4,6 @@ import { homedir } from "node:os";
 import type { WorkflowRun } from "./types.ts";
 import lockfile from "proper-lockfile";
 import { randomBytes } from "node:crypto";
-import { listTemplates } from "./catalog.ts";
 
 export interface PendingDeletionTarget { kind: "run" | "definition"; id: string; revision: number; runIds?: string[]; includeAssociatedRuns?: true }
 export interface DeletedRunSummary { id: string; revision: number; name: string; projectPath: string; createdAt: string; sourceDefinition?: WorkflowRun["sourceDefinition"] }
@@ -167,9 +166,9 @@ export class RunStore {
       if (typeof source.id !== "string" || !Number.isSafeInteger(source.revision)) throw new Error("Invalid saved workflow provenance");
       const saved = /^saved:[a-z][a-z0-9-]{0,63}$/.test(source.id) && source.revision >= 1;
       // Older servers persisted the catalogue's bare builtin ID with revision zero.
-      // Migrate only known catalogue IDs; canonical IDs remain readable if a later
-      // plugin version removes that builtin, since runs retain their own scripts.
-      const legacyBuiltin = source.revision === 0 && listTemplates().some(template => template.id === source.id);
+      // Recognize the retired published ID without keeping its script or catalogue.
+      // Canonical IDs remain readable because runs retain their own scripts.
+      const legacyBuiltin = source.revision === 0 && source.id === "review-changes";
       const builtin = /^builtin:[a-z][a-z0-9-]{0,63}$/.test(source.id) && source.revision >= 0;
       if (!saved && !legacyBuiltin && !builtin) throw new Error("Invalid saved workflow provenance");
       if (legacyBuiltin) run.sourceDefinition = { id: `builtin:${source.id}`, revision: source.revision };

@@ -211,6 +211,7 @@ html,body{height:100%;margin:0;overflow:hidden}
 #workflow-panel-prototype .wf-workspace{display:flex;position:relative;align-items:stretch;min-width:0;gap:0}
 #workflow-panel-prototype .wf-activity-summary{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;padding:14px 0}
 #workflow-panel-prototype .wf-activity-summary>h2{margin:0}
+#workflow-panel-prototype .wf-activity-summary>.wf-preparation{margin:0}
 #workflow-panel-prototype .wf-preparation[data-complete=true]{margin:0 0 0 auto}
 #workflow-panel-prototype .wf-workspace>.wf-canvas{flex:1;min-width:0}
 #workflow-panel-prototype .wf-control-flow .wf-graph-scroll{height:calc(100dvh - 230px);min-height:440px;max-height:1100px;overflow:auto;padding:22px 24px 34px;scrollbar-gutter:stable;overscroll-behavior:contain}
@@ -245,8 +246,14 @@ html,body{height:100%;margin:0;overflow:hidden}
 #workflow-panel-prototype .wf-flow-node-main time{font-size:var(--wf-xs);font-variant-numeric:tabular-nums;color:var(--wf-muted);white-space:nowrap;align-self:flex-start;margin-top:3px}
 #workflow-panel-prototype .wf-flow-process-mark{width:16px;height:16px;flex-shrink:0;color:var(--wf-muted);align-self:flex-start;margin-top:4px}
 #workflow-panel-prototype .wf-flow-node>.wf-node-settings-icon{position:absolute;right:7px;bottom:5px;min-height:22px;width:22px;height:22px;padding:3px}
-#workflow-panel-prototype .wf-flow-condition{background:transparent!important;border:0!important;border-radius:0}
-#workflow-panel-prototype .wf-flow-condition .wf-flow-node-main{padding:12px 36px;text-align:center;border-radius:0}
+#workflow-panel-prototype .wf-flow-condition{background:transparent!important;border:0!important;border-radius:0;pointer-events:none}
+#workflow-panel-prototype .wf-flow-condition.is-selected{outline:none}
+#workflow-panel-prototype .wf-flow-condition-shape{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+#workflow-panel-prototype .wf-flow-condition .wf-flow-diamond{stroke-linejoin:round}
+#workflow-panel-prototype .wf-flow-condition button.wf-flow-node-main{position:relative;padding:12px 36px;text-align:center;border-radius:0;pointer-events:auto;clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);outline:none}
+#workflow-panel-prototype .wf-flow-condition button.wf-flow-node-main,#workflow-panel-prototype .wf-flow-condition button.wf-flow-node-main:hover:not(:disabled){background:transparent}
+#workflow-panel-prototype .wf-flow-condition:hover .wf-flow-diamond{fill:var(--wf-surface)}
+#workflow-panel-prototype .wf-flow-condition:focus-within .wf-flow-diamond,#workflow-panel-prototype .wf-flow-condition.is-selected .wf-flow-diamond{stroke:var(--wf-blue);stroke-width:3}
 #workflow-panel-prototype .wf-flow-condition .wf-flow-process-mark{display:none}
 #workflow-panel-prototype .wf-flow-condition .wf-flow-node-copy small{font-size:var(--wf-xs)}
 #workflow-panel-prototype .wf-flow-group{position:absolute;z-index:0;border:1px dashed var(--wf-border);border-radius:var(--wf-radius-lg);background:var(--wf-bg);pointer-events:none}

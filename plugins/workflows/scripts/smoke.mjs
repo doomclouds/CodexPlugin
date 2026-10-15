@@ -10,7 +10,6 @@ const pluginRoot = fileURLToPath(new URL("../", import.meta.url));
 const isolatedRoot = await mkdtemp(path.join(tmpdir(), "codex-workflows-smoke-"));
 assert.equal(path.dirname(isolatedRoot), path.resolve(tmpdir()));
 await cp(path.join(pluginRoot, "runtime"), path.join(isolatedRoot, "runtime"), { recursive: true });
-await cp(path.join(pluginRoot, "workflows"), path.join(isolatedRoot, "workflows"), { recursive: true });
 await cp(path.join(pluginRoot, "package.json"), path.join(isolatedRoot, "package.json"));
 await mkdir(path.join(isolatedRoot, "assets"));
 await cp(path.join(pluginRoot, "assets", "workflows-sidebar-icon.png"), path.join(isolatedRoot, "assets", "workflows-sidebar-icon.png"));
@@ -61,7 +60,6 @@ try {
   // Plugin upgrades may remove the old checkout after its MCP process starts.
   await rm(path.join(isolatedRoot, "runtime", "panel.html"));
   await rm(path.join(isolatedRoot, "runtime", "script-worker.js"));
-  await rm(path.join(isolatedRoot, "workflows", "review-changes.workflow.js"));
   await rm(path.join(isolatedRoot, "assets", "workflows-sidebar-icon.png"));
   const panelResource = await client.readResource({ uri: panelTool._meta.ui.resourceUri });
   assert.equal(panelResource.contents[0].mimeType, "text/html;profile=mcp-app");
@@ -86,9 +84,33 @@ try {
   assert.equal(capabilities.isError, undefined);
   assert.equal(capabilities.structuredContent.version, manifest.version);
   assert.equal(capabilities.structuredContent.execution.available, true);
-  const preview = await client.callTool({ name: "workflow_preview", arguments: { projectPath: tmpdir(), script: 'export const meta = { name: "smoke", description: "Standalone runtime check" }; return args.value + 1;', args: { value: 6 } } });
+  const emptyCatalog = await client.callTool({ name: "workflow_list_templates", arguments: {} });
+  assert.equal(emptyCatalog.isError, undefined);
+  assert.deepEqual(emptyCatalog.structuredContent.templates, []);
+  const script = 'export const meta = { name: "smoke", description: "Standalone saved runtime check", parameters: [{ name: "value", label: "Value", type: "number", required: true }] }; return args.value + 1;';
+  for (const id of ["review-changes", "builtin:review-changes"]) {
+    const removed = await client.callTool({ name: "workflow_get_template", arguments: { id } });
+    assert.equal(removed.isError, true);
+    assert.match(removed.content[0].text, /Unknown workflow template/);
+    const rejected = await client.callTool({ name: "workflow_preview", arguments: { projectPath: tmpdir(), script, sourceDefinition: { id, revision: 0 } } });
+    assert.equal(rejected.isError, true);
+  }
+  assert.deepEqual((await client.callTool({ name: "workflow_list_runs", arguments: {} })).structuredContent.runs, []);
+  const saved = await client.callTool({ name: "workflow_save_template", arguments: { script, args: { value: 6 } } });
+  assert.equal(saved.isError, undefined);
+  const definition = saved.structuredContent.template;
+  assert.equal(definition.id, "saved:smoke");
+  assert.equal(definition.source, "saved");
+  const catalog = await client.callTool({ name: "workflow_list_templates", arguments: {} });
+  assert.deepEqual(catalog.structuredContent.templates.map(template => template.id), [definition.id]);
+  const template = await client.callTool({ name: "workflow_get_template", arguments: { id: definition.id } });
+  assert.equal(template.isError, undefined);
+  assert.equal(template.structuredContent.script, script);
+  assert.equal(template.structuredContent.revision, definition.revision);
+  const preview = await client.callTool({ name: "workflow_preview", arguments: { projectPath: tmpdir(), script: template.structuredContent.script, args: definition.args, sourceDefinition: { id: definition.id, revision: definition.revision } } });
   assert.equal(preview.isError, undefined);
   assert.equal(preview.structuredContent.run.execution, "draft");
+  assert.deepEqual(preview.structuredContent.run.sourceDefinition, { id: definition.id, revision: definition.revision });
   const lease = await client.callTool({ name: "workflow_panel_lease", arguments: {} });
   const runId = preview.structuredContent.run.id;
   const started = await client.callTool({ name: "workflow_start", arguments: { id: runId, revision: preview.structuredContent.run.revision } });
@@ -104,18 +126,11 @@ try {
   assert.equal(finished.result, 7);
   await client.callTool({ name: "workflow_panel_lease", arguments: { leaseId: lease.structuredContent.leaseId, release: true } });
 
-  const catalog = await client.callTool({ name: "workflow_list_templates", arguments: {} });
-  const templateId = catalog.structuredContent.templates[0].id;
-  const template = await client.callTool({ name: "workflow_get_template", arguments: { id: templateId } });
-  assert.equal(template.isError, undefined);
-  assert.equal(template.structuredContent.id, templateId);
-  assert.match(template.structuredContent.script, /export const meta/);
-
   const missing = await client.callTool({ name: "workflow_get_template", arguments: { id: "../package.json" } });
   assert.equal(missing.isError, true);
   assert.match(missing.content[0].text, /Unknown workflow template/);
   assert.equal(stderr, "");
-  console.log("Workflows MCP smoke passed: discovery, versions, stable panel resource and cached aliases after file removal, capabilities, catalog, script read, unknown ID, independent cwd, standalone bundle.");
+  console.log("Workflows MCP smoke passed: discovery, versions, stable panel resource and cached aliases after file removal, capabilities, empty catalogue, removed builtin rejection, saved definition read/execution, unknown ID, independent cwd, standalone bundle.");
 } finally {
   await client.close();
   await transport.close();
