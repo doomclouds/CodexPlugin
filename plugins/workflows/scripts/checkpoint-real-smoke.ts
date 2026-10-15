@@ -8,9 +8,11 @@ import type { CommandRequest, WorkerAdapter, WorkerEvent, WorkerRequest, WorkerR
 import { WorkflowEngine } from "../src/engine.ts";
 import { RunStore } from "../src/store.ts";
 
-// Opt-in only: this calls two real logged-in native workers. The stopped second
-// dispatch is held before native.run; real process-crash tests are separate.
+// Opt-in only: this calls two real logged-in native workers, or three when
+// --control-flow is explicit. The stopped second dispatch is held before
+// native.run; real process-crash tests are separate.
 if (!process.argv.includes("--real-workers")) throw new Error("This opt-in smoke requires --real-workers and CODEX_CLI_PATH; it calls real gpt-6-luna/max workers.");
+const controlFlowMode = process.argv.includes("--control-flow");
 
 const sha = (value: string | Buffer | undefined) => value === undefined ? null : createHash("sha256").update(value).digest("hex");
 const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
@@ -69,8 +71,9 @@ class CheckpointRealAdapter implements WorkerAdapter {
     });
     assert.equal(result.executionSettings?.model, "gpt-6-luna");
     assert.equal(result.executionSettings?.reasoningEffort, "max");
-    assert.ok(result.toolsUsed?.some(tool => tool.startsWith("native:")), "A model-only statement is not native tool execution evidence");
-    assert.ok(result.toolsUsed?.every(tool => tool.startsWith("native:")), "No external MCP tools are authorized");
+    assert.ok(result.toolsUsed, "The native worker must retain its observed tool evidence");
+    assert.ok(result.toolsUsed.some(tool => tool.startsWith("native:")), "A model-only statement is not native tool execution evidence");
+    assert.ok(result.toolsUsed.every(tool => tool.startsWith("native:")), "No external MCP tools are authorized");
     call.tools = result.toolsUsed;
     call.threadId = result.threadId;
     call.turnId = result.turnId;
@@ -125,7 +128,19 @@ async function main() {
     const writeCode = `const wf_fs=require("node:fs");wf_fs.writeFileSync(${JSON.stringify(markerName)},${JSON.stringify(`${marker}\n`)},{flag:"wx",mode:384});process.stdout.write(wf_fs.readFileSync(${JSON.stringify(markerName)},"utf8"));`;
     const readCode = `process.stdout.write(require("node:fs").readFileSync(${JSON.stringify(markerName)},"utf8"));`;
     const writeCommand = `${quote(process.execPath)} -e ${quote(writeCode)}`, readCommand = `${quote(process.execPath)} -e ${quote(readCode)}`;
-    const script = 'export const meta={name:"real-node-checkpoint",description:"Create one harmless local marker and independently read it after a manual checkpoint recovery",phases:[{title:"写入标记"},{title:"恢复后核验"}]}; phase("写入标记"); const written=await agent(args.write,{mode:"write",model:"gpt-6-luna",reasoningEffort:"max",schema:args.schema,accept:args.accept}); phase("恢复后核验"); const verified=await agent(args.read,{model:"gpt-6-luna",reasoningEffort:"max",schema:args.schema,accept:args.accept}); return {written,verified};';
+    const script = controlFlowMode ? `export const meta={name:"real-node-checkpoint-control-flow",description:"Create one harmless local marker and read it twice through an observed condition and loop after checkpoint recovery",phases:[{title:"写入标记"},{title:"恢复后核验"}]};
+phase("写入标记");
+const written=await agent(args.write,{label:"写入标记",mode:"write",model:"gpt-6-luna",reasoningEffort:"max",schema:args.schema,accept:args.accept});
+let verified;
+// @flow-label: 写入已通过？
+if(written.status==="passed") {
+  phase("恢复后核验");
+  // @flow-label: 两轮独立核验
+  for(let index=0;index<2;index++) {
+    verified=await agent(args.read,{label:"读取标记",model:"gpt-6-luna",reasoningEffort:"max",schema:args.schema,accept:args.accept});
+  }
+}
+return {written,verified};` : 'export const meta={name:"real-node-checkpoint",description:"Create one harmless local marker and independently read it after a manual checkpoint recovery",phases:[{title:"写入标记"},{title:"恢复后核验"}]}; phase("写入标记"); const written=await agent(args.write,{mode:"write",model:"gpt-6-luna",reasoningEffort:"max",schema:args.schema,accept:args.accept}); phase("恢复后核验"); const verified=await agent(args.read,{model:"gpt-6-luna",reasoningEffort:"max",schema:args.schema,accept:args.accept}); return {written,verified};';
     const common = "This is an explicitly authorized harmless smoke test in a disposable, non-Git local project. Use only native tools and the exact command below. Preserve notes.txt. No network, external MCP tools, installation, commits, extra files, permission changes or delegation. If code-mode is needed, emit the actual command result, including exit status and output. Return {\"status\":\"passed\",\"marker\":the actual marker read without its trailing newline} only after the command succeeds; do not invent results. ";
     const draft = await engine.preview({
       projectPath: project, script, allowWrite: true, workspaceMode: "local", networkAccess: false, approvalMode: "never",
@@ -136,7 +151,7 @@ async function main() {
       },
       limits: { timeoutMs: 220000, maxCalls: 3, maxReadWorkers: 1 },
     });
-    console.log(JSON.stringify({ stage: "real-checkpoint-write", model: "gpt-6-luna", effort: "max", id: draft.id, nativeWorkerCrashClaimed: false }));
+    console.log(JSON.stringify({ stage: "real-checkpoint-write", model: "gpt-6-luna", effort: "max", id: draft.id, controlFlowMode, nativeWorkerCrashClaimed: false }));
     await bounded(engine.start({ id: draft.id, revision: draft.revision }));
     await bounded(Promise.race([paused, engine.wait(draft.id).then(run => { throw new Error(`Workflow ended before the controlled pause: ${run.execution}: ${run.error ?? "no error"}`); })]));
     assert.equal(audit.nativeCalls.length, 1);
@@ -181,10 +196,10 @@ async function main() {
     assert.equal(done.tasks[1]?.attempts[0]?.status, "interrupted");
     assert.equal(done.tasks[1]?.attempts[1]?.status, "completed");
     assert.equal(done.application, "none");
-    assert.equal(done.nodeCheckpoint?.completedTasks, 2);
+    assert.equal(done.nodeCheckpoint?.completedTasks, controlFlowMode ? 3 : 2);
     assert.equal(done.checkpointState?.status, "ready");
     assert.deepEqual(done.result, { written: { status: "passed", marker }, verified: { status: "passed", marker } });
-    assert.deepEqual(audit.nativeCalls.map(call => call.attemptId), ["task_1_attempt_1", "task_2_attempt_2"]);
+    assert.deepEqual(audit.nativeCalls.map(call => call.attemptId), controlFlowMode ? ["task_1_attempt_1", "task_2_attempt_2", "task_3_attempt_1"] : ["task_1_attempt_1", "task_2_attempt_2"]);
     assert.equal(audit.heldDispatches, 1);
     assert.equal(await readFile(path.join(project, markerName), "utf8"), markerBeforeStop);
     assert.equal(await readFile(path.join(project, "notes.txt"), "utf8"), preserved);
@@ -193,9 +208,33 @@ async function main() {
     const checkpoints = await engine.listCheckpoints({ id: done.id, limit: 100 });
     assert.ok(checkpoints.total > stoppedCheckpoints.total);
     assert.ok(checkpoints.checkpoints.some(checkpoint => checkpoint.reason === "recovery"));
+    let verifiedFlow: Record<string, unknown> | undefined;
+    if (controlFlowMode) {
+      assert.equal(done.tasks.length, 3);
+      assert.equal(done.tasks[2]?.cached, false);
+      assert.equal(done.tasks[2]?.attempts.length, 1);
+      assert.equal(done.tasks[2]?.attempts[0]?.status, "completed");
+      assert.deepEqual(done.tasks.slice(1).map(task => task.output), [{ status: "passed", marker }, { status: "passed", marker }]);
+      assert.equal(typeof stopped.flowExecutionId, "string");
+      assert.equal(typeof done.flowExecutionId, "string");
+      assert.notEqual(done.flowExecutionId, stopped.flowExecutionId, "Recovery must observe a new execution path rather than retain stale observations");
+      assert.ok(done.tasks.every(task => task.flowExecutionId === done.flowExecutionId), "Cached and new tasks must belong to the current flow execution");
+      assert.equal(typeof done.tasks[1]?.flowNodeId, "string");
+      assert.equal(done.tasks[1]?.flowNodeId, done.tasks[2]?.flowNodeId, "Both native reads originate from the same loop call site");
+      assert.notEqual(done.tasks[1]?.id, done.tasks[2]?.id);
+      assert.notEqual(done.flowTraceTruncated, true);
+      const conditions = done.flowEvents?.filter(event => event.kind === "condition") ?? [];
+      const iterations = done.flowEvents?.filter(event => event.kind === "iteration") ?? [];
+      assert.equal(conditions.length, 1);
+      assert.equal(conditions[0]?.value, true);
+      assert.deepEqual(iterations.map(event => event.iteration), [1, 2]);
+      assert.equal(new Set(iterations.map(event => event.nodeId)).size, 1);
+      assert.ok(checkpoints.total >= 7, "Initial, node, stop, recovery and final boundaries must remain available");
+      verifiedFlow = { condition: { nodeId: conditions[0]!.nodeId, value: true }, loop: { nodeId: iterations[0]!.nodeId, iterations: [1, 2] }, readCallSite: done.tasks[1]!.flowNodeId, readTaskIds: done.tasks.slice(1).map(task => task.id), stoppedExecutionId: stopped.flowExecutionId, recoveredExecutionId: done.flowExecutionId, taskExecutionIds: done.tasks.map(task => task.flowExecutionId), finalCheckpointCompletedTasks: done.nodeCheckpoint!.completedTasks };
+    }
     assert.equal(sha(await readConfig()), sha(originalConfig));
     report = {
-      test: "real-node-checkpoint", success: true, model: "gpt-6-luna", effort: "max", realWorkers: audit.nativeCalls.length,
+      test: "real-node-checkpoint", success: true, controlFlowMode, ...(verifiedFlow ? { verifiedFlow } : {}), model: "gpt-6-luna", effort: "max", realWorkers: audit.nativeCalls.length,
       heldBeforeNativeDispatch: audit.heldDispatches, realNativeCrashClaimed: false, sourceSha256: sha(await readFile(fileURL())),
       nativeCalls: audit.nativeCalls, stoppedAttemptCounts: stopped.tasks.map(task => task.attempts.length), resumedAttemptCounts: done.tasks.map(task => task.attempts.length),
       firstAttemptUnchanged: true, firstTaskReused: done.tasks[0]?.cached, recoveryPreviewReadOnly: true, checkpointCount: checkpoints.total, checkpoints: checkpoints.checkpoints,

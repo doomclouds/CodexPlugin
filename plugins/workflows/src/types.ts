@@ -3,6 +3,9 @@ import type { EffectiveExecutionSettings, NodeSettings } from "./execution-setti
 import type { WorkflowFailureContext } from "./failure-context.ts";
 import type { WorkflowStopReason } from "./stop-context.ts";
 import type { CheckpointRef } from "./checkpoint-store.ts";
+import type { FlowPlan, FlowEvent } from "./control-flow.ts";
+
+export type FlowObservation = Exclude<FlowEvent, { kind: "trace-truncated" }> & { at: string; sequence: number };
 
 export type TaskStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stopping";
 export type WorkspaceMode = "snapshot" | "git-worktree" | "local";
@@ -38,6 +41,8 @@ export interface Task {
   executionSettings?: EffectiveExecutionSettings;
   configurationTarget?: string;
   currentActivity?: Activity;
+  flowNodeId?: string;
+  flowExecutionId?: string;
 }
 export interface Limits { maxReadWorkers: number; maxCalls: number; timeoutMs: number; maxTokens: number }
 export interface FileRecord { hash: string; mode: number; kind: "file" | "link" }
@@ -95,6 +100,10 @@ export interface WorkflowRun {
   executionSettings?: Partial<EffectiveExecutionSettings>;
   preparation?: Preparation; startedAt?: string; endedAt?: string;
   progressSequence?: number;
+  flowPlan?: FlowPlan;
+  flowEvents?: FlowObservation[];
+  flowTraceTruncated?: boolean;
+  flowExecutionId?: string;
   failureContext?: WorkflowFailureContext;
   stopReason?: WorkflowStopReason;
   sourceDefinition?: DefinitionSource;

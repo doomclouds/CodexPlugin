@@ -65,6 +65,7 @@ try {
   await rm(path.join(isolatedRoot, "assets", "workflows-sidebar-icon.png"));
   const panelResource = await client.readResource({ uri: panelTool._meta.ui.resourceUri });
   assert.equal(panelResource.contents[0].mimeType, "text/html;profile=mcp-app");
+  assert.deepEqual(panelResource.contents[0]._meta["openai/ui"], { availableDisplayModes: ["fullscreen"] });
   assert.match(panelResource.contents[0].text, /workflow-panel/);
   const aliases = ["ui://workflows/prototype/0.1.4.html", "ui://workflows/panel/0.2.0.html", "ui://workflows/panel/0.2.1.html"];
   const { resources } = await client.listResources();

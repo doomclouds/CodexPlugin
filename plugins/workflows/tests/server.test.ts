@@ -173,7 +173,7 @@ test("MCP preview verifies a real definition revision and script before recordin
   } finally { await close(); }
 });
 
-test("MCP server and panel resource advertise the compact packaged brand icon", async () => {
+test("MCP panel resources advertise fullscreen presentation and compact packaged brand icons", async () => {
   const { client, calls, close } = await fixture();
   try {
     const bytes = await readFile(new URL("../assets/workflows-sidebar-icon.png", import.meta.url));
@@ -184,13 +184,20 @@ test("MCP server and panel resource advertise the compact packaged brand icon", 
     assert.ok(bytes.length < 16 * 1024, "MCP descriptors should use the compact sidebar PNG");
     const resources = (await client.listResources()).resources;
     assert.ok(resources.length > 0);
-    for (const resource of resources) assert.deepEqual(resource.icons, expected);
+    for (const resource of resources) {
+      assert.deepEqual(resource.icons, expected);
+      const response = await client.readResource({ uri: resource.uri });
+      assert.equal(response.contents.length, 1);
+      assert.deepEqual(response.contents[0]?._meta?.["openai/ui"], { availableDisplayModes: ["fullscreen"] });
+      assert.deepEqual(response.contents[0]?._meta?.ui, { csp: { connectDomains: [], resourceDomains: [] } });
+    }
     const tools = (await client.listTools()).tools;
     const panelTool = tools.find(tool => tool.name === "workflow_open_panel");
     assert.deepEqual(panelTool?.icons, expected);
     assert.deepEqual(panelTool?.inputSchema, { type: "object", properties: {}, "$schema": "http://json-schema.org/draft-07/schema#" });
     assert.ok(tools.filter(tool => tool.name !== "workflow_open_panel").every(tool => tool.icons === undefined));
     assert.deepEqual((panelTool?._meta?.["openai/ui"] as Record<string, unknown>).entrypoints, [{ type: "thread" }]);
+    assert.equal((panelTool?._meta?.ui as Record<string, unknown>).visibility, undefined, "Presentation must not remove the panel tool from the model's tool catalog.");
     const opened = await client.callTool({ name: "workflow_open_panel", arguments: {} });
     assert.equal(opened.structuredContent?.executionAvailable, true);
     assert.equal((await client.callTool({ name: "workflow_start", arguments: { id, revision: 1 } })).isError, undefined);

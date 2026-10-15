@@ -24,6 +24,7 @@ import { CheckpointStore } from "./checkpoint-store.ts";
 import type { CheckpointManifest, CheckpointNode, CheckpointReason } from "./checkpoint-store.ts";
 import { StableCheckpointGate } from "./checkpoint-gate.ts";
 import { projectRunForTransport } from "./run-view.ts";
+import type { FlowCall, FlowEvent } from "./control-flow.ts";
 
 const now = () => new Date().toISOString();
 function canonical(value: unknown): unknown {
@@ -179,7 +180,9 @@ export class WorkflowEngine {
     const active = this.active.get(id);
     // A terminal script result is not ready until review, checkpoint and lock cleanup finish.
     if (active && !["preparing", "running", "stopping"].includes(run.execution)) { await active.done; run = await this.load(id); }
-    return structuredClone(run);
+    const view = structuredClone(run);
+    if (!view.flowPlan) try { view.flowPlan = validateScript(view.script).flowPlan; } catch { /* Legacy invalid scripts retain their observed task fallback. */ }
+    return view;
   }
   async getNodeProcess(id: string, input: Parameters<typeof nodeProcess>[1]) {
     // Diagnostics remain readable while terminal checkpoint and lock cleanup
@@ -385,7 +388,7 @@ export class WorkflowEngine {
   }
   async preview(input: { projectPath: string; script: string; args?: unknown; allowWrite?: boolean; networkAccess?: boolean; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; workspaceMode?: WorkspaceMode; approvalMode?: ApprovalMode; maintenance?: MaintenancePlan; limits?: Partial<Limits>; nodeSettings?: NodeSettings; sourceDefinition?: DefinitionSource }) {
     await this.initialization;
-    const { meta } = validateScript(input.script);
+    const { meta, flowPlan } = validateScript(input.script);
     validateWorkflowArgs(meta, input.args === undefined ? {} : input.args);
     const nodeSettings = validateNodeSettings(input.nodeSettings, meta);
     const approvalMode = resolveApprovalMode(input.approvalMode, "auto-review");
@@ -398,7 +401,7 @@ export class WorkflowEngine {
     if (!Number.isInteger(limits.maxReadWorkers) || limits.maxReadWorkers < 1 || limits.maxReadWorkers > 16 || !Number.isInteger(limits.maxCalls) || limits.maxCalls < 1 || limits.maxCalls > 1000 || limits.timeoutMs < 100 || limits.timeoutMs > 24 * 60 * 60 * 1000 || limits.maxTokens < 0) throw new Error("Invalid workflow limits");
     const run: WorkflowRun = {
       id: `wf_${randomBytes(12).toString("hex")}`, revision: 0, createdAt: now(), updatedAt: now(),
-      meta, script: input.script, scriptDigest: digest(input.script), args: input.args === undefined ? {} : input.args, projectPath,
+      meta, flowPlan, flowEvents: [], script: input.script, scriptDigest: digest(input.script), args: input.args === undefined ? {} : input.args, projectPath,
       approvalMode,
       allowWrite: input.allowWrite ?? false, networkAccess: input.networkAccess ?? false, allowedMcpServers: input.allowedMcpServers ?? [], allowedMcpTools: input.allowedMcpTools ?? {}, workspaceMode: input.workspaceMode ?? "snapshot", ...(maintenance ? { maintenance } : {}), ...(input.nodeSettings !== undefined ? { nodeSettings } : {}), limits, execution: "draft", review: "unavailable", application: "none", tasks: [], logs: [],
       ...(input.workspaceMode === "local" && input.allowWrite ? { localGitWrite: true as const } : {}),
@@ -419,7 +422,7 @@ export class WorkflowEngine {
     this.assertActionAvailable(run);
     this.assertRevision(run, input.revision);
     if (this.active.has(run.id) || ["preparing", "running", "stopping"].includes(run.execution) || run.application !== "none") throw new Error("This workflow cannot be edited while running or after application");
-    const { meta } = validateScript(input.script);
+    const { meta, flowPlan } = validateScript(input.script);
     validateWorkflowArgs(meta, input.args);
     const nodeSettings = validateNodeSettings(input.nodeSettings ?? run.nodeSettings, meta);
     const approvalMode = resolveApprovalMode(input.approvalMode, resolveApprovalMode(run.approvalMode));
@@ -430,6 +433,7 @@ export class WorkflowEngine {
     }
     if (run.script !== input.script) delete run.sourceDefinition;
     run.script = input.script; run.scriptDigest = digest(input.script); run.meta = meta; run.args = input.args;
+    run.flowPlan = flowPlan; run.flowEvents = []; delete run.flowExecutionId; delete run.flowTraceTruncated;
     if (input.nodeSettings !== undefined || run.nodeSettings !== undefined) run.nodeSettings = nodeSettings;
     const scopes = {
       allowWrite: input.allowWrite ?? run.allowWrite,
@@ -527,7 +531,7 @@ export class WorkflowEngine {
         if (preview.fingerprint !== input.recoveryFingerprint || !preview.canResume) throw new Error("Recovery preview changed or is blocked; refresh the preview before confirming. No workers were started.");
       }
       const approvalMode = resolveApprovalMode(input.approvalMode, resolveApprovalMode(run.approvalMode));
-      const { meta, mayUseAgent } = validateScript(run.script);
+      const { meta, mayUseAgent, flowPlan } = validateScript(run.script);
       validateWorkflowArgs(meta, run.args);
       run.meta = meta;
       run.nodeSettings = validateNodeSettings(run.nodeSettings, meta);
@@ -544,6 +548,7 @@ export class WorkflowEngine {
         this.log(run, `Explicit retry from ${input.retryFromTaskId}: preserving earlier results and invalidating this task and its following results.`);
       }
       run.controlId = randomBytes(16).toString("hex");
+      run.flowPlan = flowPlan; run.flowEvents = []; run.flowExecutionId = randomBytes(12).toString("hex"); delete run.flowTraceTruncated;
       run.execution = "preparing"; run.review = "unavailable"; run.application = "none";
       run.startedAt = now(); run.preparation = { startedAt: run.startedAt, stages: [] }; delete run.endedAt;
       delete run.error; delete run.diff; delete run.result; delete run.failureContext; delete run.stopReason;
@@ -758,7 +763,7 @@ export class WorkflowEngine {
     // launch position or later UI model/effort overrides. Hash shared args once.
     const configurationScope = digest({ projectPath: run.projectPath, goal: run.meta.description, args: run.args });
     const issued = new Set<Promise<unknown>>();
-    const dispatch = (prompt: string, rawOptions: Record<string, unknown>, scriptSignal: AbortSignal, operationId?: string) => {
+    const dispatch = (prompt: string, rawOptions: Record<string, unknown>, scriptSignal: AbortSignal, operationId?: string, flow?: FlowCall) => {
           // Capture the script's phase before model discovery or worker queues yield.
           const taskPhase = typeof rawOptions.phase === "string" ? rawOptions.phase : phase;
           const operation = (async () => {
@@ -790,6 +795,8 @@ export class WorkflowEngine {
               const errorText = message(error);
               if (previous) await this.checkpoints.archiveTask(run.id, previous, "replaced-by-configuration-failure");
               run.tasks[position] = { id: `task_${position + 1}`, index: position, prompt, options, mode: options.mode === "write" || options.isolation === "worktree" ? "write" : "read", status: "failed", cached: false, attempts: [...(previous?.attempts ?? []), { id: `task_${position + 1}_attempt_${(previous?.attempts.length ?? 0) + 1}`, status: "failed", error: errorText, endedAt: now() }], error: errorText, ...(configurationTarget ? { configurationTarget } : {}), ...(taskPhase !== undefined ? { phase: taskPhase } : {}), ...(typeof options.label === "string" ? { label: options.label } : {}) };
+              if (flow?.nodeId) run.tasks[position]!.flowNodeId = flow.nodeId;
+              if (run.flowExecutionId) run.tasks[position]!.flowExecutionId = run.flowExecutionId;
               this.log(run, errorText, `task_${position + 1}`, "error");
               await this.persist(run);
               throw new WorkflowTaskError(error, { taskId: `task_${position + 1}`, ...(taskPhase !== undefined ? { phase: taskPhase } : {}) });
@@ -798,6 +805,8 @@ export class WorkflowEngine {
             const fingerprint = taskFingerprint(prompt, options, executionSettings);
             const task: Task = { id: `task_${position + 1}`, index: position, prompt, options, mode, status: "queued", cached: false, attempts: previous?.attempts ?? [], ...(configurationTarget ? { configurationTarget } : {}), ...(executionSettings ? { executionSettings } : {}), ...(typeof options.label === "string" ? { label: options.label } : {}), ...(taskPhase !== undefined ? { phase: taskPhase } : {}) };
             if (previous && (taskFingerprint(previous.prompt, previous.options, previous.executionSettings) !== fingerprint || previous.phase !== taskPhase)) await this.checkpoints.archiveTask(run.id, previous, "replaced-by-replay");
+            if (flow?.nodeId) task.flowNodeId = flow.nodeId;
+            if (run.flowExecutionId) task.flowExecutionId = run.flowExecutionId;
             run.tasks[position] = task;
             if (position < cacheInvalidFrom && previous?.status === "completed" && this.committedTask(previous, authority) && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint && Object.hasOwn(previous, "output")) {
               try { if (options.schema) validateTaskOutput(previous.output, options.schema, options.accept); }
@@ -958,8 +967,9 @@ export class WorkflowEngine {
       const result = await executeScript(run.script, run.args, {
         phase: title => { phase = title; this.log(run, `Phase: ${title}`); },
         log: text => { this.log(run, text); },
-        agent: (prompt, options, signal) => dispatch(prompt, options, signal),
-        operation: (id, signal) => dispatch(`Operation: ${id}`, {}, signal, id),
+        agent: (prompt, options, signal, flow) => dispatch(prompt, options, signal, undefined, flow),
+        operation: (id, signal, flow) => dispatch(`Operation: ${id}`, {}, signal, id, flow),
+        flow: event => this.observeFlow(run, event),
       }, active.controller.signal, { timeoutMs: run.limits.timeoutMs, maxCalls: run.limits.maxCalls, memoryMb: 64 });
       await Promise.allSettled(issued);
       for (const retired of run.tasks.slice(index)) await this.checkpoints.archiveTask(run.id, retired, "branch-no-longer-dispatched");
@@ -1007,6 +1017,21 @@ export class WorkflowEngine {
       run.endedAt = now();
       await this.persist(run);
     }
+  }
+  private observeFlow(run: WorkflowRun, event: FlowEvent): void {
+    const events = run.flowEvents ??= [];
+    if (event.kind === "trace-truncated" || events.length >= 2000) {
+      if (!run.flowTraceTruncated) { run.flowTraceTruncated = true; this.scheduleProgress(run); }
+      return;
+    }
+    if (typeof event.nodeId !== "string" || event.nodeId.length > 100) return;
+    if (event.kind === "condition") {
+      if (typeof event.value !== "boolean") return;
+      events.push({ nodeId: event.nodeId, kind: "condition", value: event.value, at: now(), sequence: events.length + 1 });
+    } else if (event.kind === "iteration" && Number.isSafeInteger(event.iteration) && event.iteration > 0) {
+      events.push({ nodeId: event.nodeId, kind: "iteration", iteration: event.iteration, at: now(), sequence: events.length + 1 });
+    } else return;
+    this.scheduleProgress(run);
   }
   private activity(run: WorkflowRun, task: Task, attempt: Attempt, value: Activity) {
     const activities = attempt.activities ??= [];

@@ -301,6 +301,37 @@ async function configFixture(t: TestContext) {
   return { ...setup, workspace, configFile, content, factory, activation, readConfig, writes: () => writes };
 }
 
+test("default activation configuration session disables plugin and app discovery without starting a worker", async t => {
+  const setup = await fixture(t);
+  const workspace = await createGitWorkspace(setup.project, setup.data);
+  const configFile = path.join(setup.root, "activation-fixture.toml"), trace = path.join(setup.root, "activation-session.json");
+  const content = '# Disposable configuration fixture\n[mcp_servers.sample]\ncommand = "node"\n';
+  await writeFile(configFile, content);
+  const args = [path.join(workspace.root, "dist", "server.mjs")];
+  const layer = { name: { type: "user", file: configFile, profile: null }, version: "fixture-version", config: { model: "fixture-model", mcp_servers: { sample: { command: "node", args, env: { PRESERVED: "fixture" } }, other: { command: "other-fixture" } } } };
+  // Node treats the default factory's literal app-server argument as this owned
+  // script. This exercises the real default factory and real process cleanup,
+  // while no Codex model, user configuration or configured MCP is launched.
+  await writeFile(path.join(workspace.root, "app-server"), `const fs=require("node:fs"),readline=require("node:readline");
+const trace=${JSON.stringify(trace)},layer=${JSON.stringify(layer)},record={pid:process.pid,args:process.argv.slice(2),methods:[]};
+fs.writeFileSync(trace,JSON.stringify(record));
+readline.createInterface({input:process.stdin}).on("line",line=>{const message=JSON.parse(line);record.methods.push(message.method);fs.writeFileSync(trace,JSON.stringify(record));if(message.method==="initialized")return;const result=message.method==="initialize"?{}:message.method==="config/read"?{layers:[layer]}:undefined;if(result===undefined)process.stdout.write(JSON.stringify({id:message.id,error:{code:-32601,message:"Unexpected fixture method"}})+"\\n");else process.stdout.write(JSON.stringify({id:message.id,result})+"\\n");});\n`);
+  const previous = process.env.WORKFLOWS_CODEX_COMMAND;
+  let result;
+  try {
+    process.env.WORKFLOWS_CODEX_COMMAND = process.execPath;
+    result = await activateMcpServer(workspace, { serverName: "sample", command: "node", args });
+  } finally {
+    if (previous === undefined) delete process.env.WORKFLOWS_CODEX_COMMAND; else process.env.WORKFLOWS_CODEX_COMMAND = previous;
+  }
+  assert.equal(result.status, "pending_restart", result.error);
+  const recorded = JSON.parse(await readFile(trace, "utf8")) as { pid: number; args: string[]; methods: string[] };
+  assert.deepEqual(recorded.args, ["--disable", "plugins", "--disable", "apps", "--disable", "remote_plugin"]);
+  assert.deepEqual(recorded.methods, ["initialize", "initialized", "config/read"]);
+  assert.throws(() => process.kill(recorded.pid, 0), { code: "ESRCH" });
+  assert.equal(await readFile(configFile, "utf8"), content);
+});
+
 test("real owned app-server updates one server, preserves its settings and returns pending_restart", async t => {
   const setup = await configFixture(t);
   const before = await setup.readConfig();

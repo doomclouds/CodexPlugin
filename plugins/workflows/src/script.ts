@@ -2,6 +2,8 @@ import { parse } from "acorn";
 import { Worker } from "node:worker_threads";
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { compileControlFlow } from "./control-flow.ts";
+import type { FlowCall, FlowEvent, FlowPlan } from "./control-flow.ts";
 
 export interface WorkflowMeta {
   name: string;
@@ -21,10 +23,11 @@ export interface WorkflowParameter {
 }
 
 export interface ScriptHooks {
-  agent(prompt: string, options: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
-  operation?(id: string, signal: AbortSignal): Promise<unknown>;
+  agent(prompt: string, options: Record<string, unknown>, signal: AbortSignal, call?: FlowCall): Promise<unknown>;
+  operation?(id: string, signal: AbortSignal, call?: FlowCall): Promise<unknown>;
   phase(title: string): void;
   log(message: string): void;
+  flow?(event: FlowEvent): void;
 }
 
 export interface ScriptLimits {
@@ -93,7 +96,7 @@ function textField(value: unknown, label: string, maximum: number): string {
   return value;
 }
 
-export function validateScript(source: string): { meta: WorkflowMeta; body: string; mayUseAgent: boolean } {
+export function validateScript(source: string): { meta: WorkflowMeta; body: string; mayUseAgent: boolean; flowPlan: FlowPlan } {
   if (typeof source !== "string" || !source.trim()) invalid("source is empty");
   if (Buffer.byteLength(source, "utf8") > 256 * 1024) invalid("source exceeds 256 KiB");
   let program: AstNode;
@@ -178,7 +181,7 @@ export function validateScript(source: string): { meta: WorkflowMeta; body: stri
     }
   };
   walk(program);
-  return { meta, body: source.slice(first.end), mayUseAgent };
+  return { meta, body: source.slice(first.end), mayUseAgent, flowPlan: compileControlFlow(source, first.end, program).plan };
 }
 
 // Declarations constrain their named values only. Additional fields are kept,
@@ -234,7 +237,8 @@ export async function executeScript(source: string, args: unknown, hooks: Script
     memoryMb: limit(limits.memoryMb, 64, 256, "memoryMb"),
   };
   const argsJson = encode(args);
-  const worker = new Worker(scriptWorkerDataUrl, { workerData: { body, argsJson, limits: resolvedLimits, moduleBaseUrl: scriptWorkerUrl.href }, execArgv: [] });
+  const compiled = compileControlFlow(source, source.length - body.length);
+  const worker = new Worker(scriptWorkerDataUrl, { workerData: { body: compiled.body, flowHelperName: compiled.helperName, argsJson, limits: resolvedLimits, moduleBaseUrl: scriptWorkerUrl.href }, execArgv: [] });
   const controller = new AbortController();
   const pending = new Set<Promise<void>>();
   // Keep host failures out of the VM. A matching opaque identity can carry the
@@ -258,12 +262,12 @@ export async function executeScript(source: string, args: unknown, hooks: Script
     signal.addEventListener("abort", abort, { once: true });
     worker.on("error", error => { void finish(error); });
     worker.on("exit", code => { if (!finishing) void finish(new Error(`Workflow sandbox exited before returning a result (${code})`)); });
-    worker.on("message", (message: { type: string; id?: number; prompt?: string; options?: Record<string, unknown>; text?: string; resultJson?: string; error?: string; failureId?: string }) => {
+    worker.on("message", (message: { type: string; id?: number; prompt?: string; options?: Record<string, unknown>; text?: string; resultJson?: string; error?: string; failureId?: string; flowNodeId?: string; event?: FlowEvent }) => {
       if (finishing) return;
       if (message.type === "agent" || message.type === "operation") {
         const task = Promise.resolve().then(() => message.type === "operation"
-          ? hooks.operation ? hooks.operation(message.prompt!, controller.signal) : Promise.reject(new Error("No operations were approved for this workflow"))
-          : hooks.agent(message.prompt!, message.options!, controller.signal)).then(result => {
+          ? hooks.operation ? hooks.operation(message.prompt!, controller.signal, message.flowNodeId ? { nodeId: message.flowNodeId } : undefined) : Promise.reject(new Error("No operations were approved for this workflow"))
+          : hooks.agent(message.prompt!, message.options!, controller.signal, message.flowNodeId ? { nodeId: message.flowNodeId } : undefined)).then(result => {
           if (!finishing) worker.postMessage({ type: "agent-result", id: message.id, resultJson: encode(result) });
         }).catch(error => {
           if (!finishing) {
@@ -274,6 +278,9 @@ export async function executeScript(source: string, args: unknown, hooks: Script
           }
         }).finally(() => { pending.delete(task); });
         pending.add(task);
+      } else if (message.type === "flow") {
+        // Display observations never decide whether business code may run.
+        try { if (message.event) hooks.flow?.(message.event); } catch { /* A failed observer cannot change workflow execution. */ }
       } else if (message.type === "phase" || message.type === "log") {
         try { if (message.type === "phase") hooks.phase(message.text!); else hooks.log(message.text!); }
         catch (error) { void finish(abortError(error)); }

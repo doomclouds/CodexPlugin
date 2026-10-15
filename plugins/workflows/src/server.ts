@@ -15,6 +15,7 @@ import type { DeleteInput } from "./deletion.ts";
 import { readDeletionConfig } from "./deletion-config.ts";
 import { assertControlPlaneTransportable, projectRunForTransport, TransportProjectionError } from "./run-view.ts";
 import type { WorkflowRun } from "./types.ts";
+import { validateScript } from "./script.ts";
 
 function result(data: Record<string, unknown>): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
@@ -99,7 +100,7 @@ function registerPanelToolWithIcons(server: McpServer, register: () => void) {
 }
 
 export function createServer(engine: WorkflowEngine, options: { projects?: ProjectsProvider; readDeletionConfig?: (projectPaths: string[]) => Promise<Record<string, unknown>> } = {}) {
-  const serverInfo = { name: "workflows", version: "0.8.1", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.9.0", icons: panelIcons };
   const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server = new McpServer(serverInfo);
   const templates = new TemplateStore(engine.store);
@@ -124,7 +125,7 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
         uri,
         mimeType: RESOURCE_MIME_TYPE,
         text: panelHtml,
-        _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] } }, "openai/ui": { availableDisplayModes: ["inline", "fullscreen"] } },
+        _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] } }, "openai/ui": { availableDisplayModes: ["fullscreen"] } },
       }],
     }));
   }
@@ -150,7 +151,7 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
     annotations,
   }, async ({ id }) => {
     const template = id.startsWith("saved:") ? await templates.get(id) : await getTemplate(id.replace(/^builtin:/, ""));
-    return template ? result({ ...template }) : {
+    return template ? result({ ...template, flowPlan: validateScript(template.script).flowPlan }) : {
       isError: true,
       content: [{ type: "text", text: `Unknown workflow template: ${id}` }],
     };

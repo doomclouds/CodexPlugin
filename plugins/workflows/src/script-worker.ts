@@ -4,7 +4,7 @@ import type { QuickJSDeferredPromise, QuickJSHandle } from "quickjs-emscripten-c
 
 const port = parentPort;
 if (!port) throw new Error("Workflow sandbox requires a worker thread");
-const data = workerData as { body: string; argsJson?: string; limits: { timeoutMs: number; maxCalls: number; memoryMb: number } };
+const data = workerData as { body: string; flowHelperName?: string; argsJson?: string; limits: { timeoutMs: number; maxCalls: number; memoryMb: number } };
 
 async function main(): Promise<void> {
   const QuickJS = await newQuickJSWASMModuleFromVariant(import("@jitl/quickjs-singlefile-cjs-release-sync"));
@@ -18,6 +18,8 @@ async function main(): Promise<void> {
   let callCount = 0;
   let rpcMessages = 0;
   let rpcBytes = 0;
+  let flowMessages = 0;
+  let flowTruncated = false;
   let finished = false;
   let promise: QuickJSHandle | undefined;
   let resolveResult!: (handle: QuickJSHandle) => void;
@@ -71,7 +73,34 @@ async function main(): Promise<void> {
     port!.postMessage({ type: "error", error: error instanceof Error ? error.message : String(error), ...(error instanceof Error && "failureId" in error && typeof error.failureId === "string" ? { failureId: error.failureId } : {}) });
   };
   try {
-    setFunction("__workflowAgent", (promptHandle, optionsHandle) => {
+    const flowNodeId = (handle: QuickJSHandle | undefined): string | undefined => {
+      if (!handle || context.typeof(handle) !== "string") return undefined;
+      const value = context.getString(handle);
+      return /^flow_[a-z]+_[a-z0-9]+_[a-z0-9]+$/.test(value) && value.length <= 80 ? value : undefined;
+    };
+    setFunction("__workflowFlowTrace", (idHandle, kindHandle, valueHandle) => {
+      if (flowTruncated) return context.undefined;
+      if (flowMessages >= 2000) {
+        flowTruncated = true;
+        port!.postMessage({ type: "flow", event: { nodeId: "", kind: "trace-truncated" } });
+        return context.undefined;
+      }
+      const nodeId = flowNodeId(idHandle);
+      const kind = kindHandle && context.getString(kindHandle);
+      if (!nodeId || !["condition", "iteration"].includes(kind ?? "")) return context.undefined;
+      if (kind === "condition") {
+        if (!valueHandle || context.typeof(valueHandle) !== "boolean") return context.undefined;
+        flowMessages++;
+        port!.postMessage({ type: "flow", event: { nodeId, kind, value: !!context.dump(valueHandle) } });
+      } else {
+        const iteration = valueHandle && context.getNumber(valueHandle);
+        if (!Number.isSafeInteger(iteration) || iteration! < 1) return context.undefined;
+        flowMessages++;
+        port!.postMessage({ type: "flow", event: { nodeId, kind, iteration } });
+      }
+      return context.undefined;
+    });
+    setFunction("__workflowAgent", (promptHandle, optionsHandle, flowHandle) => {
       if (++callCount > data.limits.maxCalls) throw new Error(`Workflow agent call limit exceeded (${data.limits.maxCalls})`);
       const prompt = context.getString(promptHandle!);
       const optionsJson = context.getString(optionsHandle!);
@@ -82,17 +111,17 @@ async function main(): Promise<void> {
       if (options === null || typeof options !== "object" || Array.isArray(options)) throw new Error("agent options must be an object");
       const deferred = context.newPromise();
       pending.set(callCount, deferred);
-      port!.postMessage({ type: "agent", id: callCount, prompt, options });
+      port!.postMessage({ type: "agent", id: callCount, prompt, options, flowNodeId: flowNodeId(flowHandle) });
       return deferred.handle;
     });
-    setFunction("__workflowOperation", idHandle => {
+    setFunction("__workflowOperation", (idHandle, flowHandle) => {
       if (++callCount > data.limits.maxCalls) throw new Error("Workflow call limit exceeded");
       const id = context.getString(idHandle!);
       if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id)) throw new Error("operation requires a declared step ID");
       chargeMessage(id);
       const deferred = context.newPromise();
       pending.set(callCount, deferred);
-      port!.postMessage({ type: "operation", id: callCount, prompt: id });
+      port!.postMessage({ type: "operation", id: callCount, prompt: id, flowNodeId: flowNodeId(flowHandle) });
       return deferred.handle;
     });
     for (const type of ["phase", "log"] as const) setFunction(`__workflow${type}`, handle => {
@@ -111,20 +140,43 @@ async function main(): Promise<void> {
       const __hostOperation = __workflowOperation;
       const __hostPhase = __workflowphase;
       const __hostLog = __workflowlog;
+      const __hostFlowTrace = __workflowFlowTrace;
       delete globalThis.__workflowAgent;
       delete globalThis.__workflowOperation;
       delete globalThis.__workflowphase;
       delete globalThis.__workflowlog;
+      delete globalThis.__workflowFlowTrace;
       const args = ${data.argsJson === undefined ? "undefined" : `JSON.parse(${JSON.stringify(data.argsJson)})`};
-      const agent = (prompt, options = {}) => {
+      const __invokeFlowAgent = (prompt, options = {}, flowNodeId) => {
         if (typeof prompt !== "string") throw new TypeError("agent prompt must be a string");
         if (!options || typeof options !== "object" || Array.isArray(options)) throw new TypeError("agent options must be an object");
-        return __hostAgent(prompt, JSON.stringify(options));
+        return __hostAgent(prompt, JSON.stringify(options), flowNodeId);
       };
-      const operation = id => {
+      const agent = (prompt, options = {}) => __invokeFlowAgent(prompt, options);
+      const __invokeFlowOperation = (id, flowNodeId) => {
         if (typeof id !== "string") throw new TypeError("operation ID must be a string");
-        return __hostOperation(id);
+        return __hostOperation(id, flowNodeId);
       };
+      const operation = id => __invokeFlowOperation(id);
+      ${data.flowHelperName ? `const ${data.flowHelperName} = (() => {
+        const iterations = Object.create(null);
+        let observations = 0;
+        const emit = (nodeId, kind, value) => {
+          if (observations > 2000) return;
+          observations++;
+          __hostFlowTrace(nodeId, kind, value);
+        };
+        return Object.freeze({
+          condition: (nodeId, value) => { emit(nodeId, "condition", !!value); return value; },
+          reset: nodeId => { iterations[nodeId] = 0; },
+          iteration: nodeId => { if (observations > 2000) return; const iteration = (iterations[nodeId] || 0) + 1; iterations[nodeId] = iteration; emit(nodeId, "iteration", iteration); },
+          call: (nodeId, fn, kind) => kind === "agent" && fn === agent
+            ? (...values) => __invokeFlowAgent(values[0], values[1], nodeId)
+            : kind === "operation" && fn === operation
+              ? (...values) => __invokeFlowOperation(values[0], nodeId)
+              : fn
+        });
+      })();` : ""}
       const parallel = async tasks => {
         if (!Array.isArray(tasks) || tasks.length > 4096 || tasks.some(task => typeof task !== "function")) throw new TypeError("parallel requires at most 4096 functions");
         const results = await Promise.allSettled(tasks.map(task => Promise.resolve().then(task)));

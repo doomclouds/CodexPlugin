@@ -1,4 +1,4 @@
-import { elapsedLabel, renderWorkflowGraph } from "./panel-graph.ts";
+import { elapsedLabel, renderFlowObservation, renderWorkflowGraph } from "./panel-graph.ts";
 import { readParameters, renderParameterFields } from "./panel-parameters.ts";
 import type { WorkflowParameter } from "./panel-parameters.ts";
 import { failureContext, failureErrorSummary, failureErrorText, resultCheckFailure } from "../src/failure-context.ts";
@@ -61,7 +61,13 @@ export interface WorkflowTask {
   error?: string;
   executionSettings?: RecordedExecutionSettings;
   configurationTarget?: string;
+  flowNodeId?: string;
+  flowExecutionId?: string;
 }
+
+export interface FlowBlock { id: string; kind: "task" | "condition" | "loop" | "parallel" | "opaque"; label: string; yes?: FlowBlock[]; no?: FlowBlock[]; body?: FlowBlock[]; maxIterations?: number; terminal?: "return" | "throw" | "break" | "continue"; terminalLabel?: string }
+export interface FlowPlan { version: 1; blocks: FlowBlock[]; warnings: string[]; truncated: boolean }
+export interface FlowEvent { nodeId: string; kind: "condition" | "iteration"; value?: boolean; iteration?: number; at: string; sequence: number }
 
 export interface MaintenanceStep {
   id: string; command: string[]; networkAccess?: boolean; timeoutMs?: number; retries?: number; idempotent?: boolean;
@@ -116,6 +122,10 @@ export interface WorkflowRun {
   diff?: WorkflowDiff;
   limits: { maxReadWorkers: number; maxCalls: number; timeoutMs: number; maxTokens: number };
   workspacePath?: string;
+  flowPlan?: FlowPlan;
+  flowEvents?: FlowEvent[];
+  flowTraceTruncated?: boolean;
+  flowExecutionId?: string;
 }
 
 export type WorkflowRunSummary = Pick<WorkflowRun, "id" | "revision" | "progressSequence" | "projectPath" | "meta" | "execution" | "review" | "application" | "createdAt" | "updatedAt" | "startedAt" | "endedAt" | "sourceDefinition" | "deletionPending" | "deletionTarget" | "failureContext" | "stopReason" | "error"> & { listSummary: true };
@@ -147,6 +157,7 @@ export interface TemplateDefinition extends TemplateSummary {
   maintenance?: MaintenancePlan;
   nodeSettings?: NodeSettings;
   limits?: WorkflowRun["limits"];
+  flowPlan?: FlowPlan;
 }
 
 export type PanelTab = "overview" | "tasks" | "diff" | "logs";
@@ -1243,29 +1254,40 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   let approvalModeValue: ApprovalMode = "auto-review", approvalModeSnapshot: ApprovalMode = "auto-review", approvalSnapshotSource: ApprovalMode = "auto-review", approvalSourceMode: ApprovalMode = "auto-review";
   const sourceApprovalMode = (value?: WorkflowRun | TemplateDefinition): ApprovalMode => value?.approvalMode ?? (value && ("execution" in value || value.source === "saved") ? "never" : "auto-review");
   let processTarget: NodeProcessTarget | undefined;
+  let processFlowId: string | undefined;
   let processSignature = "", developerRequested = false;
   let recoveryTaskId: string | undefined;
   let reviewSignature = "";
   let artifactPage: unknown, artifactOwner = "", artifactRequest = 0, artifactLoading = false;
   let deletionPreview: DeletionPreview | undefined, deletionLoading = false, deletionRequest = 0;
   let lastGraph = "", lastGraphOwner = "";
-  const returns = new Map<HTMLDialogElement, { id?: string; task?: string; phase?: string; scope?: string; node?: string }>();
+  const returns = new Map<HTMLDialogElement, { id?: string; task?: string; phase?: string; scope?: string; node?: string; flow?: string }>();
   const currentDefinition = (): TemplateDefinition | undefined => controller.state.definition?.id === controller.state.selectedTemplate ? controller.state.definition : undefined;
   const source = (): WorkflowRun | TemplateDefinition | undefined => controller.selected ?? currentDefinition();
   const executing = (): boolean => !!controller.selected && ["preparing", "running", "stopping"].includes(controller.selected.execution);
   const parameters = (): WorkflowParameter[] | undefined => source()?.meta?.parameters;
   const activeProject = (): CodexProject | undefined => controller.state.projects.find(item => item.projectId === controller.state.selectedProjectId);
   const closeMenu = (): void => { menu.hidden = true; element("#wf-more-toggle").setAttribute("aria-expanded", "false"); };
+  const processView = (detail: "brief" | "developer"): void => {
+    element("#wf-process-body").hidden = detail === "developer";
+    developerLogs.hidden = detail !== "developer";
+    developerLogs.open = detail === "developer";
+    element("#wf-process-brief-tab").setAttribute("aria-selected", String(detail === "brief"));
+    element("#wf-process-developer-tab").setAttribute("aria-selected", String(detail === "developer"));
+    element("#wf-process-brief-tab").tabIndex = detail === "brief" ? 0 : -1;
+    element("#wf-process-developer-tab").tabIndex = detail === "developer" ? 0 : -1;
+  };
   const openDialog = (dialog: HTMLDialogElement, trigger?: HTMLElement): void => {
     closeMenu();
-    if (trigger) returns.set(dialog, { ...(trigger.id ? { id: trigger.id } : {}), ...(trigger.dataset.task ? { task: trigger.dataset.task } : {}), ...(trigger.dataset.phase ?? trigger.dataset.phaseContainer ? { phase: (trigger.dataset.phase ?? trigger.dataset.phaseContainer)! } : {}), ...(trigger.dataset.processScope ? { scope: trigger.dataset.processScope } : {}), ...(trigger.dataset.nodeSettings ? { node: trigger.dataset.nodeSettings } : {}) });
-    if (!dialog.open) dialog.showModal();
+    if (trigger) returns.set(dialog, { ...(trigger.id ? { id: trigger.id } : {}), ...(trigger.dataset.task ? { task: trigger.dataset.task } : {}), ...(trigger.dataset.phase ?? trigger.dataset.phaseContainer ? { phase: (trigger.dataset.phase ?? trigger.dataset.phaseContainer)! } : {}), ...(trigger.dataset.processScope ? { scope: trigger.dataset.processScope } : {}), ...(trigger.dataset.nodeSettings ? { node: trigger.dataset.nodeSettings } : {}), ...(trigger.dataset.flowInspect ? { flow: trigger.dataset.flowInspect } : {}) });
+    if (dialog === processDialog) { processView("brief"); root.dataset.processOpen = "true"; if (!dialog.open) dialog.show(); }
+    else if (!dialog.open) dialog.showModal();
     const focus = dialog.querySelector<HTMLElement>("input:not(:disabled),select:not(:disabled),textarea:not(:disabled)") ?? dialog.querySelector<HTMLElement>("button:not(:disabled)");
     focus?.focus({ preventScroll: true });
   };
   const restoreFocus = (dialog: HTMLDialogElement): void => {
     const key = returns.get(dialog);
-    const trigger = key?.id ? root.querySelector<HTMLElement>(`#${key.id}`) : Array.from(root.querySelectorAll<HTMLElement>("button[data-task],button[data-phase],button[data-process-scope],button[data-node-settings]")).find(value => key?.task && value.dataset.task === key.task || key?.phase && value.dataset.phase === key.phase || key?.node && value.dataset.nodeSettings === key.node || key?.scope && value.dataset.processScope === key.scope);
+    const trigger = key?.id ? root.querySelector<HTMLElement>(`#${key.id}`) : Array.from(root.querySelectorAll<HTMLElement>("button[data-task],button[data-phase],button[data-process-scope],button[data-node-settings],button[data-flow-inspect]")).find(value => key?.task && value.dataset.task === key.task || key?.phase && value.dataset.phase === key.phase || key?.node && value.dataset.nodeSettings === key.node || key?.scope && value.dataset.processScope === key.scope || key?.flow && value.dataset.flowInspect === key.flow);
     trigger?.focus({ preventScroll: true });
   };
   const readInput = (): WorkflowInput => {
@@ -1350,6 +1372,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   const openFailureProcess = (trigger?: HTMLElement): void => {
     const run = controller.selected;
     if (!run) return;
+    processFlowId = undefined;
     const failure = resultCheckFailure(run), task = run.tasks.find(task => task.id === failure?.afterTaskId);
     const knownPhase = failure?.phase && ((run.meta.phases ?? []).some(phase => (typeof phase === "string" ? phase : phase.title ?? phase.name) === failure.phase) || run.tasks.some(task => task.phase === failure.phase));
     if (task) controller.state.task = task.id;
@@ -1488,7 +1511,9 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     modeBadge.hidden = !input;
     modeBadge.title = input ? workspaceModeDescription(workspaceModeValue, input.allowWrite ?? false) : "";
     element("#wf-activity-time").textContent = run ? `${elapsed ? `已运行 ${elapsed} · ` : ""}${live && recent !== undefined ? `最近活动 ${recent < 60 ? `${recent} 秒` : `${Math.floor(recent / 60)} 分钟`}前` : `${run.tasks.filter(task => task.status === "completed").length}/${run.tasks.length} 个任务完成`}` : summary ? `当前状态：${executionLabels[summary.execution] ?? summary.execution}；完整详情尚未就绪` : "任务由 AI 生成，启动后显示实际进度";
-    const preparationHtml = run?.preparation?.stages.map(value => `<li data-tone="${value.status === "completed" ? "green" : value.status === "failed" ? "red" : value.status === "running" ? "blue" : "amber"}"><span class="wf-icon${value.status === "running" ? " is-spinning" : ""}" data-icon="${value.status === "running" ? "loader-2" : value.status === "completed" ? "circle-check" : value.status === "failed" ? "alert-circle" : "circle"}" aria-hidden="true"></span><button type="button" id="wf-preparation-${escapeHtml(value.id)}" data-process-scope="workflow" aria-label="${escapeHtml(`查看 ${value.label} 的启动过程`)}">${escapeHtml(value.label)}${value.status === "running" ? ` · ${elapsedLabel(value.startedAt)}` : ""}</button></li>`).join("") ?? "";
+    const prepared = !!run?.preparation?.stages.length && run.preparation.stages.every(value => value.status === "completed") && run.execution !== "preparing";
+    element("#wf-preparation").dataset.complete = String(prepared);
+    const preparationHtml = prepared ? '<li data-tone="green"><span class="wf-icon" data-icon="circle-check" aria-hidden="true"></span><button type="button" data-process-scope="workflow" aria-label="查看启动检查过程">启动检查已通过</button></li>' : run?.preparation?.stages.map(value => `<li data-tone="${value.status === "completed" ? "green" : value.status === "failed" ? "red" : value.status === "running" ? "blue" : "amber"}"><span class="wf-icon${value.status === "running" ? " is-spinning" : ""}" data-icon="${value.status === "running" ? "loader-2" : value.status === "completed" ? "circle-check" : value.status === "failed" ? "alert-circle" : "circle"}" aria-hidden="true"></span><button type="button" id="wf-preparation-${escapeHtml(value.id)}" data-process-scope="workflow" aria-label="${escapeHtml(`查看 ${value.label} 的启动过程`)}">${escapeHtml(value.label)}${value.status === "running" ? ` · ${elapsedLabel(value.startedAt)}` : ""}</button></li>`).join("") ?? "";
     if (element("#wf-preparation").innerHTML !== preparationHtml) {
       const preparationFocus = document.activeElement instanceof HTMLElement && document.activeElement.id.startsWith("wf-preparation-") ? document.activeElement.id : undefined;
       element("#wf-preparation").innerHTML = preparationHtml;
@@ -1526,11 +1551,11 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     element<HTMLButtonElement>("#wf-save-node-settings").disabled = nodeModel.disabled;
     element("#wf-node-settings-status").textContent = nodeNotice || state.settingsError || (live ? "执行期间配置固定。" : "保存后用于下次启动。");
     element<HTMLButtonElement>("#wf-refresh-node-settings").hidden = !!models.length && !state.settingsError;
-    const graphInput = summary ? undefined : run ? { ...run, stale, nodeSettings, executionSettings: defaultChoice() } : input?.meta ? { meta: input.meta, execution: "draft" as const, tasks: [], logs: [], nodeSettings, executionSettings: defaultChoice() } : undefined;
+    const graphInput = summary ? undefined : run ? { ...run, stale, nodeSettings, executionSettings: defaultChoice() } : input?.meta ? { meta: input.meta, execution: "draft" as const, tasks: [], logs: [], nodeSettings, executionSettings: defaultChoice(), ...(input.flowPlan ? { flowPlan: input.flowPlan } : {}) } : undefined;
     const graph = renderWorkflowGraph(graphInput, state.task, observedNow);
     if (graph !== lastGraph || owner !== lastGraphOwner) {
       const focused = document.activeElement instanceof HTMLElement && root.contains(document.activeElement) ? document.activeElement : undefined;
-      const focusedNode = focused?.dataset.nodeSettings, focusedTask = focused?.dataset.task, focusedPhase = focused?.dataset.phase, focusedScope = focused?.dataset.processScope;
+      const focusedNode = focused?.dataset.nodeSettings, focusedTask = focused?.dataset.task, focusedPhase = focused?.dataset.phase, focusedScope = focused?.dataset.processScope, focusedFlow = focused?.dataset.flowInspect;
       const graphDetails = owner === lastGraphOwner ? new Map(Array.from(root.querySelectorAll<HTMLDetailsElement>("details[data-graph-detail]")).map(value => [value.dataset.graphDetail, value.open])) : new Map<string | undefined, boolean>();
       const scroller = root.querySelector<HTMLElement>(".wf-graph-scroll");
       const position = { left: owner === lastGraphOwner ? scroller?.scrollLeft ?? 0 : 0, top: scroller?.scrollTop ?? 0 };
@@ -1538,7 +1563,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       root.querySelectorAll<HTMLDetailsElement>("details[data-graph-detail]").forEach(value => { value.open = graphDetails.get(value.dataset.graphDetail) ?? false; });
       const next = root.querySelector<HTMLElement>(".wf-graph-scroll");
       if (next) { next.scrollLeft = position.left; next.scrollTop = position.top; }
-      if (focusedNode || focusedTask || focusedPhase || focusedScope) Array.from(root.querySelectorAll<HTMLElement>("button[data-node-settings],button[data-task],button[data-phase],button[data-process-scope]")).find(value => focusedNode && value.dataset.nodeSettings === focusedNode || focusedTask && value.dataset.task === focusedTask || focusedPhase && value.dataset.phase === focusedPhase || focusedScope && value.dataset.processScope === focusedScope)?.focus({ preventScroll: true });
+      if (focusedNode || focusedTask || focusedPhase || focusedScope || focusedFlow) Array.from(root.querySelectorAll<HTMLElement>("button[data-node-settings],button[data-task],button[data-phase],button[data-process-scope],button[data-flow-inspect]")).find(value => focusedNode && value.dataset.nodeSettings === focusedNode || focusedTask && value.dataset.task === focusedTask || focusedPhase && value.dataset.phase === focusedPhase || focusedScope && value.dataset.processScope === focusedScope || focusedFlow && value.dataset.flowInspect === focusedFlow)?.focus({ preventScroll: true });
     }
     element("#wf-graph-viewport").style.setProperty("--wf-graph-zoom", String(zoom));
     element("#wf-zoom-value").textContent = `${Math.round(zoom * 100)}%`;
@@ -1577,6 +1602,13 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     processSettings.hidden = !selectedProcessTask || Object.hasOwn(selectedProcessTask.options, "operation") || !selectedProcessTask.configurationTarget;
     processSettings.disabled = !controller.canAct || live || !!run?.deletionPending;
     if (selectedProcessTask) processSettings.dataset.nodeSettings = `task:${selectedProcessTask.index}`;
+    if (processDialog.open && processFlowId && graphInput) {
+      const observation = renderFlowObservation(graphInput, processFlowId);
+      element("#wf-process-title").textContent = observation?.label ?? "计划节点";
+      element("#wf-process-body").innerHTML = observation?.html ?? '<p class="wf-muted">此节点已不在当前计划中。</p>';
+      element("#wf-attempt-picker").hidden = true;
+    }
+    element<HTMLButtonElement>("#wf-process-developer-tab").disabled = !!processFlowId;
     const nextProcess = JSON.stringify([run?.revision, run?.progressSequence, processTarget]);
     if (processDialog.open && nextProcess !== processSignature) { processSignature = nextProcess; fetchProcess(); if (developerRequested && developerLogs.open) fetchProcess(true); }
     if (recoveryDialog.open) {
@@ -1595,7 +1627,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       if (dialog === parameterDialog && !parametersSaved && parameterSnapshot !== undefined) { argsValue = parameterSnapshot; workspaceModeValue = workspaceModeSnapshot; approvalModeValue = approvalSnapshotSource === approvalSourceMode ? approvalModeSnapshot : approvalSourceMode; parametersSignature = ""; render(); }
       if (dialog === nodeDialog) { nodeDirty = false; nodeSignature = ""; }
       if (dialog === settingsDialog) { settingsSignature = ""; render(); }
-      if (dialog === processDialog) { processTarget = undefined; processReader.close(); developerLogs.open = false; developerRequested = false; element("#wf-process-developer").textContent = ""; }
+      if (dialog === processDialog) { processTarget = undefined; processFlowId = undefined; processReader.close(); developerLogs.open = false; developerRequested = false; element("#wf-process-developer").textContent = ""; root.dataset.processOpen = "false"; }
       if (dialog === recoveryDialog) { recoveryTaskId = undefined; controller.cancelRecovery(); }
       if (dialog === deleteDialog) { deletionRequest++; deletionPreview = undefined; deletionLoading = false; }
       restoreFocus(dialog);
@@ -1608,6 +1640,12 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   }
   element("#wf-more-toggle").addEventListener("click", () => { menu.hidden = !menu.hidden; element("#wf-more-toggle").setAttribute("aria-expanded", String(!menu.hidden)); if (!menu.hidden) menu.querySelector<HTMLElement>("button:not(:disabled)")?.focus(); });
   root.addEventListener("keydown", event => {
+    if (event.key === "Escape" && menu.hidden && processDialog.open && !Array.from(root.querySelectorAll<HTMLDialogElement>("dialog[open]")).some(dialog => dialog !== processDialog)) { event.preventDefault(); processDialog.close(); return; }
+    if (event.target instanceof HTMLElement && event.target.matches("[data-process-view]") && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+      const buttons = Array.from(processDialog.querySelectorAll<HTMLButtonElement>("[data-process-view]:not(:disabled)"));
+      const index = buttons.indexOf(event.target as HTMLButtonElement), next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+      event.preventDefault(); const target = buttons[next]; if (target) { processView(target.dataset.processView as "brief" | "developer"); target.focus(); } return;
+    }
     if (menu.hidden) return;
     if (event.key === "Escape") { event.preventDefault(); closeMenu(); element("#wf-more-toggle").focus(); return; }
     if (event.key === "Tab") { closeMenu(); return; }
@@ -1727,6 +1765,14 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (target?.closest("[data-load-runs]")) { void controller.loadMoreRuns(); return; }
     const close = target?.closest<HTMLElement>("[data-close-dialog]");
     if (close) { close.closest<HTMLDialogElement>("dialog")?.close(); return; }
+    const processTab = target?.closest<HTMLButtonElement>("[data-process-view]");
+    if (processTab && !processTab.disabled) { processView(processTab.dataset.processView as "brief" | "developer"); return; }
+    const flowNode = target?.closest<HTMLButtonElement>("[data-flow-inspect]");
+    if (flowNode) {
+      processFlowId = flowNode.dataset.flowInspect; processTarget = undefined; processReader.close(); developerRequested = false;
+      element("#wf-process-title").textContent = "计划节点"; element("#wf-process-body").textContent = "正在读取路径记录…";
+      openDialog(processDialog, flowNode); render(); return;
+    }
     const settingsButton = target?.closest<HTMLButtonElement>("[data-node-settings]");
     if (settingsButton && !settingsButton.disabled) {
       const processReturn = settingsButton.id === "wf-process-node-settings" ? returns.get(processDialog) : undefined;
@@ -1739,13 +1785,14 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const zoomButton = target?.closest<HTMLButtonElement>("[data-zoom]");
     if (zoomButton && !zoomButton.disabled) {
       const direction = zoomButton.dataset.zoom;
-      if (direction === "fit") { const track = root.querySelector<HTMLElement>(".wf-graph-track"), scroll = root.querySelector<HTMLElement>(".wf-graph-scroll"); zoom = track && scroll ? Math.max(.5, Math.min(1, (scroll.clientWidth - 48) / (track.scrollWidth * zoom))) : 1; }
+      if (direction === "fit") { const track = root.querySelector<HTMLElement>(".wf-graph-track"), scroll = root.querySelector<HTMLElement>(".wf-graph-scroll"); zoom = track && scroll ? Math.max(.5, Math.min(1, (scroll.clientWidth - 48) / track.offsetWidth, track.classList.contains("wf-flow-track") ? (scroll.clientHeight - 56) / track.offsetHeight : 1)) : 1; }
       else zoom = direction === "reset" ? 1 : Math.max(.5, Math.min(1.75, Math.round((zoom + (direction === "in" ? .25 : -.25)) * 100) / 100));
       render(); return;
     }
     if (target?.closest("summary")?.parentElement?.matches("details[data-graph-detail]")) return;
     const taskButton = target?.closest<HTMLElement>("[data-task],[data-phase],[data-phase-container],[data-process-scope]");
     if (taskButton && controller.selected) {
+      processFlowId = undefined;
       const failure = resultCheckFailure(controller.selected);
       if (!taskButton.dataset.task && failure && (failure.phase && (taskButton.dataset.phase ?? taskButton.dataset.phaseContainer) === failure.phase || taskButton.dataset.processScope)) { openFailureProcess(taskButton); return; }
       controller.state.task = taskButton.dataset.task; processTarget = { id: controller.selected.id, ...(taskButton.dataset.task ? { taskId: taskButton.dataset.task } : taskButton.dataset.processScope ? { scope: taskButton.dataset.processScope as "workflow" | "unphased" } : { phase: taskButton.dataset.phase ?? taskButton.dataset.phaseContainer! }) }; processReader.open(processTarget); processSignature = ""; developerRequested = false; developerLogs.open = false; element("#wf-process-title").textContent = "节点过程"; element("#wf-process-body").textContent = "正在读取简要过程…"; openDialog(processDialog, taskButton); render(); return;

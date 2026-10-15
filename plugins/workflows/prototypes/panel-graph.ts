@@ -1,4 +1,4 @@
-import type { WorkflowAttempt, WorkflowRun, WorkflowTask } from "./panel.ts";
+import type { FlowBlock, FlowEvent, FlowPlan, WorkflowAttempt, WorkflowRun, WorkflowTask } from "./panel.ts";
 import { failureContext, resultCheckFailure } from "../src/failure-context.ts";
 import type { WorkflowFailureContext } from "../src/failure-context.ts";
 
@@ -20,6 +20,10 @@ export type WorkflowGraphInput = Pick<WorkflowRun, "meta" | "execution" | "logs"
   failureContext?: WorkflowFailureContext;
   preparation?: NonNullable<WorkflowRun["preparation"]>;
   startedAt?: string;
+  flowPlan?: FlowPlan;
+  flowEvents?: FlowEvent[];
+  flowTraceTruncated?: boolean;
+  flowExecutionId?: string;
 };
 export type GraphStatus = WorkflowTask["status"] | "planned" | "skipped" | "stopped" | "unknown";
 export interface WorkflowGraphGroup {
@@ -187,6 +191,7 @@ function renderTask(task: GraphTask, run: WorkflowGraphInput, selectedTaskId?: s
   return `<div class="wf-graph-node-shell"><button type="button" class="wf-graph-node${selectedTaskId === task.id ? " is-selected" : ""}${task.cached ? " is-cached" : ""}" data-task="${escape(task.id)}" data-status="${state}" data-compact="${compact}" aria-pressed="${selectedTaskId === task.id}" aria-label="${escape(`${title}，${statusLabels[state]}，${detail}`)}">${compact && state === "running" ? "" : icon(state, " wf-graph-node-icon")}<span class="wf-graph-node-content"><span class="wf-graph-node-title">${escape(label)}</span>${compact ? "" : `<span class="wf-graph-node-status">${escape(statusLabels[state])}${latest?.startedAt ? ` · ${elapsedLabel(latest.startedAt, latest.endedAt, now)}` : ""}</span>`}${fixedCommand ? "" : `<span class="wf-graph-node-model">${escape(taskConfiguration(task, run))}</span>`}</span></button>${allowSettings && !fixedCommand ? settingsButton(`task:${task.index}`, title, run) : ""}</div>`;
 }
 export function renderWorkflowGraph(run?: WorkflowGraphInput, selectedTaskId?: string, now = Date.now()): string {
+  if (run?.flowPlan?.version === 1 && run.flowPlan.blocks.length) return renderControlFlowGraph(run, selectedTaskId, now);
   const graph = buildWorkflowGraph(run);
   if (!run) return '<div class="wf-graph wf-graph-empty"><p class="wf-graph-placeholder">选择工作流并保存预览后，执行图将在这里显示。</p></div>';
   const connector = '<div class="wf-graph-connector" aria-label="阶段展示顺序"><span class="wf-icon" data-icon="chevron-right" aria-hidden="true"></span></div>';
@@ -205,4 +210,195 @@ export function renderWorkflowGraph(run?: WorkflowGraphInput, selectedTaskId?: s
     return `<section class="wf-graph-phase" data-status="${phase.status}" data-kind="${phase.kind}" ${containerIdentity}><header class="wf-graph-phase-heading">${icon(phase.status)}<span class="wf-graph-phase-title">${escape(phase.title)}</span><button type="button" class="wf-node-process-icon" ${phase.kind === "workflow" ? 'id="wf-whole-workflow-process"' : identity.includes("unphased") ? 'id="wf-unphased-process"' : ""} ${identity} aria-label="${escape(`查看 ${phase.title} 的过程与错误`)}"><span class="wf-icon" data-icon="file-text" aria-hidden="true"></span></button>${nodeSettings}</header><div class="wf-graph-phase-state" data-tone="${phase.status === "running" ? "blue" : phase.status === "failed" ? "red" : phase.status === "completed" ? "green" : "neutral"}">${run.stale ? "上次记录 · " : ""}${escape(label)}${latest?.startedAt ? ` · ${elapsedLabel(latest.startedAt, latest.endedAt, now)}` : ""}</div>${phase.reviewFailed ? `<p class="wf-muted">${escape(phase.placeholder)}</p>` : ""}${primary ? renderTask(primary, run, selectedTaskId, now, true, false) : phase.kind === "workflow" && phase.status === "planned" ? '<p class="wf-graph-node-model">启动后展示动态任务</p>' : ""}${completedActivity ? `<p class="wf-graph-completed-activity"><span class="wf-icon" data-icon="circle-check" aria-hidden="true"></span>${escape(completedActivity.label)}</p>` : ""}${taskList}${["running", "failed", "stopping", "interrupted"].includes(phase.status) ? `<button type="button" class="wf-node-view-process" ${identity}>${phase.status === "failed" ? "查看错误" : "查看过程"}<span class="wf-icon" data-icon="chevron-right" aria-hidden="true"></span></button>` : ""}${phase.reviewFailed ? "" : `<span class="wf-graph-node-model">${escape(settings)}</span>`}</section>`;
   }).join(connector);
   return `<div class="wf-graph" role="region" aria-label="${escape(`${graph.name} 工作流执行图`)}"><div class="wf-graph-scroll"><div class="wf-graph-track">${phases}</div></div><p class="wf-graph-caption">连线表示阶段展示顺序，动态分支与循环以实际派发节点为准。${run.stale ? "连接恢复后核对实际进度。" : ""}</p></div>`;
+}
+
+type Point = [number, number];
+type RouteState = "active" | "inactive" | "planned";
+interface FlowSize { width: number; height: number }
+export interface ControlFlowNode extends FlowSize {
+  block: FlowBlock; x: number; y: number; status: GraphStatus; tasks: GraphTask[];
+  excluded: boolean; condition?: boolean; iterations: number[];
+  loopId?: string;
+}
+export interface ControlFlowEdge { points: Point[]; state: RouteState; label?: string; back?: boolean }
+export interface ControlFlowGraph extends FlowSize {
+  nodes: ControlFlowNode[]; edges: ControlFlowEdge[]; joins: Point[];
+  groups: Array<ControlFlowNode & { parallel: boolean }>;
+  unmappedTasks: GraphTask[]; historicalTasks: GraphTask[]; warnings: string[]; traceAvailable: boolean;
+}
+
+const flowGap = 28;
+const flowCard: FlowSize = { width: 286, height: 70 };
+
+// Layout follows the declared syntax tree. Execution colors are driven only by
+// recorded decisions and source-linked tasks; visual adjacency is not evidence.
+export function buildControlFlowGraph(run: WorkflowGraphInput): ControlFlowGraph {
+  const plan = run.flowPlan;
+  const nodes: ControlFlowNode[] = [], groups: ControlFlowGraph["groups"] = [], edges: ControlFlowEdge[] = [], joins: Point[] = [];
+  const warnings = [...(plan?.warnings ?? [])];
+  const events = (run.flowEvents ?? []).filter(event => event && typeof event.nodeId === "string" && Number.isSafeInteger(event.sequence)).sort((a, b) => a.sequence - b.sequence);
+  const observed = new Map<string, FlowEvent[]>();
+  for (const event of events) observed.set(event.nodeId, [...observed.get(event.nodeId) ?? [], event]);
+  const currentTasks = run.tasks.filter(task => run.flowExecutionId ? task.flowExecutionId === run.flowExecutionId : events.length > 0);
+  const historicalTasks = run.tasks.filter(task => !currentTasks.includes(task));
+  const linked = new Map<string, GraphTask[]>();
+  for (const task of currentTasks) if (task.flowNodeId) linked.set(task.flowNodeId, [...linked.get(task.flowNodeId) ?? [], task]);
+  const used = new Set<string>(), ids = new Set<string>();
+  let visited = 0;
+  const safeBlocks = (blocks: FlowBlock[] | undefined, depth = 0): FlowBlock[] => {
+    if (!Array.isArray(blocks) || depth > 16) { if (depth > 16) warnings.push("嵌套层级过深，其余实际任务列在图下方。"); return []; }
+    return blocks.flatMap(block => {
+      if (!block || typeof block.id !== "string" || !block.id || ids.has(block.id) || !["task", "condition", "loop", "parallel", "opaque"].includes(block.kind) || ++visited > 200) return [];
+      ids.add(block.id);
+      const { terminal, ...rest } = block;
+      return [{ ...rest, ...(terminal && ["return", "throw", "break", "continue"].includes(terminal) ? { terminal } : {}), label: typeof block.label === "string" ? block.label.slice(0, 160) : "未命名节点", yes: safeBlocks(block.yes, depth + 1), no: safeBlocks(block.no, depth + 1), body: safeBlocks(block.body, depth + 1) }];
+    });
+  };
+  const blocks = safeBlocks(plan?.blocks);
+  const sizes = new Map<FlowBlock, FlowSize>();
+  const horizontalLoop = (block: FlowBlock): boolean => !!block.body && block.body.length > 1 && block.body.length <= 3 && block.body.every(child => ["task", "condition", "opaque"].includes(child.kind));
+  const sequenceSize = (items: FlowBlock[]): FlowSize => {
+    const measured = items.map(size);
+    return { width: Math.max(flowCard.width, ...measured.map(value => value.width)), height: measured.length ? measured.reduce((sum, value) => sum + value.height, 0) + (measured.length - 1) * flowGap : 48 };
+  };
+  const size = (block: FlowBlock): FlowSize => {
+    const cached = sizes.get(block); if (cached) return cached;
+    let result = { ...flowCard };
+    if (block.kind === "condition") {
+      const yes = sequenceSize(block.yes ?? []), no = sequenceSize(block.no ?? []);
+      result = { width: yes.width + no.width + 64, height: 110 + Math.max(yes.height, no.height) + 38 };
+    } else if (block.kind === "loop") {
+      const children = (block.body ?? []).map(size), body = sequenceSize(block.body ?? []);
+      result = horizontalLoop(block) ? { width: children.reduce((sum, child) => sum + child.width, 0) + Math.max(0, children.length - 1) * flowGap + 112, height: Math.max(...children.map(child => child.height)) + 120 } : { width: Math.max(410, body.width + 112), height: body.height + 120 };
+    } else if (block.kind === "parallel") {
+      const lanes = (block.body ?? []).map(size);
+      result = { width: Math.max(410, lanes.reduce((sum, lane) => sum + lane.width, 0) + Math.max(0, lanes.length - 1) * 40 + 56), height: Math.max(48, ...lanes.map(lane => lane.height)) + 116 };
+    }
+    sizes.set(block, result); return result;
+  };
+  const tasksIn = (block: FlowBlock): GraphTask[] => [...linked.get(block.id) ?? [], ...[...block.yes ?? [], ...block.no ?? [], ...block.body ?? []].flatMap(tasksIn)];
+  const continues = (items: FlowBlock[]): boolean => items.every(block => !block.terminal && (block.kind !== "condition" || continues(block.yes ?? []) || continues(block.no ?? [])));
+  const loopStack: Array<{ id: string; entry: Point; exit: Point; left: number; right: number }> = [];
+  const route = (points: Point[], state: RouteState, label?: string, back?: boolean): void => { edges.push({ points, state, ...(label ? { label } : {}), ...(back ? { back } : {}) }); };
+  const node = (block: FlowBlock, x: number, y: number, dimensions: FlowSize, excluded: boolean): ControlFlowNode => {
+    const tasks = [...linked.get(block.id) ?? []].sort((a, b) => a.index - b.index);
+    tasks.forEach(task => used.add(task.id));
+    const decisions = observed.get(block.id) ?? [];
+    const condition = run.flowTraceTruncated ? undefined : [...decisions].reverse().find(event => event.kind === "condition" && typeof event.value === "boolean")?.value;
+    const iterations = [...new Set(decisions.filter(event => event.kind === "iteration" && Number.isSafeInteger(event.iteration) && event.iteration! > 0).map(event => event.iteration!))];
+    const latest = tasks.at(-1);
+    return { block, x, y, ...dimensions, tasks, excluded, ...(condition !== undefined ? { condition } : {}), ...(loopStack.at(-1) ? { loopId: loopStack.at(-1)!.id } : {}), iterations, status: excluded ? "skipped" : latest ? taskStatus(latest) : condition !== undefined ? "completed" : "planned" };
+  };
+  const sequence = (items: FlowBlock[], x: number, y: number, width: number, excluded: boolean): { start: Point; end: Point } => {
+    let top = y, last: Point | undefined, first: Point | undefined;
+    for (const block of items) {
+      const dimensions = size(block), position = place(block, x + (width - dimensions.width) / 2, top, excluded);
+      if (!first) first = position.start;
+      if (last) route([last, [last[0], (last[1] + position.start[1]) / 2], [position.start[0], (last[1] + position.start[1]) / 2], position.start], excluded ? "inactive" : tasksIn(block).length || observed.has(block.id) ? "active" : "planned");
+      last = continues([block]) ? position.end : undefined; top += dimensions.height + flowGap;
+    }
+    return { start: first ?? [x + width / 2, y], end: last ?? [x + width / 2, y + 48] };
+  };
+  const place = (block: FlowBlock, x: number, y: number, excluded: boolean): { start: Point; end: Point } => {
+    const dimensions = size(block), center = x + dimensions.width / 2;
+    if (block.kind === "condition") {
+      const card = node(block, center - 112, y, { width: 224, height: 88 }, excluded); nodes.push(card);
+      const yesSize = sequenceSize(block.yes ?? []), noSize = sequenceSize(block.no ?? []), branchY = y + 110;
+      const yesX = x, noX = x + yesSize.width + 64;
+      const yesExcluded = excluded || card.condition === false, noExcluded = excluded || card.condition === true;
+      const yes = sequence(block.yes ?? [], yesX, branchY, yesSize.width, yesExcluded), no = sequence(block.no ?? [], noX, branchY, noSize.width, noExcluded);
+      const yesState: RouteState = yesExcluded ? "inactive" : card.condition === true ? "active" : "planned";
+      const noState: RouteState = noExcluded ? "inactive" : card.condition === false ? "active" : "planned";
+      route([[center - 112, y + 44], [yes.start[0], y + 44], yes.start], yesState, "是");
+      route([[center + 112, y + 44], [no.start[0], y + 44], no.start], noState, "否");
+      const merge: Point = [center, y + dimensions.height - 12];
+      if (continues(block.yes ?? []) || continues(block.no ?? [])) joins.push(merge);
+      for (const [branch, state, items] of [[yes, yesState, block.yes ?? []], [no, noState, block.no ?? []]] as const) if (continues([...items])) route([branch.end, [branch.end[0], merge[1]], merge], state);
+      if (continues(block.yes ?? []) || continues(block.no ?? [])) route([merge, [center, y + dimensions.height]], excluded ? "inactive" : card.condition === undefined ? "planned" : "active");
+      return { start: [center, y], end: [center, y + dimensions.height] };
+    }
+    if (block.kind === "loop" || block.kind === "parallel") {
+      const group = node(block, x, y, dimensions, excluded); groups.push({ ...group, parallel: block.kind === "parallel" });
+      const children = tasksIn(block);
+      const completedControlLoop = block.kind === "loop" && !run.flowTraceTruncated && group.iterations.length > 0;
+      group.status = excluded ? "skipped" : children.some(isLive) ? "running" : children.some(task => task.status === "failed") ? "failed" : run.execution === "completed" && (children.length || completedControlLoop) ? "completed" : !run.flowTraceTruncated && group.iterations.length && ["running", "preparing"].includes(run.execution) ? "running" : "planned";
+      // The displayed group and its underlying observation share the same status.
+      groups.at(-1)!.status = group.status;
+      if (block.kind === "loop") {
+        const horizontal = horizontalLoop(block), first = block.body?.[0];
+        const entry: Point = horizontal && first ? [x + 56, y + 92 + size(first).height / 2] : [center, y + 92];
+        loopStack.push({ id: block.id, entry, exit: [center, y + dimensions.height], left: x + 22, right: x + dimensions.width - 22 });
+        let body: { start: Point; end: Point };
+        if (horizontal) {
+          let left = x + 56, previous: { right: Point; continues: boolean } | undefined, end: Point = entry;
+          for (const child of block.body ?? []) {
+            const childSize = size(child), position = place(child, left, y + 92, excluded);
+            const inlet: Point = child.kind === "condition" ? position.start : [left, y + 92 + childSize.height / 2];
+            if (previous?.continues) route(child.kind === "condition" ? [previous.right, [previous.right[0] + 12, previous.right[1]], [previous.right[0] + 12, y + 80], [inlet[0], y + 80], inlet] : [previous.right, [inlet[0], previous.right[1]], inlet], excluded ? "inactive" : tasksIn(child).length || observed.has(child.id) ? "active" : "planned");
+            previous = { right: child.kind === "condition" ? position.end : [left + childSize.width, y + 92 + childSize.height / 2], continues: continues([child]) };
+            end = position.end; left += childSize.width + flowGap;
+          }
+          body = { start: entry, end };
+        } else body = sequence(block.body ?? [], x + 56, y + 92, dimensions.width - 112, excluded);
+        const firstInlet: Point = horizontal && first ? [x + 56 + size(first).width / 2, y + 92] : body.start;
+        route([[center, y], [center, y + 72], [firstInlet[0], y + 72], firstInlet], excluded ? "inactive" : !run.flowTraceTruncated && group.iterations.length ? "active" : "planned");
+        loopStack.pop();
+        const backX = x + 22, bottom = y + dimensions.height - 24;
+        if (continues(block.body ?? [])) route([body.end, [body.end[0], bottom], [backX, bottom], [backX, body.start[1]], body.start], excluded ? "inactive" : !run.flowTraceTruncated && group.iterations.length > 1 ? "active" : "planned", "下一轮", true);
+      } else {
+        const lanes = block.body ?? [], widths = lanes.map(child => size(child).width); let left = x + 28;
+        const fork: Point = [center, y + 58], merge: Point = [center, y + dimensions.height - 18]; joins.push(fork, merge);
+        for (const [index, child] of lanes.entries()) {
+          const lane = place(child, left, y + 80, excluded);
+          const state: RouteState = excluded ? "inactive" : tasksIn(child).length ? "active" : "planned";
+          route([fork, [lane.start[0], fork[1]], lane.start], state);
+          if (continues([child])) route([lane.end, [lane.end[0], merge[1]], merge], state); left += widths[index]! + 40;
+        }
+      }
+      return { start: [center, y], end: [center, y + dimensions.height] };
+    }
+    const current = node(block, x, y, dimensions, excluded); nodes.push(current);
+    const loop = loopStack.at(-1);
+    if (loop && !block.terminalLabel && block.terminal === "break") route([[center, y + dimensions.height], [loop.right, y + dimensions.height + 12], [loop.right, loop.exit[1] - 12], loop.exit], excluded ? "inactive" : "planned", "退出循环");
+    if (loop && !block.terminalLabel && block.terminal === "continue") route([[center, y + dimensions.height], [loop.left, y + dimensions.height + 12], [loop.left, loop.entry[1] - 12], loop.entry], excluded ? "inactive" : "planned", "继续下一轮", true);
+    return { start: [center, y], end: [center, y + dimensions.height] };
+  };
+  const dimensions = sequenceSize(blocks);
+  sequence(blocks, 28, 28, dimensions.width, false);
+  if (plan?.truncated || visited > 200) warnings.push("控制流计划仅显示可解析的部分，实际任务仍完整列出。");
+  if (run.flowTraceTruncated) warnings.push("本次路径记录已截断，缺失判断保持计划状态。");
+  return { width: dimensions.width + 56, height: dimensions.height + 56, nodes, edges, joins, groups, warnings: [...new Set(warnings)], unmappedTasks: currentTasks.filter(task => !used.has(task.id)), historicalTasks, traceAvailable: events.length > 0 };
+}
+
+function renderControlFlowGraph(run: WorkflowGraphInput, selectedTaskId?: string, now = Date.now()): string {
+  const graph = buildControlFlowGraph(run);
+  const point = ([x, y]: Point): string => `${x},${y}`;
+  const path = (points: Point[]): string => points.map(([x, y], index) => `${index ? "L" : "M"}${x} ${y}`).join(" ");
+  const wires = graph.edges.map(edge => `<g class="wf-flow-route" data-route="${edge.state}"${edge.back ? ' data-loop-back="true"' : ""}><path d="${path(edge.points)}" marker-end="url(#wf-flow-arrow-${edge.state})"/>${edge.label ? `<text x="${edge.points[1]![0]}" y="${edge.points[1]![1] - 9}" text-anchor="middle">${escape(edge.label)}</text>` : ""}</g>`).join("");
+  const diamonds = graph.nodes.filter(node => node.block.kind === "condition").map(node => `<polygon class="wf-flow-diamond" data-status="${node.status}" points="${[[node.x, node.y + node.height / 2], [node.x + node.width / 2, node.y], [node.x + node.width, node.y + node.height / 2], [node.x + node.width / 2, node.y + node.height]].map(value => point(value as Point)).join(" ")}"/>`).join("");
+  const groupCards = graph.groups.map(group => {
+    const maximum = Number.isSafeInteger(group.block.maxIterations) && group.block.maxIterations! > 0 ? group.block.maxIterations : undefined;
+    const iteration = group.iterations.at(-1);
+    return `<section class="wf-flow-group" data-flow-group="${escape(group.block.id)}" data-status="${group.status}" style="left:${group.x}px;top:${group.y}px;width:${group.width}px;height:${group.height}px"><header><strong>${escape(group.block.label)}</strong><span class="wf-flow-group-badge">${group.parallel ? "并行" : iteration ? run.flowTraceTruncated ? `已记录至第 ${iteration} 轮 · 后续未记录` : `第 ${iteration}${maximum ? ` / ${maximum}` : ""} 轮` : "循环 · 尚未观测"}</span><span class="wf-muted">${group.parallel ? "各路独立执行后汇合" : maximum ? `最多 ${maximum} 轮` : "按脚本条件结束"}</span>${group.iterations.length > 1 ? `<span class="wf-flow-rounds" aria-label="已观测循环轮次">${group.iterations.slice(-8).map(value => `<span${value === iteration && !run.flowTraceTruncated ? ' aria-current="step"' : ""}>第 ${value} 轮</span>`).join("")}</span>` : ""}<button type="button" class="wf-node-process-icon" data-flow-inspect="${escape(group.block.id)}" aria-label="${escape(`查看 ${group.block.label} 的路径记录`)}"><span class="wf-icon" data-icon="file-text" aria-hidden="true"></span></button></header></section>`;
+  }).join("");
+  const cards = graph.nodes.map(node => {
+    const task = node.tasks.at(-1), latest = task?.attempts.at(-1), condition = node.block.kind === "condition";
+    const status = node.excluded ? node.tasks.length ? "最近判断未进入 · 保留历史调用" : "最近判断未进入" : condition ? node.condition === undefined ? "等待实际判断" : `最近判断：${node.condition ? "是" : "否"}` : task ? `${node.loopId || node.tasks.length > 1 ? "最近调用 · " : ""}${task.cached ? "已复用结果" : statusLabels[taskStatus(task)]}` : node.block.terminalLabel ? `${node.block.terminal === "continue" ? "继续" : "退出"}至标签 ${node.block.terminalLabel} · 跳转范围待确认` : node.block.terminal ? "控制流指令 · 不代表执行成功" : node.block.kind === "opaque" ? "动态区域 · 查看下方实际任务" : "计划节点 · 尚未派发";
+    const process = task ? `data-task="${escape(task.id)}"` : `data-flow-inspect="${escape(node.block.id)}"`;
+    const activity = !node.excluded && task && isLive(task) && task.currentActivity?.status === "running" ? task.currentActivity.label : undefined;
+    return `<article class="wf-flow-node${condition ? " wf-flow-condition" : ""}${task && task.id === selectedTaskId ? " is-selected" : ""}" data-flow-node="${escape(node.block.id)}" data-status="${node.status}"${node.block.terminal ? ` data-flow-terminal="${node.block.terminal}"` : ""} style="left:${node.x}px;top:${node.y}px;width:${node.width}px;height:${node.height}px"><button type="button" class="wf-flow-node-main" ${process} aria-label="${escape(`查看 ${node.block.label} 的过程`)}">${condition ? "" : icon(node.status)}<span class="wf-flow-node-copy"><strong>${escape(node.block.label)}</strong><small>${run.stale ? "上次记录 · " : ""}${escape(activity || status)}</small></span>${latest?.startedAt ? `<time>${elapsedLabel(latest.startedAt, latest.endedAt, now)}</time>` : ""}<span class="wf-icon wf-flow-process-mark" data-icon="file-text" aria-hidden="true"></span></button>${task && !Object.hasOwn(task.options, "operation") && !condition ? settingsButton(`task:${task.index}`, node.block.label, run) : ""}${node.tasks.length > 1 ? `<details class="wf-flow-invocations" data-graph-detail="flow:${escape(node.block.id)}"><summary>${node.tasks.length} 次实际调用</summary><div>${node.tasks.filter(value => value.id !== task?.id).map(value => renderTask(value, run, selectedTaskId, now)).join("")}</div></details>` : ""}</article>`;
+  }).join("");
+  const fallback = (graph.unmappedTasks.length ? `<section class="wf-flow-fallback"><h3>其他实际任务 <span>${graph.unmappedTasks.length}</span></h3><p class="wf-muted">这些调用来自动态区域或尚未关联结构节点，按真实执行记录展示。</p>${graph.unmappedTasks.map(task => renderTask(task, run, selectedTaskId, now)).join("")}</section>` : "") + (graph.historicalTasks.length ? `<details class="wf-flow-fallback" data-graph-detail="flow:historical"><summary>历史任务 · ${graph.historicalTasks.length} 项，不代表本轮进度</summary>${graph.historicalTasks.map(task => renderTask(task, run, selectedTaskId, now)).join("")}</details>` : "");
+  const context = failureContext(run), resultFailure = resultCheckFailure(run);
+  const failure = context?.kind === "review" || resultFailure ? `<button type="button" class="wf-flow-result-error" data-process-scope="workflow"><span class="wf-icon" data-icon="alert-circle" aria-hidden="true"></span>${context?.kind === "review" ? "改动审查失败 · 查看原因" : "结果检查失败 · 查看原因"}</button>` : "";
+  return `<div class="wf-graph wf-control-flow" role="region" aria-label="${escape(`${run.meta.name} 控制流执行图`)}"><div class="wf-graph-scroll"><div class="wf-graph-track wf-flow-track" style="width:${graph.width}px;height:${graph.height}px">${groupCards}<svg class="wf-flow-wires" viewBox="0 0 ${graph.width} ${graph.height}" width="${graph.width}" height="${graph.height}" aria-hidden="true"><defs>${["active", "inactive", "planned"].map(state => `<marker id="wf-flow-arrow-${state}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z"/></marker>`).join("")}</defs>${wires}${diamonds}${graph.joins.map(([x, y]) => `<circle class="wf-flow-join" cx="${x}" cy="${y}" r="4"/>`).join("")}</svg>${cards}</div>${fallback}${failure}${graph.warnings.length ? `<div class="wf-flow-warnings" role="note">${graph.warnings.map(warning => `<p>${escape(warning)}</p>`).join("")}</div>` : ""}</div><div class="wf-flow-legend" aria-label="节点状态图例"><span data-status="completed">${icon("completed")}已完成</span><span data-status="running">${icon("running")}运行中</span><span data-status="failed">${icon("failed")}失败</span><span data-status="planned">${icon("planned")}待执行 / 未进入</span></div><p class="wf-graph-caption">${graph.traceAvailable ? "高亮路径来自实际判断，虚线保留未进入或尚未执行的路径。" : "当前仅展示计划结构；实际条件与循环轮次将在执行时出现。"}${run.stale ? "连接恢复后核对实际进度。" : ""}</p></div>`;
+}
+
+export function renderFlowObservation(run: WorkflowGraphInput, nodeId: string): { label: string; html: string } | undefined {
+  const graph = buildControlFlowGraph(run);
+  const node = [...graph.nodes, ...graph.groups].find(value => value.block.id === nodeId);
+  if (!node) return undefined;
+  const events = (run.flowEvents ?? []).filter(event => event.nodeId === nodeId && (event.kind === "condition" && typeof event.value === "boolean" || event.kind === "iteration" && Number.isSafeInteger(event.iteration) && event.iteration! > 0)).slice(-40);
+  const entries = events.map(event => `<li data-status="completed">${icon("completed")}<span>${event.kind === "condition" ? `条件判断：${event.value ? "是" : "否"}` : `进入第 ${event.iteration} 轮`}</span><time>${escape(new Date(event.at).toLocaleTimeString("zh-CN", { hour12: false }))}</time></li>`).join("");
+  return { label: node.block.label, html: `<div class="wf-facts"><span>${node.block.kind === "condition" ? "条件节点" : node.block.kind === "loop" ? "循环节点" : node.block.kind === "parallel" ? "并行区域" : "计划节点"}</span><span>${events.length ? "实际执行记录" : "尚无本轮执行记录"}</span></div><p class="wf-process-summary">${events.length ? "下方仅列出本轮实际观测到的路径；未观测分支保留计划状态。" : "这是计划中的结构节点，尚不能确认是否进入。"}</p><ol class="wf-timeline">${entries || '<li><span class="wf-icon" data-icon="circle" aria-hidden="true"></span><span>等待实际执行</span></li>'}</ol>${run.flowTraceTruncated ? '<p class="wf-notice">本轮路径记录已截断，当前只展示已保留的事件。</p>' : ""}` };
 }

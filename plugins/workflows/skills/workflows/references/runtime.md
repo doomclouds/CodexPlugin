@@ -166,6 +166,8 @@ const maintenance = {
 
 ## 停止、恢复与应用
 
+运行详情的 `flowPlan` 是有界源码结构，`flowEvents` 是本轮实际条件与循环观测；`flowExecutionId` 与任务的同名字段区分本轮调用和历史。`flowNodeId` 关联静态调用位置，相同位置的多次循环调用仍有各自 task/attempt。`flowTraceTruncated` 后不能将最后一条已记录事件当成当前状态。可选 `// @flow-label: 名称` 注释仅作用于紧邻控制语句的展示名称，不替代任务描述或执行授权。复杂动态区域保留实际任务回退；不存在“图已解析所以整个任意 JavaScript 依赖关系都已确认”的保证。
+
 检查点在首次执行前、稳定节点结束后和整轮收尾时提交。`nodeCheckpoint` 是最近已提交清单的引用，包含身份、顺序、时间、摘要、保存原因和完成任务数；`checkpointState.status` 为 `saving | dirty | ready | failed`。清单与任务历史是运行自有文件，不内嵌为无限增长的主运行列表；参考列表按返回的真实 `nextOffset` 翻页。
 
 `workflow_preview_recovery({ id, revision, retryFromTaskId? })` 不执行或改变记录，返回 `preview`。其 `strategy: "preserve-files"`、`currentFilesPreserved: true`、`externalEffectsReverted: false` 明确表示保留当前文件；`reusedTaskIds`、`rerunTaskIds`、`invalidatedTaskIds` 是实际任务身份，`blockers`、`warnings` 说明不能恢复或须核对的事实。`canResume: false` 时不执行。确认同一目标后，`workflow_resume` 传 `recoveryFingerprint: preview.fingerprint`；后台获取执行锁并重算，指纹或版本变化时零派发拒绝。旧调用省略该字段仍保留原恢复校验，但新操作应使用预览与指纹。

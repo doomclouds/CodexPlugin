@@ -369,7 +369,7 @@ async function userConfig(session: ActivationSession): Promise<ConfigLayer> {
   if (!layer?.name.file || !layer.version) throw new Error("Codex did not expose a versioned user config layer");
   return layer;
 }
-const defaultSession: ActivationSessionFactory = cwd => new ProtocolSession(process.env.WORKFLOWS_CODEX_COMMAND ?? "codex", ["app-server"], cwd, 15000, 5000, () => {});
+const defaultSession: ActivationSessionFactory = cwd => new ProtocolSession(process.env.WORKFLOWS_CODEX_COMMAND ?? "codex", ["app-server", "--disable", "plugins", "--disable", "apps", "--disable", "remote_plugin"], cwd, 15000, 5000, () => {});
 async function saveActivationJournal(filename: string, journal: ActivationJournal): Promise<void> {
   const directory = path.dirname(filename);
   await mkdir(directory, { recursive: true, mode: 0o700 });

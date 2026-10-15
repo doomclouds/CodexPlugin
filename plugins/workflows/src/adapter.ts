@@ -90,6 +90,12 @@ export interface CodexAdapterOptions {
 type JsonObject = Record<string, unknown>;
 type Usage = WorkerResult["usage"];
 type Completion = { id: string; status: string; items?: unknown; error?: unknown };
+interface EnvironmentDiscovery {
+  controller: AbortController;
+  promise: Promise<ExecutionEnvironment>;
+  subscribers: number;
+  settled: boolean;
+}
 
 const disabledFeatures = ["apps", "plugins", "remote_plugin", "browser_use", "computer_use", "multi_agent", "hooks", "skill_mcp_dependency_install", "memories"];
 // Recent Codex code-mode hosts gate delegation through agents.enabled rather
@@ -390,6 +396,7 @@ export class CodexAdapter implements WorkerAdapter {
   private readonly running = new Map<Promise<unknown>, AbortController>();
   private closed = false;
   private readonly modelCatalogues = new Map<string, { models: unknown[]; expiresAt: number }>();
+  private readonly environmentDiscoveries = new Map<string, EnvironmentDiscovery>();
 
   constructor(options: CodexAdapterOptions = {}) {
     this.options = {
@@ -439,9 +446,65 @@ export class CodexAdapter implements WorkerAdapter {
     const controller = new AbortController();
     const relay = () => controller.abort();
     signal.addEventListener("abort", relay, { once: true });
-    const operation = this.inspectExecutionEnvironment(cwd, controller.signal);
+    const operation = this.subscribeExecutionEnvironment(cwd, controller.signal);
     this.running.set(operation, controller);
     return operation.finally(() => { signal.removeEventListener("abort", relay); this.running.delete(operation); });
+  }
+
+  private async subscribeExecutionEnvironment(cwd: string, signal: AbortSignal): Promise<ExecutionEnvironment> {
+    const canonical = await realpath(cwd);
+    if (signal.aborted) throw abortError();
+    if (this.closed) throw new Error("Worker adapter is closed.");
+    let discovery = this.environmentDiscoveries.get(canonical);
+    // A cancelled final subscriber still owns its process until native cleanup
+    // settles. New callers wait for that boundary before launching a successor.
+    while (discovery?.controller.signal.aborted) {
+      await discovery.promise.catch(() => {});
+      if (signal.aborted) throw abortError();
+      if (this.closed) throw new Error("Worker adapter is closed.");
+      discovery = this.environmentDiscoveries.get(canonical);
+    }
+    if (!discovery) {
+      const controller = new AbortController();
+      const pending: EnvironmentDiscovery = { controller, subscribers: 0, settled: false, promise: undefined! };
+      pending.promise = this.inspectExecutionEnvironment(canonical, controller.signal).finally(() => {
+        pending.settled = true;
+        if (this.environmentDiscoveries.get(canonical) === pending) this.environmentDiscoveries.delete(canonical);
+      });
+      discovery = pending;
+      this.environmentDiscoveries.set(canonical, pending);
+    }
+    const shared = discovery;
+    shared.subscribers++;
+    return new Promise<ExecutionEnvironment>((resolve, reject) => {
+      let finished = false;
+      const release = () => {
+        finished = true;
+        signal.removeEventListener("abort", abort);
+        shared.subscribers--;
+      };
+      const abort = () => {
+        if (finished) return;
+        release();
+        if (!shared.subscribers && !shared.settled) {
+          shared.controller.abort();
+          // Last cancellation must not acknowledge completion before the real
+          // discovery process and its descendants have exited.
+          void shared.promise.then(() => reject(abortError()), () => reject(abortError()));
+        } else reject(abortError());
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      void shared.promise.then(environment => {
+        if (finished) return;
+        release();
+        resolve(structuredClone(environment));
+      }, error => {
+        if (finished) return;
+        release();
+        reject(error);
+      });
+      if (signal.aborted) abort();
+    });
   }
 
   private async modelEnvironment(session: ProtocolSession, config: unknown, cwd: string): Promise<ExecutionEnvironment> {
@@ -480,7 +543,7 @@ export class CodexAdapter implements WorkerAdapter {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.9.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config = object(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config, cwd);
@@ -595,7 +658,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.9.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer); startupTimer = undefined;
       if (canceled || signal.aborted) throw canceled ?? abortError();
@@ -879,7 +942,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.9.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object(object(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== undefined || request.reasoningEffort !== undefined) {

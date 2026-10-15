@@ -159,6 +159,21 @@ async function variant(name, mutation) {
     const entrypoint = tools.find(tool => tool.name === "workflow_open_panel");
     assert.ok(entrypoint, "Actual host discovers the Workflows entrypoint tool");
     assert.deepEqual(entrypoint._meta["openai/ui"].entrypoints, [{ type: "thread" }]);
+    const panelResource = await host.request("mcpServer/resource/read", { threadId: thread.thread.id, server: server.name, uri: entrypoint._meta.ui.resourceUri });
+    assert.deepEqual(panelResource.contents[0]._meta["openai/ui"], { availableDisplayModes: ["fullscreen"] });
+    const capabilities = await host.request("mcpServer/tool/call", { threadId: thread.thread.id, server: server.name, tool: "workflow_get_capabilities", arguments: {} });
+    assert.notEqual(capabilities.isError, true);
+    const lifecycle = capabilities.structuredContent.runtimeLifecycle;
+    assert.equal(lifecycle.globalSingleton, false);
+    assert.equal(lifecycle.instanceScope, "host-connection");
+    assert.equal(lifecycle.parentProcessId, host.child.pid, "The stdio runtime must remain a direct child of this genuine Codex host");
+    for (let opening = 0; opening < 2; opening++) {
+      const opened = await host.request("mcpServer/tool/call", { threadId: thread.thread.id, server: server.name, tool: "workflow_open_panel", arguments: {} });
+      assert.notEqual(opened.isError, true);
+    }
+    const afterOpen = await host.request("mcpServer/tool/call", { threadId: thread.thread.id, server: server.name, tool: "workflow_get_capabilities", arguments: {} });
+    assert.equal(afterOpen.structuredContent.runtimeLifecycle.processId, lifecycle.processId, "Opening the panel again must not create a new runtime for the same connection");
+    records.push({ variant: name + "-lifecycle", parentIsCodexHost: true, repeatedPanelOpensReuseRuntime: true, globalSingletonClaimed: false, displayModes: ["fullscreen"] });
     if (liveProjectProbe) {
       const probe = inventory.data.find(server => server.name === "desktop_transport_probe");
       assert.equal(probe?.runtimeStatus, "connected", probe?.toolsError ?? "Read-only native transport fixture is unavailable");
