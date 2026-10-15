@@ -74,7 +74,7 @@ test("advertised local mode exposes immediate writes and no rollback or apply", 
   const capabilities = response.structuredContent as unknown as { execution: { defaultWorkspaceMode: string; workspaceModes: string[]; localMode: Record<string, unknown> } };
   assert.equal(capabilities.execution.defaultWorkspaceMode, "snapshot");
   assert.deepEqual(capabilities.execution.workspaceModes, ["snapshot", "git-worktree", "local"]);
-  assert.deepEqual(capabilities.execution.localMode, { requiresAllowWrite: true, writesOriginalProject: true, requiresApply: false, automaticRollback: false, deletionOwnsProject: false, maintenanceSupported: false, maxConcurrentProjectWriters: 1, coordinationScope: "shared-workflows-data-directory", externalEditorsSerialized: false });
+  assert.deepEqual(capabilities.execution.localMode, { requiresAllowWrite: true, writesOriginalProject: true, requiresApply: false, automaticRollback: false, deletionOwnsProject: false, maintenanceSupported: false, projectGitMetadataWrite: true, gitMetadataScope: "canonical-project-contained-only", legacyRunsKeepRecordedWriteScope: true, protectedInstructionDirectoriesAutoGranted: false, maxConcurrentProjectWriters: 1, coordinationScope: "shared-workflows-data-directory", externalEditorsSerialized: false });
   const tools = await client.listTools();
   for (const name of ["workflow_preview", "workflow_update", "workflow_save_template"]) {
     const tool = tools.tools.find(item => item.name === name)!;

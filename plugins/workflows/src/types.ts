@@ -76,6 +76,8 @@ export interface WorkflowRun {
   workspace?: Workspace; workspacePath?: string; diff?: Diff; result?: unknown; error?: string;
   leaseId?: string; scriptDigest: string; contextDigest?: string;
   networkAccess?: boolean; workspaceMode?: WorkspaceMode;
+  // Internal preview-time sandbox scope. Its absence keeps legacy runs unchanged.
+  localGitWrite?: true;
   maintenance?: MaintenancePlan; maintenanceReview?: MaintenanceReview;
   activation?: ActivationResult; controlId?: string; workspaceCheckpoint?: string;
   localCheckpointState?: { filesDigest: string; gitDigest: string | null };

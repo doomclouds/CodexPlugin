@@ -5,7 +5,7 @@ const maximumBytes = 3 * 1024 * KiB;
 const maximumDiffBytes = 256 * KiB;
 const maximumLogBytes = 128 * KiB;
 const maximumNewControlBytes = 2 * 1024 * KiB;
-const controlKeys = ["id", "revision", "meta", "script", "args", "projectPath", "allowWrite", "networkAccess", "allowedMcpServers", "allowedMcpTools", "workspaceMode", "workspace", "workspacePath", "maintenance", "nodeSettings", "limits", "executionSettings", "sourceDefinition", "execution", "review", "application", "deletionPending", "deletionTarget", "scriptDigest", "contextDigest", "workspaceCheckpoint"];
+const controlKeys = ["id", "revision", "meta", "script", "args", "projectPath", "allowWrite", "networkAccess", "allowedMcpServers", "allowedMcpTools", "workspaceMode", "localGitWrite", "workspace", "workspacePath", "maintenance", "nodeSettings", "limits", "executionSettings", "sourceDefinition", "execution", "review", "application", "deletionPending", "deletionTarget", "scriptDigest", "contextDigest", "workspaceCheckpoint"];
 
 export class TransportProjectionError extends Error {
   readonly code: string;

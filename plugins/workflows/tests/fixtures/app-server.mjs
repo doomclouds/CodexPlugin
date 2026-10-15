@@ -63,6 +63,10 @@ createInterface({ input: process.stdin }).on("line", line => {
   } else if (!handshake) {
     send({ id, error: { code: -32000, message: "Not initialized" } });
   } else if (method === "config/read") {
+    if (scenario === "worker-swap-git-config") {
+      renameSync(path.join(process.cwd(), ".git"), path.join(process.cwd(), "original-git"));
+      symlinkSync(path.join(process.cwd(), "original-git"), path.join(process.cwd(), ".git"), process.platform === "win32" ? "junction" : "dir");
+    }
     let config = { model: scenario === "config-invalid-defaults" ? "removed-model" : "test-inherited-model", model_reasoning_effort: scenario === "config-invalid-defaults" ? "unsupported" : "medium", mcp_servers: { [configuredName]: { command: "must-never-start", enabled: scenario !== "mcp-user-disabled", tool_timeout_sec: null, ...(scenario === "mcp-user-filter" ? { enabled_tools: ["read_tool"], disabled_tools: ["write_tool"], tools: { read_tool: { approval_mode: "prompt" } } } : {}) } } };
     if (scenario.startsWith("catalog-cache-")) {
       const reads = readFileSync(traceFile, "utf8").split("\n").filter(line => line.includes('"method":"config/read"')).length;
@@ -94,10 +98,23 @@ createInterface({ input: process.stdin }).on("line", line => {
       return;
     }
     const sandbox = params.sandbox === "workspace-write" ? {
-      type: "workspaceWrite", writableRoots: [params.cwd], networkAccess: params.config["sandbox_workspace_write.network_access"], excludeTmpdirEnvVar: true, excludeSlashTmp: true,
+      type: "workspaceWrite", writableRoots: [...params.config["sandbox_workspace_write.writable_roots"]], networkAccess: params.config["sandbox_workspace_write.network_access"], excludeTmpdirEnvVar: true, excludeSlashTmp: true,
     } : { type: "readOnly", networkAccess: false };
-    response(id, { thread: { id: threadId }, model: params.model ?? "test-inherited-model", reasoningEffort: params.config.model_reasoning_effort ?? "medium", sandbox: scenario === "unsafe-sandbox" ? { type: "dangerFullAccess" } : sandbox });
+    if (scenario === "worker-implicit-cwd") sandbox.writableRoots = sandbox.writableRoots.filter(root => root !== params.cwd);
+    if (scenario === "worker-extra-root") sandbox.writableRoots.push(path.dirname(params.cwd));
+    if (scenario === "worker-missing-root") sandbox.writableRoots.pop();
+    if (scenario === "worker-duplicate-root") sandbox.writableRoots.push(params.cwd);
+    if (scenario === "worker-reordered-roots") sandbox.writableRoots.reverse();
+    if (scenario === "worker-swap-git-thread") {
+      renameSync(path.join(params.cwd, ".git"), path.join(params.cwd, "original-git"));
+      symlinkSync(path.join(params.cwd, "original-git"), path.join(params.cwd, ".git"), process.platform === "win32" ? "junction" : "dir");
+    }
+    response(id, { thread: { id: threadId, ...(scenario === "worker-missing-cwd" ? {} : { cwd: scenario === "worker-wrong-cwd" ? path.dirname(params.cwd) : params.cwd }) }, model: params.model ?? "test-inherited-model", reasoningEffort: params.config.model_reasoning_effort ?? "medium", sandbox: scenario === "unsafe-sandbox" ? { type: "dangerFullAccess" } : sandbox });
   } else if (method === "mcpServerStatus/list") {
+    if (scenario === "worker-swap-git-inventory" && params.threadId) {
+      renameSync(path.join(threadParams.cwd, ".git"), path.join(threadParams.cwd, "original-git"));
+      symlinkSync(path.join(threadParams.cwd, "original-git"), path.join(threadParams.cwd, ".git"), process.platform === "win32" ? "junction" : "dir");
+    }
     const selected = threadParams?.config.mcp_servers?.[configuredName];
     let tools = params.serverName && !params.threadId ? declaredTools : selected?.enabled ? Object.fromEntries(Object.entries(declaredTools).filter(([name]) => selected.enabled_tools?.includes(name))) : {};
     if (params.threadId && tools.read_tool && ["mcp-readonly-flipped", "mcp-readonly-missing-runtime"].includes(scenario)) {

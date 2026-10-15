@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
 import { CodexAdapter } from "../src/adapter.ts";
 import type { CommandRequest, WorkerEvent, WorkerRequest } from "../src/adapter.ts";
 import { normalizeProtectedPaths } from "../src/protected-paths.ts";
@@ -12,7 +13,7 @@ import { normalizeProtectedPaths } from "../src/protected-paths.ts";
 const fixture = fileURLToPath(new URL("fixtures/app-server.mjs", import.meta.url));
 
 async function setup(scenario: string, options: { startupTimeoutMs?: number; interruptTimeoutMs?: number; shutdownTimeoutMs?: number } = {}) {
-  const cwd = await mkdtemp(path.join(os.tmpdir(), "workflows-adapter-test-"));
+  const cwd = await realpath(await mkdtemp(path.join(os.tmpdir(), "workflows-adapter-test-")));
   const trace = path.join(cwd, "protocol.jsonl");
   const adapter = new CodexAdapter({ command: process.execPath, args: [fixture, scenario, trace], startupTimeoutMs: 5000, interruptTimeoutMs: 100, shutdownTimeoutMs: 100, ...options });
   const request: WorkerRequest = { id: "test-worker", prompt: "Protocol test task", cwd, mode: "read" };
@@ -269,6 +270,122 @@ test("write worker confines writes to its workspace and forwards an explicit mod
     assert.deepEqual(turn.params.sandboxPolicy, { type: "workspaceWrite", writableRoots: [context.request.cwd], networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true });
   } finally { await context.cleanup(); }
 });
+
+test("new local write workers grant only their own contained Git directory at every protocol stage", async () => {
+  const context = await setup("complete");
+  try {
+    execFileSync("git", ["init", "--quiet", context.request.cwd]);
+    await context.adapter.run({ ...context.request, mode: "write", localGitWrite: true }, context.controller.signal, () => {});
+    const cwd = await realpath(context.request.cwd), roots = [cwd, path.join(cwd, ".git")];
+    const transcript = await context.transcript(), thread = transcript.find(message => message.method === "thread/start")!, turn = transcript.find(message => message.method === "turn/start")!;
+    assert.deepEqual(thread.params.config["sandbox_workspace_write.writable_roots"], roots);
+    assert.deepEqual(turn.params.sandboxPolicy.writableRoots, roots);
+    assert.match(thread.params.developerInstructions, /contained Git metadata is writable/);
+    assert.match(thread.params.developerInstructions, /\.agents and \.codex remain protected/);
+    assert.equal(turn.params.approvalPolicy, "never");
+  } finally { await context.cleanup(); }
+});
+
+test("legacy local write requests do not gain Git metadata permission", async () => {
+  const context = await setup("complete");
+  try {
+    execFileSync("git", ["init", "--quiet", context.request.cwd]);
+    await context.adapter.run({ ...context.request, mode: "write" }, context.controller.signal, () => {});
+    const transcript = await context.transcript();
+    assert.deepEqual(transcript.find(message => message.method === "thread/start")!.params.config["sandbox_workspace_write.writable_roots"], [context.request.cwd]);
+    assert.deepEqual(transcript.find(message => message.method === "turn/start")!.params.sandboxPolicy.writableRoots, [context.request.cwd]);
+  } finally { await context.cleanup(); }
+});
+
+test("read workers reject the internal local Git write capability before launching", async () => {
+  const context = await setup("complete");
+  try {
+    await assert.rejects(context.adapter.run({ ...context.request, localGitWrite: true }, context.controller.signal, () => {}), /requires a write worker/);
+    await assert.rejects(access(path.join(context.request.cwd, "protocol.jsonl")), { code: "ENOENT" });
+  } finally { await context.cleanup(); }
+});
+
+for (const scenario of ["worker-extra-root", "worker-missing-root", "worker-duplicate-root", "worker-wrong-cwd", "worker-missing-cwd"]) {
+  test(`local Git scope refuses an incorrectly enforced sandbox (${scenario})`, async () => {
+    const context = await setup(scenario);
+    try {
+      execFileSync("git", ["init", "--quiet", context.request.cwd]);
+      await assert.rejects(context.adapter.run({ ...context.request, mode: "write", localGitWrite: true }, context.controller.signal, () => {}), /does not match its declared workspace and Git scope/);
+      assert.equal((await context.transcript()).some(message => message.method === "turn/start"), false);
+    } finally { await context.cleanup(); }
+  });
+}
+
+for (const withGit of [true, false]) {
+  test(`native workspace-write implicit cwd is verified with the exact additional roots (Git ${withGit})`, async () => {
+    const context = await setup("worker-implicit-cwd");
+    try {
+      if (withGit) execFileSync("git", ["init", "--quiet", context.request.cwd]);
+      const result = await context.adapter.run({ ...context.request, mode: "write", localGitWrite: true }, context.controller.signal, () => {});
+      assert.equal(result.output, "worker complete");
+      const transcript = await context.transcript();
+      assert.deepEqual(transcript.find(message => message.method === "turn/start")!.params.sandboxPolicy.writableRoots, [context.request.cwd, ...(withGit ? [path.join(context.request.cwd, ".git")] : [])]);
+    } finally { await context.cleanup(); }
+  });
+}
+
+test("local Git write capability rejects a replaced project root that became a symbolic link", async () => {
+  const context = await setup("complete"), outside = await realpath(await mkdtemp(path.join(os.tmpdir(), "workflows-local-root-outside-")));
+  try {
+    const alias = path.join(context.request.cwd, "linked-project");
+    await symlink(outside, alias, process.platform === "win32" ? "junction" : "dir");
+    await assert.rejects(context.adapter.run({ ...context.request, cwd: alias, mode: "write", localGitWrite: true }, context.controller.signal, () => {}), /canonical project directory without symbolic links/);
+    await assert.rejects(access(path.join(context.request.cwd, "protocol.jsonl")), { code: "ENOENT" });
+  } finally { await context.cleanup(); await rm(outside, { recursive: true, force: true }); }
+});
+
+for (const scenario of ["worker-swap-git-config", "worker-swap-git-thread", "worker-swap-git-inventory"]) {
+  test(`local Git scope refuses metadata replaced during worker startup (${scenario})`, async () => {
+    const context = await setup(scenario);
+    try {
+      execFileSync("git", ["init", "--quiet", context.request.cwd]);
+      await assert.rejects(context.adapter.run({ ...context.request, mode: "write", localGitWrite: true }, context.controller.signal, () => {}), /Git metadata identity or writable scope changed/);
+      assert.equal((await context.transcript()).some(message => message.method === "turn/start"), false);
+      if (scenario === "worker-swap-git-config") assert.equal((await context.transcript()).some(message => message.method === "thread/start"), false);
+    } finally { await context.cleanup(); }
+  });
+}
+
+test("local Git sandbox comparison accepts only the complete root set independent of order", async () => {
+  const context = await setup("worker-reordered-roots");
+  try {
+    execFileSync("git", ["init", "--quiet", context.request.cwd]);
+    const result = await context.adapter.run({ ...context.request, mode: "write", localGitWrite: true }, context.controller.signal, () => {});
+    assert.equal(result.output, "worker complete");
+  } finally { await context.cleanup(); }
+});
+
+for (const kind of ["linked", "symlink", "external-common", "absent"] as const) {
+  test(`local source editing does not grant unsafe Git metadata (${kind})`, async () => {
+    const context = await setup("complete"), outside = await mkdtemp(path.join(os.tmpdir(), "workflows-local-git-outside-"));
+    try {
+      if (kind !== "absent") execFileSync("git", ["init", "--quiet", context.request.cwd]);
+      if (kind === "linked" || kind === "symlink") {
+        const metadata = path.join(outside, "metadata");
+        const { rename } = await import("node:fs/promises");
+        await rename(path.join(context.request.cwd, ".git"), metadata);
+        if (kind === "linked") await writeFile(path.join(context.request.cwd, ".git"), `gitdir: ${metadata}\n`);
+        else await symlink(metadata, path.join(context.request.cwd, ".git"), process.platform === "win32" ? "junction" : "dir");
+      } else if (kind === "external-common") {
+        execFileSync("git", ["init", "--quiet", "--bare", outside]);
+        await writeFile(path.join(context.request.cwd, ".git", "commondir"), outside + "\n");
+      }
+      const before = kind === "absent" ? undefined : await readFile(path.join(kind === "linked" || kind === "symlink" ? path.join(outside, "metadata") : path.join(context.request.cwd, ".git"), "HEAD"), "utf8");
+      const result = await context.adapter.run({ ...context.request, mode: "write", localGitWrite: true }, context.controller.signal, () => {});
+      assert.equal(result.output, "worker complete");
+      const transcript = await context.transcript(), thread = transcript.find(message => message.method === "thread/start")!;
+      assert.deepEqual(thread.params.config["sandbox_workspace_write.writable_roots"], [await realpath(context.request.cwd)]);
+      assert.deepEqual(transcript.find(message => message.method === "turn/start")!.params.sandboxPolicy.writableRoots, [await realpath(context.request.cwd)]);
+      assert.match(thread.params.developerInstructions, /Git metadata writing is not granted/);
+      if (before !== undefined) assert.equal(await readFile(path.join(kind === "linked" || kind === "symlink" ? path.join(outside, "metadata") : path.join(context.request.cwd, ".git"), "HEAD"), "utf8"), before);
+    } finally { await context.cleanup(); await rm(outside, { recursive: true, force: true }); }
+  });
+}
 
 for (const scenario of ["interrupt", "cancel-before-ack"]) {
   test(`abort sends turn/interrupt and waits for terminal status (${scenario})`, async () => {
