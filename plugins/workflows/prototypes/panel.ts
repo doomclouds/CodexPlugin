@@ -321,6 +321,7 @@ export class WorkflowPanelController {
   private settingsRequest = 0;
   private projectsRequest = 0;
   private detailRequest = 0;
+  private historyRequest = 0;
   private firstPageIds = new Set<string>();
   private listedProject: string | undefined;
   private acceptedProjection = new Map<string, string>();
@@ -343,6 +344,10 @@ export class WorkflowPanelController {
   get currentProject(): CodexProject | undefined { return this.state.projectsLoaded && this.state.projectContextSource === "thread" ? this.state.projects.find(project => project.projectId === this.state.currentProjectId) : undefined; }
   get projectBound(): boolean { const project = this.currentProject; return !!project && this.state.selectedProjectId === project.projectId && this.state.projectPath === project.path; }
   get canAct(): boolean { return this.projectBound && !this.selectedSummary && !this.unresolvedDetails.has(this.state.selectedRun ?? "") && !this.state.detailsBusy && (!this.selected || this.selected.projectPath === this.state.projectPath) && this.state.connection === "connected" && !this.state.reconnecting && !this.initializing && !this.state.busy && !this.closing; }
+  get canSelectWorkflow(): boolean {
+    const run = this.stopTarget;
+    return this.projectBound && this.state.connection === "connected" && !this.state.reconnecting && !this.initializing && !this.state.busy && !this.state.detailsBusy && !this.closing && !["preparing", "running", "stopping"].includes(run?.execution ?? "") && run?.application !== "applying";
+  }
 
   setProjectPath(projectPath: string): void {
     // A tool argument is a hint, never evidence of the current chat's project.
@@ -518,7 +523,7 @@ export class WorkflowPanelController {
   async refresh(force = false): Promise<boolean> {
     if (!this.projectBound) return true;
     const projectPath = this.state.selectedProjectId ? this.state.projectPath : "";
-    if (this.listedProject !== projectPath) { this.listedProject = projectPath; this.firstPageIds.clear(); this.state.runNextOffset = undefined; this.state.runTotal = 0; }
+    if (this.listedProject !== projectPath) { this.listedProject = projectPath; this.firstPageIds.clear(); this.historyRequest++; this.state.historyBusy = false; this.state.runNextOffset = undefined; this.state.runTotal = 0; }
     if (this.closing || !force && (this.pollingProject === projectPath || this.state.connection !== "connected" || this.state.reconnecting)) return false;
     const request = ++this.pollRequest;
     this.pollingProject = projectPath;
@@ -531,13 +536,15 @@ export class WorkflowPanelController {
       const runs: WorkflowListItem[] = data.runs.map(value => data.listSummary === true ? parseRunSummary(value) : parseRun(value)).filter(run => run.projectPath === projectPath);
       for (const run of runs) if (run.listSummary) this.rememberSummary(run);
       const selectedListing = runs.find(run => run.id === this.state.selectedRun);
+      const completeListing = data.listSummary === true && data.nextOffset === undefined && typeof data.totalRuns === "number" && data.totalRuns === runs.length;
+      if (completeListing) { this.historyRequest++; this.state.historyBusy = false; }
       // Keep the newer response when polling overlaps an explicit action.
       const createdDuringPoll = this.state.runs.filter(run => !knownRuns.has(run.id) && !runs.some(item => item.id === run.id));
       this.state.runs = [...createdDuringPoll, ...runs.map(run => {
         const existing = this.state.runs.find(item => item.id === run.id);
         if (run.listSummary && existing?.listSummary !== true && existing) return existing;
         return existing && (existing.revision > run.revision || existing.revision === run.revision && (existing.progressSequence ?? 0) > (run.progressSequence ?? 0)) ? existing : run;
-      }), ...this.state.runs.filter(run => data.listSummary === true && knownRuns.has(run.id) && !runs.some(item => item.id === run.id) && (!this.firstPageIds.has(run.id) || run.id === this.state.selectedRun))];
+      }), ...this.state.runs.filter(run => data.listSummary === true && !completeListing && knownRuns.has(run.id) && !runs.some(item => item.id === run.id) && (!this.firstPageIds.has(run.id) || run.id === this.state.selectedRun))];
       this.firstPageIds = new Set(runs.map(run => run.id));
       this.state.runTotal = typeof data.totalRuns === "number" ? data.totalRuns : this.state.runs.length;
       const pageNext = typeof data.nextOffset === "number" ? data.nextOffset : undefined;
@@ -546,7 +553,7 @@ export class WorkflowPanelController {
       if (this.state.error.startsWith("宿主连接中断：")) this.state.error = "";
       this.changed();
       const detail = this.selected;
-      if (this.selectedSummary || selectedListing && detail && (selectedListing.revision > detail.revision || (selectedListing.progressSequence ?? 0) > (detail.progressSequence ?? 0))) await this.loadDetails(this.state.selectedRun!, selectedListing);
+      if (this.selectedSummary || detail && (selectedListing ? selectedListing.revision > detail.revision || (selectedListing.progressSequence ?? 0) > (detail.progressSequence ?? 0) : knownRuns.has(detail.id))) await this.loadDetails(this.state.selectedRun!, selectedListing);
       return true;
     } catch (error) { if (request === this.pollRequest) this.disconnected(error); return false; }
     finally { if (request === this.pollRequest) this.pollingProject = undefined; }
@@ -555,10 +562,11 @@ export class WorkflowPanelController {
   async loadMoreRuns(): Promise<void> {
     if (!this.projectBound || this.state.historyBusy || this.state.runNextOffset === undefined) return;
     const projectPath = this.state.projectPath, offset = this.state.runNextOffset;
+    const request = ++this.historyRequest;
     this.state.historyBusy = true; this.changed();
     try {
       const data = await this.request("workflow_list_runs", { projectPath, offset, limit: 100 });
-      if (this.closing || this.state.projectPath !== projectPath) return;
+      if (this.closing || request !== this.historyRequest || this.state.projectPath !== projectPath) return;
       if (!Array.isArray(data.runs)) throw new Error("宿主未返回运行摘要页");
       for (const value of data.runs) {
         const run = data.listSummary === true ? parseRunSummary(value) : parseRun(value);
@@ -567,8 +575,8 @@ export class WorkflowPanelController {
       }
       this.state.runTotal = typeof data.totalRuns === "number" ? data.totalRuns : this.state.runs.length;
       this.state.runNextOffset = typeof data.nextOffset === "number" && data.nextOffset > offset ? data.nextOffset : undefined;
-    } catch (error) { this.state.error = `读取更多运行失败：${errorMessage(error)}`; }
-    finally { this.state.historyBusy = false; this.changed(); }
+    } catch (error) { if (request === this.historyRequest) this.state.error = `读取更多运行失败：${errorMessage(error)}`; }
+    finally { if (request === this.historyRequest) { this.state.historyBusy = false; this.changed(); } }
   }
 
   async refreshTemplates(): Promise<void> {
@@ -653,6 +661,16 @@ export class WorkflowPanelController {
     this.changed();
   }
 
+  async selectWorkflow(value: string): Promise<void> {
+    if (!this.canSelectWorkflow) return;
+    if (value === "more-runs") { await this.loadMoreRuns(); return; }
+    if (value.startsWith("run:")) { await this.select(value.slice(4)); return; }
+    if (value.startsWith("template:")) {
+      const id = value.slice(9);
+      if (this.state.templates.some(template => template.id === id)) this.selectTemplate(id);
+    }
+  }
+
   async saveTemplate(input: Pick<WorkflowInput, "script" | "args" | "allowWrite" | "limits" | "networkAccess" | "allowedMcpServers" | "allowedMcpTools" | "workspaceMode" | "maintenance" | "nodeSettings">, revision?: number): Promise<TemplateSummary | undefined> {
     if (!this.canAct) return undefined;
     this.state.busy = true;
@@ -672,6 +690,9 @@ export class WorkflowPanelController {
   async select(id: string): Promise<void> {
     if (!this.projectBound || !this.state.runs.some(run => run.id === id && run.projectPath === this.state.projectPath)) return;
     this.definitionSelected = false;
+    this.templateRequest++;
+    this.state.selectedTemplate = undefined;
+    delete this.state.definition;
     this.state.selectedRun = id;
     this.state.task = undefined;
     this.state.tab = "overview";
@@ -817,6 +838,20 @@ export function parseToolGrants(text: string): Record<string, string[]> {
   return Object.fromEntries(entries) as Record<string, string[]>;
 }
 export function jsonInput(value: unknown): string { return JSON.stringify(value, null, 2) ?? "{}"; }
+export function workflowSelectOptions(state: Pick<PanelState, "runs" | "templates" | "selectedRun" | "selectedTemplate" | "runNextOffset" | "historyBusy" | "projectPath">): string {
+  const runs = state.runs.filter(run => run.projectPath === state.projectPath);
+  const selectedRun = runs.find(run => run.id === state.selectedRun);
+  const selectedTemplate = state.selectedRun ? undefined : state.templates.find(template => template.id === state.selectedTemplate);
+  const placeholder = `<option value="" disabled${!selectedRun && !selectedTemplate ? " selected" : ""}>选择工作流</option>`;
+  const runOptions = runs.length ? `<optgroup label="本项目运行">${runs.map(run => {
+    const created = new Date(run.createdAt).toLocaleString("zh-CN", { hour12: false });
+    const label = `${run.meta.name} · ${executionLabels[run.execution] ?? run.execution} · ${created} · ${run.id.slice(-8)}`;
+    return `<option value="${escapeHtml(`run:${run.id}`)}"${run.id === selectedRun?.id ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  }).join("")}</optgroup>` : "";
+  const templateOptions = state.templates.length ? `<optgroup label="工作流库">${state.templates.map(template => `<option value="${escapeHtml(`template:${template.id}`)}"${template.id === selectedTemplate?.id ? " selected" : ""}>${escapeHtml(template.name)}${template.source === "builtin" ? " · 内置" : ""}</option>`).join("")}</optgroup>` : "";
+  const more = state.runNextOffset !== undefined ? `<option value="more-runs"${state.historyBusy ? " disabled" : ""}>${state.historyBusy ? "正在加载更多运行…" : "加载更多本项目运行…"}</option>` : "";
+  return placeholder + runOptions + templateOptions + more;
+}
 export function modelSelectOptions(models: ExecutionSettingsResponse["models"], selected: string, inherited: string): string {
   return `<option value="">${escapeHtml(inherited)}</option>` + (selected && !models.some(model => model.id === selected) ? `<option value="${escapeHtml(selected)}" selected disabled>${escapeHtml(selected)} · 当前不可用</option>` : "") + models.map(model => `<option value="${escapeHtml(model.id)}" ${model.id === selected ? "selected" : ""}>${escapeHtml(model.displayName || model.id)}</option>`).join("");
 }
@@ -1118,9 +1153,9 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     }
     const template = state.templates.find(item => item.id === state.selectedTemplate);
     const templateKey = JSON.stringify([template?.id, template?.revision]);
-    if (controller.canAct && !run && template && templateRequest !== templateKey && (!definition || definition.revision !== template.revision)) {
+    if (controller.canAct && !state.selectedRun && template && templateRequest !== templateKey && (!definition || definition.revision !== template.revision)) {
       templateRequest = templateKey;
-      queueMicrotask(() => { if (controller.state.selectedTemplate === template.id && !controller.selected) void controller.loadTemplate(template.id); });
+      queueMicrotask(() => { if (controller.state.selectedTemplate === template.id && !controller.state.selectedRun) void controller.loadTemplate(template.id); });
     }
     const live = executing();
     const stale = state.connection !== "connected" || state.reconnecting;
@@ -1136,10 +1171,10 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const connectionText = state.reconnecting ? "正在连接并同步…" : ({ offline: "离线预览", connecting: "正在连接…", connected: "已连接宿主", degraded: "连接异常", closed: "面板已关闭" })[state.connection];
     if (element("#wf-connection").textContent !== connectionText) element("#wf-connection").textContent = connectionText;
     const selector = element<HTMLSelectElement>("#wf-template-select");
-    const displayedRun = run ?? summary;
-    const options = '<option value="">选择工作流</option>' + (displayedRun ? `<option value="__run__" selected>${escapeHtml(displayedRun.meta.name)} · 当前运行</option>` : "") + state.templates.map(item => `<option value="${escapeHtml(item.id)}" ${!run && item.id === state.selectedTemplate ? "selected" : ""}>${escapeHtml(item.name)}${item.source === "builtin" ? " · 内置" : ""}</option>`).join("");
+    const options = workflowSelectOptions(state);
     if (selector.innerHTML !== options) selector.innerHTML = options;
-    selector.disabled = !controller.canAct || live || !state.templates.length && !run;
+    selector.value = state.selectedRun ? `run:${state.selectedRun}` : state.selectedTemplate ? `template:${state.selectedTemplate}` : "";
+    selector.disabled = !controller.canSelectWorkflow || !state.templates.length && !state.runs.length && state.runNextOffset === undefined;
     const notification = element("#wf-notification");
     notification.textContent = failureErrorSummary(state.error || run?.error || ""); notification.hidden = !notification.textContent;
     element<HTMLButtonElement>("#wf-error-details").hidden = !run?.error;
@@ -1293,7 +1328,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   document.addEventListener("pointerdown", event => { if (event.target instanceof Node && !element(".wf-more-wrap").contains(event.target)) closeMenu(); });
   project.addEventListener("change", () => { void controller.selectProject(project.value); });
   element("#wf-refresh-projects").addEventListener("click", () => { void controller.refreshProjects(); });
-  element<HTMLSelectElement>("#wf-template-select").addEventListener("change", event => { const id = (event.target as HTMLSelectElement).value; if (id === "__run__") return; templateRequest = ""; controller.selectTemplate(id || undefined); });
+  element<HTMLSelectElement>("#wf-template-select").addEventListener("change", event => { const value = (event.target as HTMLSelectElement).value; templateRequest = ""; void controller.selectWorkflow(value).finally(render); });
   element("#wf-parameters-toggle").addEventListener("click", event => { parameterSnapshot = structuredClone(argsValue); parametersSaved = false; parameterError.hidden = true; openDialog(parameterDialog, event.currentTarget as HTMLElement); });
   element<HTMLFormElement>("#wf-parameters-form").addEventListener("submit", event => {
     event.preventDefault();

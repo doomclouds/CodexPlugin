@@ -1,7 +1,7 @@
 import { App, applyDocumentTheme, applyHostFonts, applyHostStyleVariables } from "@modelcontextprotocol/ext-apps";
 import { applyPanelHostStyles, mountPanel } from "./panel.js";
 
-const app = new App({ name: "Workflows", version: "0.5.9" }, {}, { autoResize: true });
+const app = new App({ name: "Workflows", version: "0.5.10" }, {}, { autoResize: true });
 const root = document.getElementById("workflow-panel-prototype");
 if (!root) throw new Error("Workflows panel root is missing");
 const panel = mountPanel(root, async (name, args) => app.callServerTool({ name, arguments: args }, { timeout: 120000 }));
