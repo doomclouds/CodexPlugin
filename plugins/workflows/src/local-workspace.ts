@@ -51,6 +51,7 @@ async function names(root: string, includeIgnored: boolean, signal?: AbortSignal
     signal?.throwIfAborted();
     if (depth > 64) throw new Error("Local workspace exceeds 64 directory levels");
     const entries = (await readdir(current)).sort();
+    if (current !== root && entries.includes(".git")) throw new Error("Unregistered nested Git repositories are not supported in local workspace tracking");
     for (const entry of entries) {
       if (entry === ".git") continue;
       const relative = prefix + entry, target = filename(root, relative), info = await lstat(target);

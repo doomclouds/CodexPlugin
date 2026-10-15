@@ -186,3 +186,15 @@ test("runtime validation refuses Git metadata redirected into workflow storage a
   await assert.rejects(validateLocalWorkspace(workspace, project, run), /Git metadata depends on workflow-owned data/);
   assert.equal(await readFile(path.join(project, "code.txt"), "utf8"), "independent source\n");
 });
+
+test("non-Git projects cannot silently exclude nested repository metadata from recovery checkpoints", async t => {
+  const { project, run } = await fixture(t);
+  await writeFile(path.join(project, "code.txt"), "existing source\n");
+  const workspace = await createLocalWorkspace(project, run), nested = path.join(project, "nested");
+  await mkdir(nested); await git(nested, ["init", "--quiet"]);
+  const head = await readFile(path.join(nested, ".git", "HEAD"));
+  await assert.rejects(localWorkspaceFingerprint(workspace), /Unregistered nested Git repositories/);
+  await assert.rejects(createLocalWorkspace(project, run), /Unregistered nested Git repositories/);
+  assert.equal(await readFile(path.join(project, "code.txt"), "utf8"), "existing source\n");
+  assert.deepEqual(await readFile(path.join(nested, ".git", "HEAD")), head);
+});
