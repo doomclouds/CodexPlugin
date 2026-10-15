@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { WorkflowEngine } from "../src/engine.ts";
 import { RunStore } from "../src/store.ts";
+import { captureLocalWorkspaceCheckpoints } from "../src/local-workspace.ts";
 import type { WorkerAdapter, WorkerRequest } from "../src/adapter.ts";
 
 const exec = promisify(execFile);
@@ -39,6 +40,30 @@ async function eventually(check: () => Promise<boolean>) {
   const until = Date.now() + 10000;
   while (!await check()) { if (Date.now() >= until) throw new Error("Local fixture did not reach its expected state"); await new Promise(resolve => setTimeout(resolve, 10)); }
 }
+async function fixtureGit(project: string, args: string[]) { return (await exec("git", args, { cwd: project, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } })).stdout.trim(); }
+async function commitFixture(project: string) {
+  await fixtureGit(project, ["add", "--all"]);
+  await fixtureGit(project, ["-c", "user.name=Workflow Fixture", "-c", "user.email=workflow@example.invalid", "commit", "--quiet", "-m", "Add fixture"]);
+}
+async function pausedFixture(t: TestContext, initialHostRef = false) {
+  const working = deferred(); let secondAttempts = 0;
+  const f = await fixture(t, async (request, signal) => {
+    if (request.id.startsWith("task_1_")) return "verified first";
+    if (secondAttempts++ === 0) {
+      working.resolve();
+      await new Promise<void>(resolve => { if (signal.aborted) resolve(); else signal.addEventListener("abort", () => resolve(), { once: true }); });
+      throw new Error("Interrupted second task");
+    }
+    return "verified second";
+  }, true);
+  await commitFixture(f.project);
+  if (initialHostRef) await fixtureGit(f.project, ["update-ref", "refs/codex/turn-diffs/checkpoints/already-present", "HEAD"]);
+  const preview = await f.engine.preview(localInput(f.project, 'await agent("First"); return await agent("Second");'));
+  await f.engine.start({ id: preview.id, revision: preview.revision }); await working.promise;
+  const stopped = await f.engine.stop(preview.id);
+  assert.equal(stopped.execution, "stopped");
+  return { ...f, stopped };
+}
 
 test("local agents change the original dirty project immediately without applying or staging user files", async t => {
   const started = deferred(), finish = deferred();
@@ -54,7 +79,7 @@ test("local agents change the original dirty project immediately without applyin
   assert.equal((await f.engine.get(preview.id)).execution, "running");
   finish.resolve(); const done = await f.engine.wait(preview.id);
   assert.equal(done.execution, "completed", done.error); assert.equal(done.review, "ready"); assert.equal(done.application, "none");
-  assert.equal(done.workspace?.kind, "local"); assert.equal(done.workspacePath, f.project); assert.match(done.workspaceCheckpoint!, /^local-v1:/);
+  assert.equal(done.workspace?.kind, "local"); assert.equal(done.workspacePath, f.project); assert.match(done.workspaceCheckpoint!, /^local-v2:/);
   assert.deepEqual(done.diff?.files.map(file => file.path), ["source.txt"]);
   assert.equal(await readFile(path.join(f.project, "notes.txt"), "utf8"), "user untracked\n");
   assert.equal((await exec("git", ["ls-files", "--stage"], { cwd: f.project })).stdout, indexBefore);
@@ -78,13 +103,82 @@ test("local stop preserves partial edits and resume reuses the completed prefix 
   const preview = await f.engine.preview(localInput(f.project, 'await agent("First",{mode:"write"}); return await agent("Second",{mode:"write"});'));
   await f.engine.start({ id: preview.id, revision: preview.revision }); await working.promise;
   const stopped = await f.engine.stop(preview.id);
-  assert.equal(stopped.execution, "stopped"); assert.match(stopped.workspaceCheckpoint!, /^local-v1:/);
+  assert.equal(stopped.execution, "stopped"); assert.match(stopped.workspaceCheckpoint!, /^local-v2:/);
   assert.match(await readFile(path.join(f.project, "source.txt"), "utf8"), /second partial/);
   await f.engine.start({ id: stopped.id, revision: stopped.revision }, true);
   const done = await f.engine.wait(stopped.id);
   assert.equal(done.execution, "completed", done.error); assert.equal(done.tasks[0]?.cached, true);
   assert.equal(f.calls.filter(call => call.id.startsWith("task_1_")).length, 1);
   assert.match(await readFile(path.join(f.project, "source.txt"), "utf8"), /second completed/);
+});
+
+test("local-v2 resume preserves completed tasks after host checkpoint refs are added, changed and deleted", async t => {
+  const started = [deferred(), deferred(), deferred()]; let secondAttempts = 0;
+  const f = await fixture(t, async (request, signal) => {
+    if (request.id.startsWith("task_1_")) return "verified first";
+    const attempt = secondAttempts++;
+    if (attempt < started.length) {
+      started[attempt]!.resolve();
+      await new Promise<void>(resolve => { if (signal.aborted) resolve(); else signal.addEventListener("abort", () => resolve(), { once: true }); });
+      throw new Error("Interrupted second task");
+    }
+    return "verified second";
+  }, true);
+  await commitFixture(f.project);
+  const alternate = await fixtureGit(f.project, ["-c", "user.name=Workflow Fixture", "-c", "user.email=workflow@example.invalid", "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Host bookkeeping object"]);
+  const preview = await f.engine.preview(localInput(f.project, 'await agent("First"); return await agent("Second");'));
+  await f.engine.start({ id: preview.id, revision: preview.revision }); await started[0]!.promise;
+  let stopped = await f.engine.stop(preview.id);
+  const checkpoint = stopped.workspaceCheckpoint;
+  for (const [index, args] of [
+    ["update-ref", "refs/codex/turn-diffs/checkpoints/turn", "HEAD"],
+    ["update-ref", "refs/codex/turn-diffs/checkpoints/turn", alternate],
+    ["update-ref", "-d", "refs/codex/turn-diffs/checkpoints/turn"],
+  ].entries()) {
+    await fixtureGit(f.project, args);
+    await f.engine.start({ id: stopped.id, revision: stopped.revision }, true);
+    if (index < 2) {
+      await started[index + 1]!.promise; stopped = await f.engine.stop(stopped.id);
+      assert.equal(stopped.workspaceCheckpoint, checkpoint);
+    }
+  }
+  const done = await f.engine.wait(stopped.id);
+  assert.equal(done.execution, "completed", done.error);
+  assert.equal(done.tasks[0]?.cached, true); assert.equal(done.tasks[0]?.attempts.length, 1);
+  assert.equal(f.calls.filter(call => call.id.startsWith("task_1_")).length, 1);
+  assert.equal(done.tasks[1]?.attempts.length, 4);
+  assert.equal(done.workspaceCheckpoint, checkpoint);
+});
+
+test("legacy local checkpoints migrate only when an exact full or reserved-ref-free candidate matches", async t => {
+  for (const variant of ["full-state-match", "only-new-host-ref"] as const) await t.test(variant, async child => {
+    const f = await pausedFixture(child, variant === "full-state-match");
+    const captured = await captureLocalWorkspaceCheckpoints(f.stopped.workspace!);
+    assert.ok(captured.legacy);
+    f.stopped.workspaceCheckpoint = captured.legacy; await f.store.save(f.stopped);
+    if (variant === "only-new-host-ref") await fixtureGit(f.project, ["update-ref", "refs/codex/turn-diffs/checkpoints/after-stop", "HEAD"]);
+    await f.engine.start({ id: f.stopped.id, revision: f.stopped.revision }, true);
+    const done = await f.engine.wait(f.stopped.id);
+    assert.equal(done.execution, "completed", done.error); assert.equal(done.tasks[0]?.cached, true);
+    assert.equal(done.tasks[0]?.attempts.length, 1); assert.equal(done.tasks[1]?.attempts.length, 2);
+    assert.match(done.workspaceCheckpoint!, /^local-v2:/);
+    assert.ok(done.logs.some(log => log.message.includes("Legacy local checkpoint verified exactly")));
+    assert.equal(f.calls.filter(call => call.id.startsWith("task_1_")).length, 1);
+  });
+});
+
+test("legacy local checkpoints with an unknown historical subset of host refs refuse replay and retain the old checkpoint", async t => {
+  const f = await pausedFixture(t, true);
+  const captured = await captureLocalWorkspaceCheckpoints(f.stopped.workspace!); assert.ok(captured.legacy);
+  const saved = captured.legacy;
+  f.stopped.workspaceCheckpoint = saved; await f.store.save(f.stopped);
+  await fixtureGit(f.project, ["update-ref", "refs/codex/turn-diffs/checkpoints/new-after-stop", "HEAD"]);
+  await f.engine.start({ id: f.stopped.id, revision: f.stopped.revision }, true);
+  const refused = await f.engine.wait(f.stopped.id);
+  assert.equal(refused.execution, "failed"); assert.equal(refused.failureContext?.recovery, "new-preview");
+  assert.match(refused.error!, /changed since the last checkpoint/);
+  assert.equal(refused.workspaceCheckpoint, saved); assert.equal(f.calls.length, 2);
+  assert.equal(refused.tasks[0]?.attempts.length, 1); assert.equal(refused.tasks[1]?.attempts.length, 1);
 });
 
 test("shared-store local runs serialize the whole project and a waiter can stop without dispatch", async t => {
@@ -120,15 +214,22 @@ test("local project locks prevent isolated application while edits are active", 
   assert.equal(applied.application, "applied", applied.error); assert.equal(await readFile(path.join(f.project, "isolated.txt"), "utf8"), "reviewed\n");
 });
 
-test("external source or ignored-artifact changes refuse local cached replay", async t => {
-  const f = await fixture(t, async () => "verified", true);
-  const preview = await f.engine.preview(localInput(f.project, 'await agent("Verify"); throw new Error("Manual decision required");'));
-  await f.engine.start({ id: preview.id, revision: preview.revision }); const failed = await f.engine.wait(preview.id);
-  assert.equal(failed.execution, "failed"); assert.match(failed.workspaceCheckpoint!, /^local-v1:/);
-  await writeFile(path.join(f.project, "build-output"), "external artifact\n");
-  await f.engine.start({ id: failed.id, revision: failed.revision }, true); const refused = await f.engine.wait(failed.id);
-  assert.equal(refused.execution, "failed"); assert.match(refused.error!, /changed since the last checkpoint/); assert.equal(f.calls.length, 1);
-  assert.equal(await readFile(path.join(f.project, "build-output"), "utf8"), "external artifact\n");
+test("external source, ignored-artifact or meaningful Git ref changes refuse local cached replay", async t => {
+  for (const variant of ["source", "ignored-artifact", "git-ref"] as const) await t.test(variant, async child => {
+    const f = await fixture(child, async () => "verified", true); await commitFixture(f.project);
+    const preview = await f.engine.preview(localInput(f.project, 'await agent("Verify"); throw new Error("Manual decision required");'));
+    await f.engine.start({ id: preview.id, revision: preview.revision }); const failed = await f.engine.wait(preview.id);
+    assert.equal(failed.execution, "failed"); assert.match(failed.workspaceCheckpoint!, /^local-v2:/);
+    if (variant === "source") await writeFile(path.join(f.project, "source.txt"), "external source edit\n");
+    else if (variant === "ignored-artifact") await writeFile(path.join(f.project, "build-output"), "external artifact\n");
+    else await fixtureGit(f.project, ["update-ref", "refs/remotes/fixture/main", "HEAD"]);
+    await f.engine.start({ id: failed.id, revision: failed.revision }, true); const refused = await f.engine.wait(failed.id);
+    assert.equal(refused.execution, "failed"); assert.match(refused.error!, /changed since the last checkpoint/); assert.equal(f.calls.length, 1);
+    assert.equal(refused.failureContext?.recovery, "new-preview"); assert.equal(refused.workspaceCheckpoint, failed.workspaceCheckpoint);
+    assert.equal(refused.tasks[0]?.attempts.length, 1);
+    if (variant === "source") assert.equal(await readFile(path.join(f.project, "source.txt"), "utf8"), "external source edit\n");
+    if (variant === "ignored-artifact") assert.equal(await readFile(path.join(f.project, "build-output"), "utf8"), "external artifact\n");
+  });
 });
 
 test("a local crash without a reliable checkpoint cannot replay previously started workers", async t => {
@@ -138,6 +239,7 @@ test("a local crash without a reliable checkpoint cannot replay previously start
   delete failed.workspaceCheckpoint; await f.store.save(failed);
   await f.engine.start({ id: failed.id, revision: failed.revision }, true); const refused = await f.engine.wait(failed.id);
   assert.equal(refused.execution, "failed"); assert.match(refused.error!, /without a reliable checkpoint/); assert.equal(f.calls.length, 1);
+  assert.equal(refused.failureContext?.recovery, "new-preview");
 });
 
 test("local write permission is explicit and cannot be removed or converted after creating its project baseline", async t => {

@@ -254,12 +254,19 @@ export async function gitAwareContextDigest(project: string): Promise<string> { 
 // File contents alone miss same-tree branch changes, staged blobs and new refs.
 // Keep this separate from source baselines so older writable runs can resume
 // under their existing workspace validation without an artificial digest drift.
-export async function readOnlyGitContextDigest(project: string): Promise<string> {
+interface ReadOnlyGitContext {
+  head: string | null; branch: string | null;
+  index: Awaited<ReturnType<typeof readGitIndexState>>;
+  refs: string; configFingerprint: string;
+  children: Array<[string, ReadOnlyGitContext]>;
+}
+export interface ReadOnlyGitContextDigests { full: string; withoutHostCheckpoints: string }
+export async function readOnlyGitContextDigests(project: string): Promise<ReadOnlyGitContextDigests> {
   const optional = async (root: string, args: string[]) => {
     try { return await gitCommand(root, args); }
     catch (error) { if (Number((error as { code?: unknown }).code) === 1) return null; throw error; }
   };
-  const inspect = async (root: string, depth: number): Promise<unknown> => {
+  const inspect = async (root: string, depth: number): Promise<ReadOnlyGitContext> => {
     if (depth > 16) throw new Error("Git context nesting exceeds 16 levels");
     const [head, branch, index, refs, config] = await Promise.all([
       optional(root, ["rev-parse", "--verify", "--quiet", "HEAD"]),
@@ -268,14 +275,30 @@ export async function readOnlyGitContextDigest(project: string): Promise<string>
       gitCommand(root, ["for-each-ref", "--sort=refname", "--format=%(refname)%00%(objectname)%00%(symref)"]),
       gitCommand(root, ["config", "--local", "--null", "--list"]),
     ]);
-    const children = [];
+    const children: Array<[string, ReadOnlyGitContext]> = [];
     for (const entry of index.entries.filter(item => item.mode === "160000")) if (await initialized(root, entry.path)) {
       const child = await realpath(relative(root, entry.path));
       children.push([entry.path, await inspect(child, depth + 1)]);
     }
     return { head, branch, index, refs, configFingerprint: digest(config), children };
   };
-  return digest(await inspect(await realpath(project), 0));
+  const context = await inspect(await realpath(project), 0);
+  const withoutHostCheckpoints = (value: ReadOnlyGitContext): ReadOnlyGitContext => ({
+    ...value,
+    // Codex may publish its turn-diff bookkeeping refs after its worker exits.
+    // These do not alter the checked project, index or business Git references.
+    refs: value.refs.split("\n").filter(record => {
+      const separator = record.indexOf("\0");
+      const name = separator < 0 ? record : record.slice(0, separator);
+      return !name.startsWith("refs/codex/turn-diffs/checkpoints/");
+    }).join("\n"),
+    children: value.children.map(([name, child]) => [name, withoutHostCheckpoints(child)]),
+  });
+  return { full: digest(context), withoutHostCheckpoints: digest(withoutHostCheckpoints(context)) };
+}
+export async function readOnlyGitContextDigest(project: string, options: { ignoreHostCheckpoints?: boolean } = {}): Promise<string> {
+  const values = await readOnlyGitContextDigests(project);
+  return options.ignoreHostCheckpoints ? values.withoutHostCheckpoints : values.full;
 }
 export function flattenGitArtifacts(manifest: GitManifest): MaintenanceArtifact[] {
   const result: MaintenanceArtifact[] = [];

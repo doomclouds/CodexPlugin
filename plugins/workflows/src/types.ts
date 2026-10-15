@@ -78,6 +78,7 @@ export interface WorkflowRun {
   networkAccess?: boolean; workspaceMode?: WorkspaceMode;
   maintenance?: MaintenancePlan; maintenanceReview?: MaintenanceReview;
   activation?: ActivationResult; controlId?: string; workspaceCheckpoint?: string;
+  localCheckpointState?: { filesDigest: string; gitDigest: string | null };
   allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>;
   nodeSettings?: NodeSettings;
   executionSettings?: Partial<EffectiveExecutionSettings>;

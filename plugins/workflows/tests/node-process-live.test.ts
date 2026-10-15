@@ -92,7 +92,7 @@ for (const outcome of ["completed", "failed"] as const) {
     assert.deepEqual(stopResult, final);
     assert.equal(final.execution, outcome);
     assert.equal(final.workspace?.kind, "local");
-    assert.match(final.workspaceCheckpoint!, /^local-v1:/);
+    assert.match(final.workspaceCheckpoint!, /^local-v2:/);
     assert.equal(final.application, "none");
     assert.equal(await store.isLocked(draft.id), false);
     assert.deepEqual(await engine.get(draft.id), final);

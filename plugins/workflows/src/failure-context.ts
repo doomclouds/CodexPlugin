@@ -2,6 +2,7 @@ export interface WorkflowFailureContext {
   kind: "script" | "preparation" | "review" | "checkpoint";
   phase?: string;
   afterTaskId?: string;
+  recovery?: "new-preview";
 }
 
 export interface FailureContextInput {

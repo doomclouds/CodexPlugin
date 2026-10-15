@@ -292,6 +292,14 @@ export function canApply(run: WorkflowRun, tab: PanelTab): boolean {
   return run.workspaceMode !== "local" && !run.deletionPending && tab === "diff" && run.execution === "completed" && (!!run.diff?.files.length || run.maintenanceReview !== undefined || run.activation !== undefined) && ["none", "partial", "conflict", "failed"].includes(run.application);
 }
 
+export function requiresNewLocalPreview(run?: WorkflowRun): boolean {
+  if (!run || run.workspaceMode !== "local" || !["stopped", "failed"].includes(run.execution)) return false;
+  if (run.failureContext?.recovery === "new-preview") return true;
+  // Older records did not persist a structured recovery hint.
+  return run.error === "Local project or build artifacts changed since the last checkpoint. Create a new preview; cached results cannot safely replay."
+    || run.error === "Local project has previously started workers without a reliable checkpoint. Inspect existing edits and create a new preview before continuing.";
+}
+
 export function canChangeWorkspaceMode(input?: WorkflowRun | TemplateDefinition): boolean {
   if (!input) return false;
   if (!("execution" in input)) return true;
@@ -838,6 +846,7 @@ export class WorkflowPanelController {
     if (current?.deletionPending) { this.state.error = "清理未完成，请先重试删除。"; this.changed(); return; }
     if (current && current.projectPath !== input.projectPath) { this.state.error = "已有运行所属项目固定；请从工作流库在目标项目中新建运行。"; this.changed(); return; }
     if (current && ["preparing", "running", "stopping"].includes(current.execution)) return;
+    if (requiresNewLocalPreview(current)) { this.state.error = "本地检查点无法继续复用。请点击“重新检查”创建新预览，再手动启动。"; this.changed(); return; }
     const scope = (value: WorkflowInput | WorkflowRun) => ({ projectPath: value.projectPath, script: value.script, args: value.args, sourceDefinition: value.sourceDefinition, allowWrite: value.allowWrite, networkAccess: value.networkAccess ?? false, allowedMcpServers: value.allowedMcpServers ?? [], allowedMcpTools: value.allowedMcpTools ?? {}, workspaceMode: value.workspaceMode ?? "snapshot", maintenance: value.maintenance, nodeSettings: value.nodeSettings ?? {} });
     const sameLimits = !current || !input.limits || Object.entries(input.limits).every(([key, value]) => current.limits[key as keyof WorkflowRun["limits"]] === value);
     if (current && sameLimits && JSON.stringify(scope(current)) === JSON.stringify(scope(input))) {
@@ -850,12 +859,32 @@ export class WorkflowPanelController {
     if (saved) await this.perform("start", true);
   }
 
+  async recheckFromCurrent(): Promise<WorkflowRun | undefined> {
+    const current = this.selected;
+    if (!this.canAct || !current || !requiresNewLocalPreview(current) || current.deletionPending || current.application === "applying") return undefined;
+    const input = structuredClone({
+      projectPath: current.projectPath, script: current.script, args: current.args, allowWrite: current.allowWrite,
+      workspaceMode: "local" as const, networkAccess: current.networkAccess ?? false,
+      allowedMcpServers: current.allowedMcpServers ?? [], allowedMcpTools: current.allowedMcpTools ?? {},
+      nodeSettings: current.nodeSettings ?? {}, limits: current.limits,
+      ...(current.maintenance ? { maintenance: current.maintenance } : {}),
+      ...(current.sourceDefinition ? { sourceDefinition: current.sourceDefinition } : {}),
+    });
+    const saved = await this.save(input);
+    if (!saved && /Workflow definition changed or does not match the planned script/i.test(this.state.error)) {
+      this.state.error += "。工作流库中的定义已更新，请选择库中最新版本，核对参数后新建运行。";
+      this.changed();
+    }
+    return saved;
+  }
+
   async perform(action: UserAction, _userGesture = false, taskId?: string): Promise<void> {
     const detail = this.selected, run = action === "stop" ? this.stopTarget : detail;
     const allowed = action === "stop" ? this.projectBound && this.state.connection === "connected" && !this.state.reconnecting && !this.state.busy && !this.closing : this.canAct;
     if (!run || !allowed || run.deletionPending) return;
     if (action === "start" && run.execution !== "draft") return;
     if (action === "resume" && !["stopped", "failed"].includes(run.execution)) return;
+    if (action === "resume" && requiresNewLocalPreview(detail)) { this.state.error = "本地检查点无法继续复用。请点击“重新检查”创建新预览，再手动启动。"; this.changed(); return; }
     if (action === "stop" && !["preparing", "running"].includes(run.execution)) return;
     if (action === "apply" && (!detail || !canApply(detail, this.state.tab))) return;
     if (action === "cancel" && (!detail || run.execution !== "running" || !taskId || !detail.tasks.some(task => task.id === taskId && ["queued", "running"].includes(task.status)))) return;
@@ -1089,7 +1118,8 @@ export function renderNodeProcess(process: NodeProcess, now = Date.now()): strin
   const entries = process.activities.map(activity => `<li data-status="${escapeHtml(activity.status)}"><span class="wf-icon${activity.status === "running" ? " is-spinning" : ""}" data-icon="${activity.status === "running" ? "loader-2" : activity.status === "completed" ? "circle-check" : activity.status === "failed" ? "alert-circle" : "circle"}" aria-hidden="true"></span><span>${escapeHtml(activity.label)}</span><time>${elapsedLabel(activity.startedAt, activity.endedAt, now)}</time></li>`).join("");
   return `<div class="wf-facts"><span>${escapeHtml(state)}</span>${process.currentActivity ? `<span>${process.status === "running" ? "当前" : "最后活动"}：${escapeHtml(process.currentActivity.label)}</span>` : ""}</div>${process.error ? `<div class="wf-alert" role="alert">${escapeHtml(process.error)}</div>` : ""}${entries ? `<ol class="wf-timeline">${entries}</ol>` : '<p class="wf-muted">此节点尚未报告过程活动。</p>'}${process.summary ? `<div class="wf-process-result">${escapeHtml(process.summary)}</div>` : ""}`;
 }
-export function primaryWorkflowAction(run?: WorkflowRun): { action: "start" | "inspect-failure" | "retry-review"; label: string } {
+export function primaryWorkflowAction(run?: WorkflowRun): { action: "start" | "inspect-failure" | "retry-review" | "recheck"; label: string } {
+  if (requiresNewLocalPreview(run)) return { action: "recheck", label: "重新检查" };
   if (run && failureContext(run)?.kind === "review" && run.tasks.every(task => task.status === "completed")) return { action: "retry-review", label: "重试审查" };
   return run && resultCheckFailure(run) ? { action: "inspect-failure", label: "查看失败原因" } : { action: "start", label: run && ["stopped", "failed"].includes(run.execution) ? "继续" : "启动" };
 }
@@ -1338,7 +1368,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const executionText = run && stale ? "状态待确认" : !controller.projectBound ? "项目待确认" : summary ? state.detailsBusy ? "正在读取详情" : `${executionLabels[summary.execution] ?? summary.execution} · 仅摘要` : run?.deletionPending ? "清理未完成" : reviewFailed ? "改动审查失败" : resultFailure ? "结果检查失败" : run ? executionLabels[run.execution] ?? run.execution : input ? "待开始" : "待选择";
     if (stateElement.textContent !== executionText) stateElement.textContent = executionText;
     stateElement.dataset.tone = stale || run?.deletionPending ? "amber" : tone(run?.execution ?? "draft");
-    const action = (name: string, label: string, enabled: boolean, primary = false): string => `<button type="button" data-action="${name}" ${primary ? 'class="wf-primary"' : ""} ${enabled ? "" : "disabled"}><span class="wf-icon" data-icon="${name === "stop" ? "player-stop" : "player-play"}" aria-hidden="true"></span>${label}</button>`;
+    const action = (name: string, label: string, enabled: boolean, primary = false): string => `<button type="button" data-action="${name}" ${primary ? 'class="wf-primary"' : ""} ${enabled ? "" : "disabled"}><span class="wf-icon" data-icon="${name === "stop" ? "player-stop" : name === "recheck" ? "refresh" : "player-play"}" aria-hidden="true"></span>${label}</button>`;
     const canStart = controller.canAct && !run?.deletionPending && !!input && (!!run || !!activeProject() && !state.projectsError) && !live && run?.application !== "applying";
     const liveRecord = controller.stopTarget ?? run ?? summary;
     const canStop = controller.projectBound && state.connection === "connected" && !state.reconnecting && !state.busy && !!liveRecord && ["preparing", "running"].includes(liveRecord.execution);
@@ -1348,6 +1378,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const currentTask = run?.tasks.find(task => task.status === "running" || task.status === "stopping");
     const stage = run?.preparation?.stages.find(value => value.status === "running");
     element("#wf-current-action").textContent = (run && stale ? state.reconnecting ? "正在恢复连接，核对实际进度" : "连接已中断，显示上次读取的进度" : !controller.projectBound ? state.projectsBusy ? "正在确认当前聊天所属项目" : state.projectsError && !state.projectsError.startsWith("工作流仅在项目聊天") ? "无法确认当前聊天所属项目，请查看具体原因" : "请从项目聊天打开 Workflows" : summary ? state.detailsBusy ? "正在读取工作流详情" : "运行详情尚未就绪，请刷新后查看" : run?.deletionPending ? "清理未完成，可从更多操作中重试删除" : reviewFailed ? run!.tasks.every(task => task.status === "completed") ? "改动审查失败，已完成任务保留，可重试审查" : "改动审查失败，部分任务未完成，可继续恢复" : resultFailure ? `${resultFailure.phase ? resultFailure.phase + "：" : ""}结果检查未通过，查看原因后选择重试节点` : run?.execution === "preparing" ? stage?.label ?? "正在准备工作流" : run?.execution === "stopped" ? stopSummary(run.stopReason) : currentTask?.currentActivity?.label ?? currentTask?.label ?? (run?.execution === "failed" ? run.tasks.length ? "工作流执行失败，点击失败节点查看原因" : "启动准备失败，点击准备步骤查看原因" : run?.execution === "completed" ? "工作流执行完成" : input?.meta?.description || definition?.description || input?.meta?.name || "选择工作流，查看执行过程")).slice(0, 160);
+    if (!stale && requiresNewLocalPreview(run)) element("#wf-current-action").textContent = "本地检查点无法继续复用，点击“重新检查”创建新预览；现有文件保留。";
     const latestAt = [currentTask?.currentActivity?.endedAt, currentTask?.currentActivity?.startedAt, run?.logs.at(-1)?.at, run?.updatedAt].filter((value): value is string => !!value && Number.isFinite(Date.parse(value))).sort((left, right) => Date.parse(right) - Date.parse(left))[0];
     const observedNow = stale && run && Number.isFinite(Date.parse(run.updatedAt)) ? Date.parse(run.updatedAt) : Date.now();
     const elapsed = elapsedLabel(run?.startedAt ?? run?.preparation?.startedAt, run?.endedAt, observedNow);
@@ -1608,6 +1639,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (action.dataset.action === "stop") { void controller.perform("stop", true); return; }
     if (action.dataset.action === "inspect-failure") { openFailureProcess(action); return; }
     if (action.dataset.action === "retry-review") { void controller.perform("resume", true); return; }
+    if (action.dataset.action === "recheck") { void controller.recheckFromCurrent(); return; }
     if (action.dataset.action === "start") {
       try { const input = readInput(); argsValue = input.args; parameterError.hidden = true; void controller.startWithInput(input); }
       catch (error) { parameterSnapshot = structuredClone(argsValue); workspaceModeSnapshot = workspaceModeValue; parametersSaved = false; parameterError.textContent = errorMessage(error); parameterError.hidden = false; openDialog(parameterDialog, element("#wf-parameters-toggle")); }

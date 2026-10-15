@@ -45008,7 +45008,7 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.6.2",
+    version: "0.6.3",
     stage: "runtime-v2",
     available: ["host-thread-directory-binding", "bounded-run-transport", "artifact-pagination", "paged-run-summaries", "bounded-diff-preview", "declared-protected-command-paths", "explicit-task-retry", "snapshot-checkpoint", "git-context-cache", "preparation-progress", "node-activity", "node-process", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "local-project-writing", "project-writer-serialization", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: true, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree", "local"], localMode: { requiresAllowWrite: true, writesOriginalProject: true, requiresApply: false, automaticRollback: false, deletionOwnsProject: false, maintenanceSupported: false, maxConcurrentProjectWriters: 1, coordinationScope: "shared-workflows-data-directory", externalEditorsSerialized: false }, submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
@@ -45868,7 +45868,7 @@ var CodexAdapter = class {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.2" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.3" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config2 = object4(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config2, cwd);
@@ -46026,7 +46026,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.2" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.3" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -46257,7 +46257,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.2" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.3" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object4(object4(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== void 0 || request.reasoningEffort !== void 0) {
@@ -46704,7 +46704,7 @@ async function inspectGitManifest(project, options = {}) {
 async function gitAwareContextDigest(project) {
   return digest(await inspectGitManifest(project));
 }
-async function readOnlyGitContextDigest(project) {
+async function readOnlyGitContextDigests(project) {
   const optional2 = async (root, args) => {
     try {
       return await gitCommand(root, args);
@@ -46729,7 +46729,23 @@ async function readOnlyGitContextDigest(project) {
     }
     return { head: head2, branch: branch2, index, refs, configFingerprint: digest(config2), children };
   };
-  return digest(await inspect(await realpath2(project), 0));
+  const context = await inspect(await realpath2(project), 0);
+  const withoutHostCheckpoints = (value) => ({
+    ...value,
+    // Codex may publish its turn-diff bookkeeping refs after its worker exits.
+    // These do not alter the checked project, index or business Git references.
+    refs: value.refs.split("\n").filter((record5) => {
+      const separator = record5.indexOf("\0");
+      const name = separator < 0 ? record5 : record5.slice(0, separator);
+      return !name.startsWith("refs/codex/turn-diffs/checkpoints/");
+    }).join("\n"),
+    children: value.children.map(([name, child]) => [name, withoutHostCheckpoints(child)])
+  });
+  return { full: digest(context), withoutHostCheckpoints: digest(withoutHostCheckpoints(context)) };
+}
+async function readOnlyGitContextDigest(project, options = {}) {
+  const values = await readOnlyGitContextDigests(project);
+  return options.ignoreHostCheckpoints ? values.withoutHostCheckpoints : values.full;
 }
 function flattenGitArtifacts(manifest) {
   const result2 = [];
@@ -48032,25 +48048,33 @@ async function createLocalWorkspace(projectPath, runDirectory, signal) {
   }
   await rm6(baselineRoot, { recursive: true, force: true });
   await mkdir7(baselineRoot, { mode: 448 });
-  const beforeGit = await gitRoot(root) ? await readOnlyGitContextDigest(root) : void 0;
+  const beforeGit = await gitRoot(root) ? await readOnlyGitContextDigest(root, { ignoreHostCheckpoints: true }) : void 0;
   const captured = await scan(root, false, sourceLimit, signal, baselineRoot);
-  const afterGit = await gitRoot(root) ? await readOnlyGitContextDigest(root) : void 0;
+  const afterGit = await gitRoot(root) ? await readOnlyGitContextDigest(root, { ignoreHostCheckpoints: true }) : void 0;
   if (beforeGit !== afterGit) throw new Error("Local Git state changed while capturing the baseline");
   const workspace = { root, original: root, kind: "local", baselineRoot, baseline: captured.records, rootIdentity: { dev: identity.dev, ino: identity.ino } };
   await validateLocalWorkspace(workspace, root, run);
   await baseline(workspace);
   return workspace;
 }
-async function localWorkspaceFingerprint(workspace, signal) {
+async function captureLocalWorkspaceCheckpoints(workspace, signal) {
   signal?.throwIfAborted();
   await validate2(workspace);
   await baseline(workspace);
-  const gitBefore = await gitRoot(workspace.root) ? await readOnlyGitContextDigest(workspace.root) : void 0;
+  const gitBefore = await gitRoot(workspace.root) ? await readOnlyGitContextDigests(workspace.root) : void 0;
   const current2 = await scan(workspace.root, true, checkpointLimit, signal);
-  const gitAfter = await gitRoot(workspace.root) ? await readOnlyGitContextDigest(workspace.root) : void 0;
-  if (gitBefore !== gitAfter) throw new Error("Local Git state changed during checkpoint hashing");
+  const gitAfter = await gitRoot(workspace.root) ? await readOnlyGitContextDigests(workspace.root) : void 0;
+  if (gitBefore?.withoutHostCheckpoints !== gitAfter?.withoutHostCheckpoints) throw new Error("Local Git state changed during checkpoint hashing");
   await validate2(workspace);
-  return `local-v1:${hash3({ rootIdentity: workspace.rootIdentity, files: current2.records, git: gitAfter ?? null })}`;
+  const fingerprint2 = (git2) => hash3({ rootIdentity: workspace.rootIdentity, files: current2.records, git: git2 ?? null });
+  const filtered = fingerprint2(gitAfter?.withoutHostCheckpoints);
+  return {
+    current: `local-v2:${filtered}`,
+    ...gitBefore?.full === gitAfter?.full ? { legacy: `local-v1:${fingerprint2(gitAfter?.full)}` } : {},
+    legacyWithoutHostCheckpoints: `local-v1:${filtered}`,
+    filesDigest: hash3(current2.records),
+    gitDigest: gitAfter?.withoutHostCheckpoints ?? null
+  };
 }
 async function fileDiff(cwd, left, right, full) {
   const env = { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" };
@@ -48938,7 +48962,7 @@ function registerPanelToolWithIcons(server2, register) {
   }
 }
 function createServer(engine2, options = {}) {
-  const serverInfo = { name: "workflows", version: "0.6.2", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.6.3", icons: panelIcons };
   const panelHtml = readFileSync3(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);
@@ -49294,9 +49318,10 @@ function nodeProcess(run, input2) {
   const current2 = tasks.find((task) => task.currentActivity?.status === "running")?.currentActivity ?? last?.currentActivity;
   const failure2 = resultCheckFailure(run);
   const reviewFailed = input2.scope === "workflow" && failureContext(run)?.kind === "review";
+  const newPreviewRequired = input2.scope === "workflow" && failureContext(run)?.recovery === "new-preview";
   const failedAfterTasks = Boolean(failure2 && (input2.scope === "workflow" || input2.phase && input2.phase === failure2.phase || tasks.some((task) => task.id === failure2.afterTaskId)));
   const error62 = reviewFailed ? run.error : tasks.find((task) => task.status === "failed")?.error ?? (input2.scope === "workflow" || failedAfterTasks ? run.error : void 0);
-  const summary = reviewFailed ? run.tasks.every((task) => task.status === "completed") ? "\u4EFB\u52A1\u5DF2\u5B8C\u6210\uFF0C\u751F\u6210\u6539\u52A8\u5BA1\u67E5\u5931\u8D25\uFF0C\u53EF\u91CD\u8BD5\u5BA1\u67E5\u3002" : "\u90E8\u5206\u4EFB\u52A1\u672A\u6210\u529F\uFF0C\u7EE7\u7EED\u65F6\u4F1A\u91CD\u65B0\u6267\u884C\u5931\u6548\u4EFB\u52A1\u5E76\u91CD\u65B0\u751F\u6210\u5BA1\u67E5\u3002" : failedAfterTasks ? "\u4EFB\u52A1\u6267\u884C\u5DF2\u5B8C\u6210\uFF0C\u4F46\u5DE5\u4F5C\u6D41\u5728\u540E\u7EED\u68C0\u67E5\u6216\u7ED3\u679C\u5224\u65AD\u65F6\u5931\u8D25\u3002\u8BF7\u6838\u5BF9\u9519\u8BEF\uFF0C\u518D\u9009\u62E9\u662F\u5426\u4ECE\u6B64\u8282\u70B9\u91CD\u8BD5\u3002" : status === "failed" ? "\u672C\u8282\u70B9\u6267\u884C\u5931\u8D25\uFF0C\u67E5\u770B\u9519\u8BEF\u4E0E\u8FC7\u7A0B\u540E\u518D\u51B3\u5B9A\u662F\u5426\u7EE7\u7EED\u3002" : status === "completed" ? "\u672C\u8282\u70B9\u5DF2\u5B8C\u6210\u3002" : status === "preparing" ? prep.find((activity) => activity.status === "running")?.label ?? "\u6B63\u5728\u51C6\u5907\u5DE5\u4F5C\u6D41\u3002" : status === "running" ? current2?.label ?? "\u6B63\u5728\u6267\u884C\u4EFB\u52A1\uFF0C\u7B49\u5F85\u65B0\u7684\u6D3B\u52A8\u3002" : status === "stopping" ? "\u6B63\u5728\u7B49\u5F85\u4EFB\u52A1\u9000\u51FA\u3002" : status === "interrupted" || status === "stopped" ? stopSummary(run.stopReason) : "\u672C\u8282\u70B9\u5C1A\u672A\u6267\u884C\u3002";
+  const summary = newPreviewRequired ? "\u65E7\u68C0\u67E5\u70B9\u65E0\u6CD5\u590D\u7528\u3002\u70B9\u51FB\u201C\u91CD\u65B0\u68C0\u67E5\u201D\u521B\u5EFA\u65B0\u9884\u89C8\uFF0C\u6838\u5BF9\u5F53\u524D\u9879\u76EE\u540E\u518D\u542F\u52A8\uFF1B\u73B0\u6709\u6587\u4EF6\u548C\u65E7\u8FD0\u884C\u4FDD\u7559\u3002" : reviewFailed ? run.tasks.every((task) => task.status === "completed") ? "\u4EFB\u52A1\u5DF2\u5B8C\u6210\uFF0C\u751F\u6210\u6539\u52A8\u5BA1\u67E5\u5931\u8D25\uFF0C\u53EF\u91CD\u8BD5\u5BA1\u67E5\u3002" : "\u90E8\u5206\u4EFB\u52A1\u672A\u6210\u529F\uFF0C\u7EE7\u7EED\u65F6\u4F1A\u91CD\u65B0\u6267\u884C\u5931\u6548\u4EFB\u52A1\u5E76\u91CD\u65B0\u751F\u6210\u5BA1\u67E5\u3002" : failedAfterTasks ? "\u4EFB\u52A1\u6267\u884C\u5DF2\u5B8C\u6210\uFF0C\u4F46\u5DE5\u4F5C\u6D41\u5728\u540E\u7EED\u68C0\u67E5\u6216\u7ED3\u679C\u5224\u65AD\u65F6\u5931\u8D25\u3002\u8BF7\u6838\u5BF9\u9519\u8BEF\uFF0C\u518D\u9009\u62E9\u662F\u5426\u4ECE\u6B64\u8282\u70B9\u91CD\u8BD5\u3002" : status === "failed" ? "\u672C\u8282\u70B9\u6267\u884C\u5931\u8D25\uFF0C\u67E5\u770B\u9519\u8BEF\u4E0E\u8FC7\u7A0B\u540E\u518D\u51B3\u5B9A\u662F\u5426\u7EE7\u7EED\u3002" : status === "completed" ? "\u672C\u8282\u70B9\u5DF2\u5B8C\u6210\u3002" : status === "preparing" ? prep.find((activity) => activity.status === "running")?.label ?? "\u6B63\u5728\u51C6\u5907\u5DE5\u4F5C\u6D41\u3002" : status === "running" ? current2?.label ?? "\u6B63\u5728\u6267\u884C\u4EFB\u52A1\uFF0C\u7B49\u5F85\u65B0\u7684\u6D3B\u52A8\u3002" : status === "stopping" ? "\u6B63\u5728\u7B49\u5F85\u4EFB\u52A1\u9000\u51FA\u3002" : status === "interrupted" || status === "stopped" ? stopSummary(run.stopReason) : "\u672C\u8282\u70B9\u5C1A\u672A\u6267\u884C\u3002";
   const ids = new Set(tasks.map((task) => task.id));
   return {
     id: run.id,
@@ -49535,6 +49560,9 @@ var digest2 = (value) => createHash9("sha256").update(JSON.stringify(canonical(v
 var message = (error62) => error62 instanceof Error ? error62.message : String(error62);
 var defaults = { maxReadWorkers: 4, maxCalls: 1e3, timeoutMs: 60 * 60 * 1e3, maxTokens: 0 };
 var taskFingerprint = (prompt, options, settings) => digest2({ prompt, options, ...settings?.model || settings?.reasoningEffort ? { executionSettings: { model: settings.model, reasoningEffort: settings.reasoningEffort } } : {} });
+var LocalReplayError = class extends Error {
+  recovery = "new-preview";
+};
 var Pool = class {
   running = 0;
   waiting = [];
@@ -50109,8 +50137,19 @@ var WorkflowEngine = class {
           if (!run.workspace || run.workspace.kind !== "local" || run.workspacePath !== run.workspace.root) throw new Error("Local project workspace identity is missing or inconsistent");
           await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id));
           if (run.workspaceCheckpoint) {
-            if (!run.workspaceCheckpoint.startsWith("local-v1:") || await localWorkspaceFingerprint(run.workspace, active.controller.signal) !== run.workspaceCheckpoint) throw new Error("Local project or build artifacts changed since the last checkpoint. Create a new preview; cached results cannot safely replay.");
-          } else if (run.tasks.some((task) => task.status === "completed" || task.attempts.some((attempt) => attempt.startedAt))) throw new Error("Local project has previously started workers without a reliable checkpoint. Inspect existing edits and create a new preview before continuing.");
+            const checkpoints = await captureLocalWorkspaceCheckpoints(run.workspace, active.controller.signal);
+            const saved = run.workspaceCheckpoint;
+            const verified = saved.startsWith("local-v2:") ? saved === checkpoints.current : saved.startsWith("local-v1:") && (saved === checkpoints.legacy || saved === checkpoints.legacyWithoutHostCheckpoints);
+            if (!verified) {
+              const changed = run.localCheckpointState ? [
+                ...run.localCheckpointState.filesDigest !== checkpoints.filesDigest ? ["\u9879\u76EE\u6587\u4EF6\u6216\u5FFD\u7565\u4EA7\u7269"] : [],
+                ...run.localCheckpointState.gitDigest !== checkpoints.gitDigest ? ["Git \u63D0\u4EA4\u3001\u5206\u652F\u3001\u7D22\u5F15\u6216\u914D\u7F6E"] : []
+              ] : [];
+              const detail = changed.length ? `\u53D8\u5316\u8303\u56F4\uFF1A${changed.join("\u3001")}\u3002` : "\u65E7\u68C0\u67E5\u70B9\u65E0\u6CD5\u5B8C\u6574\u6838\u9A8C\u3002";
+              throw new LocalReplayError(`Local project or build artifacts changed since the last checkpoint. ${detail}\u8BF7\u70B9\u51FB\u201C\u91CD\u65B0\u68C0\u67E5\u201D\u521B\u5EFA\u65B0\u9884\u89C8\uFF0C\u518D\u4ECE\u5934\u6838\u5BF9\u5F53\u524D\u9879\u76EE\uFF1B\u539F\u9879\u76EE\u5DF2\u6709\u6539\u52A8\u4F1A\u4FDD\u7559\u3002`);
+            }
+            if (saved.startsWith("local-v1:")) this.log(run, "Legacy local checkpoint verified exactly; Codex internal turn checkpoints are excluded from future project checkpoints.");
+          } else if (run.tasks.some((task) => task.status === "completed" || task.attempts.some((attempt) => attempt.startedAt))) throw new LocalReplayError("Local project has previously started workers without a reliable checkpoint. \u8BF7\u70B9\u51FB\u201C\u91CD\u65B0\u68C0\u67E5\u201D\u521B\u5EFA\u65B0\u9884\u89C8\uFF0C\u6838\u5BF9\u5DF2\u6709\u6539\u52A8\u540E\u518D\u542F\u52A8\u3002");
         } else if (run.workspace?.kind === "git-worktree") {
           await validateGitWorkspace(run.workspace);
           if (run.workspaceCheckpoint && await maintenanceFingerprint(run.workspace) !== run.workspaceCheckpoint) throw new Error("Saved Git checkout or artifacts changed; cached steps cannot safely replay. Create a new preview.");
@@ -50123,7 +50162,10 @@ var WorkflowEngine = class {
       });
       run.preparation.endedAt = now();
       run.execution = "running";
-      if (run.workspaceMode === "local") delete run.workspaceCheckpoint;
+      if (run.workspaceMode === "local") {
+        delete run.workspaceCheckpoint;
+        delete run.localCheckpointState;
+      }
       this.log(run, resume ? "Manual resume: replaying script and validating saved results in launch order." : "Execution prepared; dispatching workflow tasks.");
       await this.persist(run);
       this.preparationGuard(run, active);
@@ -50139,7 +50181,7 @@ var WorkflowEngine = class {
         this.log(run, stopSummary(run.stopReason));
       } else {
         run.error = message(error62);
-        run.failureContext = { kind: "preparation" };
+        run.failureContext = { kind: "preparation", ...error62 instanceof LocalReplayError ? { recovery: error62.recovery } : {} };
         this.log(run, run.error, void 0, "error");
       }
       await this.persist(run);
@@ -50399,12 +50441,15 @@ ${prompt}`,
       if (run.workspace?.kind === "local") {
         try {
           await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id));
-          run.workspaceCheckpoint = await localWorkspaceFingerprint(run.workspace);
+          const checkpoint = await captureLocalWorkspaceCheckpoints(run.workspace);
+          run.workspaceCheckpoint = checkpoint.current;
+          run.localCheckpointState = { filesDigest: checkpoint.filesDigest, gitDigest: checkpoint.gitDigest };
         } catch (error62) {
           delete run.workspaceCheckpoint;
+          delete run.localCheckpointState;
           run.execution = run.execution === "completed" ? "failed" : run.execution;
           run.error = `Could not checkpoint local project: ${message(error62)}`;
-          run.failureContext = { kind: "checkpoint", ...phase ? { phase } : {} };
+          run.failureContext = { kind: "checkpoint", recovery: "new-preview", ...phase ? { phase } : {} };
           this.log(run, run.error, void 0, "error");
         }
       } else if (run.workspace?.kind === "git-worktree") {

@@ -7,7 +7,7 @@ import { executeScript, validateScript, validateWorkflowArgs } from "./script.ts
 import { RunStore } from "./store.ts";
 import { listGitlinks, gitAwareContextDigest, readOnlyGitContextDigest } from "./submodules.ts";
 import { snapshotFingerprint } from "./snapshot-checkpoint.ts";
-import { createLocalWorkspace, validateLocalWorkspace, localWorkspaceDiff, localWorkspaceFingerprint } from "./local-workspace.ts";
+import { createLocalWorkspace, validateLocalWorkspace, localWorkspaceDiff, captureLocalWorkspaceCheckpoints } from "./local-workspace.ts";
 import { stopSummary } from "./stop-context.ts";
 import { nodeProcess } from "./node-process.ts";
 import type { WorkflowStopReason } from "./stop-context.ts";
@@ -28,6 +28,10 @@ const message = (error: unknown) => error instanceof Error ? error.message : Str
 const defaults: Limits = { maxReadWorkers: 4, maxCalls: 1000, timeoutMs: 60 * 60 * 1000, maxTokens: 0 };
 const taskFingerprint = (prompt: string, options: Record<string, unknown>, settings?: EffectiveExecutionSettings) => digest({ prompt, options, ...(settings?.model || settings?.reasoningEffort ? { executionSettings: { model: settings.model, reasoningEffort: settings.reasoningEffort } } : {}) });
 interface Active { controller: AbortController; done: Promise<void>; tasks: Map<string, AbortController>; environment?: ExecutionEnvironment; environmentPromise?: Promise<ExecutionEnvironment> }
+
+class LocalReplayError extends Error {
+  readonly recovery = "new-preview";
+}
 
 class Pool {
   private running = 0;
@@ -457,8 +461,19 @@ export class WorkflowEngine {
           if (!run.workspace || run.workspace.kind !== "local" || run.workspacePath !== run.workspace.root) throw new Error("Local project workspace identity is missing or inconsistent");
           await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id));
           if (run.workspaceCheckpoint) {
-            if (!run.workspaceCheckpoint.startsWith("local-v1:") || await localWorkspaceFingerprint(run.workspace, active.controller.signal) !== run.workspaceCheckpoint) throw new Error("Local project or build artifacts changed since the last checkpoint. Create a new preview; cached results cannot safely replay.");
-          } else if (run.tasks.some(task => task.status === "completed" || task.attempts.some(attempt => attempt.startedAt))) throw new Error("Local project has previously started workers without a reliable checkpoint. Inspect existing edits and create a new preview before continuing.");
+            const checkpoints = await captureLocalWorkspaceCheckpoints(run.workspace, active.controller.signal);
+            const saved = run.workspaceCheckpoint;
+            const verified = saved.startsWith("local-v2:") ? saved === checkpoints.current : saved.startsWith("local-v1:") && (saved === checkpoints.legacy || saved === checkpoints.legacyWithoutHostCheckpoints);
+            if (!verified) {
+              const changed = run.localCheckpointState ? [
+                ...(run.localCheckpointState.filesDigest !== checkpoints.filesDigest ? ["项目文件或忽略产物"] : []),
+                ...(run.localCheckpointState.gitDigest !== checkpoints.gitDigest ? ["Git 提交、分支、索引或配置"] : []),
+              ] : [];
+              const detail = changed.length ? `变化范围：${changed.join("、")}。` : "旧检查点无法完整核验。";
+              throw new LocalReplayError(`Local project or build artifacts changed since the last checkpoint. ${detail}请点击“重新检查”创建新预览，再从头核对当前项目；原项目已有改动会保留。`);
+            }
+            if (saved.startsWith("local-v1:")) this.log(run, "Legacy local checkpoint verified exactly; Codex internal turn checkpoints are excluded from future project checkpoints.");
+          } else if (run.tasks.some(task => task.status === "completed" || task.attempts.some(attempt => attempt.startedAt))) throw new LocalReplayError("Local project has previously started workers without a reliable checkpoint. 请点击“重新检查”创建新预览，核对已有改动后再启动。");
         } else if (run.workspace?.kind === "git-worktree") {
           await validateGitWorkspace(run.workspace);
           if (run.workspaceCheckpoint && await maintenanceFingerprint(run.workspace) !== run.workspaceCheckpoint) throw new Error("Saved Git checkout or artifacts changed; cached steps cannot safely replay. Create a new preview.");
@@ -470,7 +485,7 @@ export class WorkflowEngine {
         }
       });
       run.preparation!.endedAt = now(); run.execution = "running";
-      if (run.workspaceMode === "local") delete run.workspaceCheckpoint;
+      if (run.workspaceMode === "local") { delete run.workspaceCheckpoint; delete run.localCheckpointState; }
       this.log(run, resume ? "Manual resume: replaying script and validating saved results in launch order." : "Execution prepared; dispatching workflow tasks.");
       await this.persist(run);
       this.preparationGuard(run, active);
@@ -480,7 +495,7 @@ export class WorkflowEngine {
       this.finishPreparation(run, interrupted ? "interrupted" : "failed");
       run.execution = interrupted ? "stopped" : "failed"; run.endedAt = now();
       if (interrupted) { run.stopReason ??= this.closing ? "service-shutdown" : "requested"; delete run.error; this.log(run, stopSummary(run.stopReason)); }
-      else { run.error = message(error); run.failureContext = { kind: "preparation" }; this.log(run, run.error, undefined, "error"); }
+      else { run.error = message(error); run.failureContext = { kind: "preparation", ...(error instanceof LocalReplayError ? { recovery: error.recovery } : {}) }; this.log(run, run.error, undefined, "error"); }
       await this.persist(run);
     } finally {
       await releaseProject?.();
@@ -682,8 +697,13 @@ export class WorkflowEngine {
       else this.log(run, run.error!, undefined, "error");
     } finally {
       if (run.workspace?.kind === "local") {
-        try { await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id)); run.workspaceCheckpoint = await localWorkspaceFingerprint(run.workspace); }
-        catch (error) { delete run.workspaceCheckpoint; run.execution = run.execution === "completed" ? "failed" : run.execution; run.error = `Could not checkpoint local project: ${message(error)}`; run.failureContext = { kind: "checkpoint", ...(phase ? { phase } : {}) }; this.log(run, run.error, undefined, "error"); }
+        try {
+          await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id));
+          const checkpoint = await captureLocalWorkspaceCheckpoints(run.workspace);
+          run.workspaceCheckpoint = checkpoint.current;
+          run.localCheckpointState = { filesDigest: checkpoint.filesDigest, gitDigest: checkpoint.gitDigest };
+        }
+        catch (error) { delete run.workspaceCheckpoint; delete run.localCheckpointState; run.execution = run.execution === "completed" ? "failed" : run.execution; run.error = `Could not checkpoint local project: ${message(error)}`; run.failureContext = { kind: "checkpoint", recovery: "new-preview", ...(phase ? { phase } : {}) }; this.log(run, run.error, undefined, "error"); }
       } else if (run.workspace?.kind === "git-worktree") {
         try { run.workspaceCheckpoint = await maintenanceFingerprint(run.workspace); }
         catch (error) { run.execution = run.execution === "completed" ? "failed" : run.execution; run.error = `Could not checkpoint isolated checkout: ${message(error)}`; run.failureContext = { kind: "checkpoint", ...(phase ? { phase } : {}) }; this.log(run, run.error, undefined, "error"); }

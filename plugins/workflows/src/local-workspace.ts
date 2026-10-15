@@ -5,7 +5,7 @@ import { lstat, mkdir, open, readdir, readlink, realpath, rm, symlink } from "no
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { Diff, FileRecord, Workspace } from "./types.ts";
-import { gitCommand, readGitIndex, readOnlyGitContextDigest } from "./submodules.ts";
+import { gitCommand, readGitIndex, readOnlyGitContextDigest, readOnlyGitContextDigests } from "./submodules.ts";
 
 const sourceLimit = 256 * 1024 * 1024;
 const checkpointLimit = 2 * 1024 * 1024 * 1024;
@@ -201,24 +201,39 @@ export async function createLocalWorkspace(projectPath: string, runDirectory: st
   try { await directory(baselineRoot); } catch (error) { if (!absent(error)) throw error; }
   await rm(baselineRoot, { recursive: true, force: true });
   await mkdir(baselineRoot, { mode: 0o700 });
-  const beforeGit = await gitRoot(root) ? await readOnlyGitContextDigest(root) : undefined;
+  const beforeGit = await gitRoot(root) ? await readOnlyGitContextDigest(root, { ignoreHostCheckpoints: true }) : undefined;
   const captured = await scan(root, false, sourceLimit, signal, baselineRoot);
-  const afterGit = await gitRoot(root) ? await readOnlyGitContextDigest(root) : undefined;
+  const afterGit = await gitRoot(root) ? await readOnlyGitContextDigest(root, { ignoreHostCheckpoints: true }) : undefined;
   if (beforeGit !== afterGit) throw new Error("Local Git state changed while capturing the baseline");
   const workspace: Workspace = { root, original: root, kind: "local", baselineRoot, baseline: captured.records, rootIdentity: { dev: identity.dev, ino: identity.ino } };
   await validateLocalWorkspace(workspace, root, run);
   await baseline(workspace);
   return workspace;
 }
-export async function localWorkspaceFingerprint(workspace: Workspace, signal?: AbortSignal): Promise<string> {
+export interface LocalWorkspaceCheckpoints {
+  current: string; legacy?: string; legacyWithoutHostCheckpoints: string;
+  filesDigest: string; gitDigest: string | null;
+}
+export async function captureLocalWorkspaceCheckpoints(workspace: Workspace, signal?: AbortSignal): Promise<LocalWorkspaceCheckpoints> {
   signal?.throwIfAborted();
   await validate(workspace); await baseline(workspace);
-  const gitBefore = await gitRoot(workspace.root) ? await readOnlyGitContextDigest(workspace.root) : undefined;
+  const gitBefore = await gitRoot(workspace.root) ? await readOnlyGitContextDigests(workspace.root) : undefined;
   const current = await scan(workspace.root, true, checkpointLimit, signal);
-  const gitAfter = await gitRoot(workspace.root) ? await readOnlyGitContextDigest(workspace.root) : undefined;
-  if (gitBefore !== gitAfter) throw new Error("Local Git state changed during checkpoint hashing");
+  const gitAfter = await gitRoot(workspace.root) ? await readOnlyGitContextDigests(workspace.root) : undefined;
+  if (gitBefore?.withoutHostCheckpoints !== gitAfter?.withoutHostCheckpoints) throw new Error("Local Git state changed during checkpoint hashing");
   await validate(workspace);
-  return `local-v1:${hash({ rootIdentity: workspace.rootIdentity, files: current.records, git: gitAfter ?? null })}`;
+  const fingerprint = (git: string | undefined) => hash({ rootIdentity: workspace.rootIdentity, files: current.records, git: git ?? null });
+  const filtered = fingerprint(gitAfter?.withoutHostCheckpoints);
+  return {
+    current: `local-v2:${filtered}`,
+    ...(gitBefore?.full === gitAfter?.full ? { legacy: `local-v1:${fingerprint(gitAfter?.full)}` } : {}),
+    legacyWithoutHostCheckpoints: `local-v1:${filtered}`,
+    filesDigest: hash(current.records),
+    gitDigest: gitAfter?.withoutHostCheckpoints ?? null,
+  };
+}
+export async function localWorkspaceFingerprint(workspace: Workspace, signal?: AbortSignal): Promise<string> {
+  return (await captureLocalWorkspaceCheckpoints(workspace, signal)).current;
 }
 async function fileDiff(cwd: string, left: string, right: string, full: ReturnType<typeof createHash>): Promise<{ text: string; bytes: number; truncated: boolean }> {
   const env = { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" };
