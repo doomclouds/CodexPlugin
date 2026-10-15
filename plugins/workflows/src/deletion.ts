@@ -6,6 +6,7 @@ import type { DeletedRunSummary } from "./store.ts";
 import { TemplateStore } from "./templates.ts";
 import type { WorkflowRun } from "./types.ts";
 import { inspectProjectTemporaryFiles } from "./project-temps.ts";
+import { validateLocalWorkspaceForDeletion } from "./local-workspace.ts";
 
 export type DeleteInput = { kind: "run"; id: string; revision: number } | { kind: "definition"; id: string; revision: number; runIds?: string[]; includeAssociatedRuns?: true };
 export interface DeletionBlock { code: string; message: string; runId?: string; path?: string; reference?: { source: string; serverName?: string; field?: string } }
@@ -230,7 +231,12 @@ export class DeletionService {
         result.runs.push({ id: run.id, revision: run.revision, name: run.meta.name, projectPath: run.projectPath });
         if (["preparing", "running", "stopping"].includes(run.execution) || run.application === "applying") blocked.push({ code: "active", runId: run.id, message: "工作流仍在准备、执行或应用；请先停止并等待后台进程退出，再重新预览删除。" });
         let workspaceOwned = true;
-        if (run.workspace) {
+        if (run.workspace?.kind === "local") {
+          try {
+            if (!canonicalDirectory || !run.allowWrite || run.workspaceMode !== "local" || run.workspacePath !== run.workspace.root) throw new Error("Local workspace record does not match its execution scope");
+            await validateLocalWorkspaceForDeletion(run.workspace, run.projectPath, canonicalDirectory);
+          } catch { workspaceOwned = false; }
+        } else if (run.workspace) {
           // Derive aliases only from the verified owned run directory. Never
           // resolve a record-supplied workspace path to infer ownership.
           const expected = [path.join(directory, "workspace"), ...(canonicalDirectory ? [path.join(canonicalDirectory, "workspace")] : [])];
@@ -241,7 +247,7 @@ export class DeletionService {
           }
         }
         if (run.workspace && !workspaceOwned) blocked.push({ code: "workspace_ownership", runId: run.id, path: run.workspace.root, message: "工作区位置不属于该运行，不能自动删除。请先核对工作区所有权。" });
-        else if (run.workspace && run.workspace.kind !== "git-worktree") {
+        else if (run.workspace && run.workspace.kind !== "git-worktree" && run.workspace.kind !== "local") {
           try {
             const temporary = await inspectProjectTemporaryFiles(run.workspace);
             for (const item of temporary.owned) {
@@ -358,7 +364,7 @@ export class DeletionService {
             try { await this.store.ownedDirectory(run.id); } catch (error) { if (!absent(error)) throw error; }
             let record: WorkflowRun | undefined;
             try { record = await this.store.loadForDeletion(run.id); } catch (error) { if (!absent(error)) throw error; }
-            if (record?.workspace && record.workspace.kind !== "git-worktree") {
+            if (record?.workspace && record.workspace.kind !== "git-worktree" && record.workspace.kind !== "local") {
               const temporary = await inspectProjectTemporaryFiles(record.workspace, true);
               if (temporary.blocked.length) {
                 for (const item of temporary.blocked) result.remaining.push({ path: item.path, reason: item.message });

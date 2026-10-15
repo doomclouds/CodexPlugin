@@ -4,6 +4,7 @@ import type { WorkflowFailureContext } from "./failure-context.ts";
 import type { WorkflowStopReason } from "./stop-context.ts";
 
 export type TaskStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stopping";
+export type WorkspaceMode = "snapshot" | "git-worktree" | "local";
 export interface Activity {
   id: string;
   kind: "initializing" | "command" | "files" | "search" | "mcp" | "message" | "waiting";
@@ -39,7 +40,9 @@ export interface Limits { maxReadWorkers: number; maxCalls: number; timeoutMs: n
 export interface FileRecord { hash: string; mode: number; kind: "file" | "link" }
 export interface Workspace {
   root: string; baseline: Record<string, FileRecord>; original: string;
-  kind?: "snapshot" | "git-worktree";
+  kind?: WorkspaceMode;
+  baselineRoot?: string;
+  rootIdentity?: { dev: number; ino: number };
   git?: { base: string; branch: string; upstream?: string; target?: string };
 }
 export interface Diff {
@@ -72,7 +75,7 @@ export interface WorkflowRun {
   tasks: Task[]; logs: Array<{ at: string; level: "info" | "error"; message: string; taskId?: string }>;
   workspace?: Workspace; workspacePath?: string; diff?: Diff; result?: unknown; error?: string;
   leaseId?: string; scriptDigest: string; contextDigest?: string;
-  networkAccess?: boolean; workspaceMode?: "snapshot" | "git-worktree";
+  networkAccess?: boolean; workspaceMode?: WorkspaceMode;
   maintenance?: MaintenancePlan; maintenanceReview?: MaintenanceReview;
   activation?: ActivationResult; controlId?: string; workspaceCheckpoint?: string;
   allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>;

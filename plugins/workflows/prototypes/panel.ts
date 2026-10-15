@@ -6,6 +6,8 @@ import { stopSummary } from "../src/stop-context.ts";
 import type { WorkflowStopReason } from "../src/stop-context.ts";
 import type { WorkflowFailureContext } from "../src/failure-context.ts";
 
+export type WorkspaceMode = "snapshot" | "git-worktree" | "local";
+
 export interface ExecutionChoice { model?: string; reasoningEffort?: string }
 export interface NodeExecutionChoice extends ExecutionChoice { identity?: string }
 export type NodeSettings = Record<string, NodeExecutionChoice>;
@@ -97,7 +99,7 @@ export interface WorkflowRun {
   networkAccess?: boolean;
   allowedMcpServers?: string[];
   allowedMcpTools?: Record<string, string[]>;
-  workspaceMode?: "snapshot" | "git-worktree";
+  workspaceMode?: WorkspaceMode;
   maintenance?: MaintenancePlan;
   nodeSettings?: NodeSettings;
   executionSettings?: ExecutionSettings;
@@ -140,7 +142,7 @@ export interface TemplateDefinition extends TemplateSummary {
   networkAccess?: boolean;
   allowedMcpServers?: string[];
   allowedMcpTools?: Record<string, string[]>;
-  workspaceMode?: "snapshot" | "git-worktree";
+  workspaceMode?: WorkspaceMode;
   maintenance?: MaintenancePlan;
   nodeSettings?: NodeSettings;
   limits?: WorkflowRun["limits"];
@@ -148,7 +150,7 @@ export interface TemplateDefinition extends TemplateSummary {
 
 export type PanelTab = "overview" | "tasks" | "diff" | "logs";
 export type UserAction = "start" | "resume" | "stop" | "apply" | "cancel";
-export interface WorkflowInput { sourceDefinition?: { id: string; revision?: number }; projectPath: string; script: string; args: unknown; allowWrite: boolean; networkAccess?: boolean; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; workspaceMode?: "snapshot" | "git-worktree"; maintenance?: MaintenancePlan; nodeSettings?: NodeSettings; limits?: WorkflowRun["limits"] }
+export interface WorkflowInput { sourceDefinition?: { id: string; revision?: number }; projectPath: string; script: string; args: unknown; allowWrite: boolean; networkAccess?: boolean; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; workspaceMode?: WorkspaceMode; maintenance?: MaintenancePlan; nodeSettings?: NodeSettings; limits?: WorkflowRun["limits"] }
 export interface PanelState {
   connection: "offline" | "connecting" | "connected" | "degraded" | "closed";
   reconnecting: boolean;
@@ -287,7 +289,31 @@ export function parseRunSummary(value: unknown): WorkflowRunSummary {
 }
 
 export function canApply(run: WorkflowRun, tab: PanelTab): boolean {
-  return !run.deletionPending && tab === "diff" && run.execution === "completed" && (!!run.diff?.files.length || run.maintenanceReview !== undefined || run.activation !== undefined) && ["none", "partial", "conflict", "failed"].includes(run.application);
+  return run.workspaceMode !== "local" && !run.deletionPending && tab === "diff" && run.execution === "completed" && (!!run.diff?.files.length || run.maintenanceReview !== undefined || run.activation !== undefined) && ["none", "partial", "conflict", "failed"].includes(run.application);
+}
+
+export function canChangeWorkspaceMode(input?: WorkflowRun | TemplateDefinition): boolean {
+  if (!input) return false;
+  if (!("execution" in input)) return true;
+  return input.execution === "draft" && !input.deletionPending && !input.workspacePath && !input.startedAt && !input.preparation && !input.tasks.length;
+}
+
+export function workspaceModeRestriction(input: WorkflowRun | TemplateDefinition | undefined, mode: WorkspaceMode): string {
+  if (input?.maintenance && mode !== "git-worktree") return "维护操作需要 Git 隔离工作区。";
+  if (!input?.allowWrite && mode !== "snapshot") return `${mode === "local" ? "本地修改" : "Git 隔离工作区"}需要写入授权，请在对话中让 AI 调整执行范围。`;
+  return "";
+}
+
+export function workspaceModeLabel(mode: WorkspaceMode = "snapshot", allowWrite = false): string {
+  if (!allowWrite) return "只读分析";
+  if (mode === "local") return "本地项目 · 直接修改";
+  return mode === "git-worktree" ? "Git 隔离工作区" : "隔离快照";
+}
+
+export function workspaceModeDescription(mode: WorkspaceMode = "snapshot", allowWrite = false): string {
+  if (!allowWrite) return "直接读取当前项目用于分析，未授权文件写入；隔离工作方式仅在允许写入时生效。";
+  if (mode === "local") return "适合日常开发、修 Bug；直接在当前项目修改文件，改动立即生效，无需应用。停止或删除运行不会撤销已写入原项目的改动。";
+  return mode === "git-worktree" ? "适合依赖 Git 历史、提交或子模块的任务；使用独立 Git 工作区，改动经审查后应用回原项目。" : "适合先隔离试验；在独立文件快照中执行，审查差异后再应用回原项目。";
 }
 
 export function partialApplicationMessage(run: WorkflowRun): string {
@@ -918,14 +944,20 @@ function activationSummary(run: WorkflowRun): string {
 }
 
 export function renderWorkflowDiff(run: WorkflowRun, artifactPage?: unknown): string {
-  if (failureContext(run)?.kind === "review") return `<h3 class="wf-section-title">改动审查失败</h3><div class="wf-alert" role="alert">${escapeHtml(failureErrorSummary(run.error ?? "无法完成改动审查"))}</div><p class="wf-muted">${run.tasks.every(task => task.status === "completed") ? "已完成任务结果保留。点击“重试审查”将回放有效缓存并重新汇总差异，无需从任务节点重跑。" : "部分任务未完成。点击“继续”按普通恢复处理，可能重新执行失败或中断的任务；有效结果按恢复检查保留。"}</p>`;
-  if (run.execution !== "completed") return '<div class="wf-empty">整个工作流执行完成后统一汇总差异。停止或失败时保留工作区，可恢复后继续。</div>';
+  const local = run.workspaceMode === "local";
+  const localNotice = local ? `<div class="wf-notice">${escapeHtml(workspaceModeDescription("local", run.allowWrite))}</div>` : "";
+  const localDiffAvailable = local && !!run.diff && ["completed", "stopped", "failed"].includes(run.execution);
+  const reviewFailure = failureContext(run)?.kind === "review" ? `<h3 class="wf-section-title">改动审查失败</h3><div class="wf-alert" role="alert">${escapeHtml(failureErrorSummary(run.error ?? "无法完成改动审查"))}</div><p class="wf-muted">${run.tasks.every(task => task.status === "completed") ? "已完成任务结果保留。点击“重试审查”将回放有效缓存并重新汇总差异，无需从任务节点重跑。" : "部分任务未完成。点击“继续”按普通恢复处理，可能重新执行失败或中断的任务；有效结果按恢复检查保留。"}</p>` : "";
+  if (reviewFailure && !localDiffAvailable) return `${localNotice}${reviewFailure}`;
+  if (local && !localDiffAvailable) return `${localNotice}<div class="wf-empty">${["completed", "stopped", "failed"].includes(run.execution) ? "尚未取得本地差异，当前项目可能已有改动，请检查项目文件。" : "本次执行结束后汇总本地差异。执行期间改动直接写入当前项目。"}</div>`;
+  if (!local && run.execution !== "completed") return '<div class="wf-empty">整个工作流执行完成后统一汇总差异。停止或失败时保留工作区，可恢复后继续。</div>';
   const conflicts = run.diff?.conflicts?.length ? `<div class="wf-alert" role="alert">存在应用冲突：${run.diff.conflicts.map(escapeHtml).join("、")}</div>` : "";
   const bytes = typeof run.diff?.totalBytes === "number" && Number.isSafeInteger(run.diff.totalBytes) && run.diff.totalBytes >= 0 ? `${run.diff.totalBytes.toLocaleString("zh-CN")} 字节` : "未提供";
-  const preview = run.diff?.previewTruncated ? `<div class="wf-notice" role="status">以下仅显示部分差异预览。完整文件清单共 ${run.diff.files.length} 项；应用会处理完整清单中的变更。</div>` : "";
+  const preview = run.diff?.previewTruncated ? `<div class="wf-notice" role="status">以下仅显示部分差异预览。完整文件清单共 ${run.diff.files.length} 项；${local ? "本地改动已直接写入当前项目。" : "应用会处理完整清单中的变更。"}</div>` : "";
   const integrity = run.diff?.contentSha256 ? `<details data-detail="diff-integrity"><summary>完整差异校验信息</summary><div class="wf-muted">完整差异总量：${escapeHtml(bytes)}<br>完整差异 SHA-256：<code>${escapeHtml(run.diff.contentSha256)}</code></div></details>` : "";
-  const changes = run.diff?.files.length ? `<h3 class="wf-section-title">变更文件（完整清单 · ${run.diff.files.length} 项）</h3>${run.diff.files.map(file => `<div class="wf-file-header"><span>${escapeHtml(file.path)}</span><span> · ${escapeHtml(file.status)}</span></div>`).join("")}${preview}${run.diff.previewTruncated ? `<p class="wf-muted">完整差异总量：${escapeHtml(bytes)}</p>` : ""}${integrity}<pre aria-label="${run.diff.previewTruncated ? "差异部分预览" : "统一差异"}">${escapeHtml(run.diff.text)}</pre>` : '<div class="wf-empty">本次执行没有文件改动。</div>';
+  const changes = run.diff?.files.length ? `<h3 class="wf-section-title">${local ? "已记录的本地差异" : "变更文件"}（完整清单 · ${run.diff.files.length} 项）</h3>${run.diff.files.map(file => `<div class="wf-file-header"><span>${escapeHtml(file.path)}</span><span> · ${escapeHtml(file.status)}</span></div>`).join("")}${preview}${run.diff.previewTruncated ? `<p class="wf-muted">完整差异总量：${escapeHtml(bytes)}</p>` : ""}${integrity}<pre aria-label="${run.diff.previewTruncated ? "差异部分预览" : "统一差异"}">${escapeHtml(run.diff.text)}</pre>` : `<div class="wf-empty">${local ? "本次记录的差异为空。" : "本次执行没有文件改动。"}</div>`;
 
+  if (local) return `${localNotice}${reviewFailure}<p class="wf-muted">以下为本次运行结束时记录的差异；当前项目的后续编辑不会自动更新到此记录。</p>${changes}`;
   return `${run.application === "partial" ? `<div class="wf-alert" role="alert">${escapeHtml(partialApplicationMessage(run))}</div>` : ""}${conflicts}${changes}${maintenanceReview(run, artifactPage)}${activationSummary(run)}<div class="wf-notice">${escapeHtml(applicationLabels[run.application] ?? run.application)}。${run.activation?.status === "pending_restart" ? "配置已更新；宿主仍需重新加载并核对实际版本，脚本完成不代表新版服务已生效。" : "应用前会检查当前项目；冲突时保留工作区供你处理。"}</div>`;
 }
 
@@ -949,7 +981,7 @@ export function renderDeletionPreview(preview: DeletionPreview): string {
   const bytes = preview.totalBytes < 1024 * 1024 ? `${Math.ceil(preview.totalBytes / 1024)} KB` : `${(preview.totalBytes / 1024 / 1024).toFixed(1)} MB`;
   const scopeLabels: Record<string, string> = { run: "运行、日志、缓存与隔离工作区", definition: "工作流定义", lock: "控制与锁文件" };
   const scopes = [...new Set(preview.objects.map(object => scopeLabels[object.kind] ?? object.kind))];
-  return `<p>将清理${preview.target.kind === "definition" ? preview.target.runIds?.length ? "工作流定义、关联运行及你额外选择的旧运行" : "工作流定义及其明确关联的运行" : "本次运行"}，此操作无法撤销。</p><ul class="wf-delete-stats"><li>运行记录：${preview.runs.length} 条</li><li>文件：${preview.totalFiles} 个 · ${escapeHtml(bytes)}</li><li>范围：${escapeHtml(scopes.join("、") || "无运行文件")}</li></ul>${preview.runs.length ? `<details><summary>查看将删除的运行（${preview.runs.length} 条）</summary><ul class="wf-delete-stats">${preview.runs.map(run => `<li><strong>${escapeHtml(run.name)}</strong><br><span class="wf-muted">${escapeHtml(run.id)} · ${escapeHtml(run.projectPath)}</span></li>`).join("")}</ul></details>` : ""}${preview.blocked.length ? `<div class="wf-alert" role="alert">当前无法完成删除：${preview.blocked.map(item => escapeHtml(item.message)).join("；")}</div>` : '<p class="wf-muted">日志、结果缓存、隔离工作区及控制文件会一并清理；清理未完成会保留可重试状态。</p>'}`;
+  return `<p>将清理${preview.target.kind === "definition" ? preview.target.runIds?.length ? "工作流定义、关联运行及你额外选择的旧运行" : "工作流定义及其明确关联的运行" : "本次运行"}，此操作无法撤销。</p><p class="wf-muted">已写入原项目的文件和提交会保留；停止或删除运行不会撤销这些改动。</p><ul class="wf-delete-stats"><li>运行记录：${preview.runs.length} 条</li><li>文件：${preview.totalFiles} 个 · ${escapeHtml(bytes)}</li><li>范围：${escapeHtml(scopes.join("、") || "无运行文件")}</li></ul>${preview.runs.length ? `<details><summary>查看将删除的运行（${preview.runs.length} 条）</summary><ul class="wf-delete-stats">${preview.runs.map(run => `<li><strong>${escapeHtml(run.name)}</strong><br><span class="wf-muted">${escapeHtml(run.id)} · ${escapeHtml(run.projectPath)}</span></li>`).join("")}</ul></details>` : ""}${preview.blocked.length ? `<div class="wf-alert" role="alert">当前无法完成删除：${preview.blocked.map(item => escapeHtml(item.message)).join("；")}</div>` : '<p class="wf-muted">日志、结果缓存、隔离工作区及控制文件会一并清理；清理未完成会保留可重试状态。</p>'}`;
 }
 export function renderNodeProcess(process: NodeProcess, now = Date.now()): string {
   const state = taskLabels[process.status] ?? executionLabels[process.status] ?? "等待中";
@@ -973,6 +1005,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   const parameterFields = element("#wf-parameter-fields");
   const parameterError = element("#wf-parameter-error");
   const parameterDialog = element<HTMLDialogElement>("#wf-parameters-dialog");
+  const workspaceModeSelect = element<HTMLSelectElement>("#wf-workspace-mode-select");
   const settingsDialog = element<HTMLDialogElement>("#wf-settings-dialog");
   const nodeDialog = element<HTMLDialogElement>("#wf-node-settings-dialog");
   const processDialog = element<HTMLDialogElement>("#wf-process-dialog");
@@ -988,6 +1021,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   let owner = "", parametersSignature = "", settingsSignature = "", templateRequest = "";
   let argsValue: unknown = {}, nodeSettings: NodeSettings = {}, nodeKey = "", nodeNotice = "", nodeDirty = false;
   let parameterSnapshot: unknown, parametersSaved = false, nodeSignature = "", zoom = 1;
+  let workspaceModeValue: WorkspaceMode = "snapshot", workspaceModeSnapshot: WorkspaceMode = "snapshot", workspaceSourceMode: WorkspaceMode = "snapshot";
   let processTarget: { id: string; taskId?: string; phase?: string; scope?: "workflow" | "unphased" } | undefined;
   let processLoading = false, processRequest = 0, processSignature = "", developerRequested = false;
   let reviewSignature = "";
@@ -1021,7 +1055,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const values = new Map(Array.from(parameterFields.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-parameter]")).map(control => [control.dataset.parameter!, control.dataset.parameterType === "boolean" ? (control as HTMLInputElement).checked : control.value]));
     const definition = currentDefinition();
     return { projectPath: path, script: input.script, args: parameters()?.length ? readParameters(parameters()!, values, argsValue) : argsValue,
-      allowWrite: input.allowWrite ?? false, networkAccess: input.networkAccess ?? false, allowedMcpServers: input.allowedMcpServers ?? [], allowedMcpTools: input.allowedMcpTools ?? {}, workspaceMode: input.workspaceMode ?? "snapshot", nodeSettings: structuredClone(nodeSettings), ...(input.maintenance ? { maintenance: input.maintenance } : {}), ...(input.limits ? { limits: input.limits } : {}),
+      allowWrite: input.allowWrite ?? false, networkAccess: input.networkAccess ?? false, allowedMcpServers: input.allowedMcpServers ?? [], allowedMcpTools: input.allowedMcpTools ?? {}, workspaceMode: workspaceModeValue, nodeSettings: structuredClone(nodeSettings), ...(input.maintenance ? { maintenance: input.maintenance } : {}), ...(input.limits ? { limits: input.limits } : {}),
       ...(controller.selected?.sourceDefinition ? { sourceDefinition: controller.selected.sourceDefinition } : definition ? { sourceDefinition: { id: definition.id, revision: definition.revision ?? 0 } } : {}),
     };
   };
@@ -1145,8 +1179,8 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const currentArtifactOwner = JSON.stringify([run?.id, run?.revision]);
     if (artifactOwner !== currentArtifactOwner) { artifactPage = undefined; artifactOwner = currentArtifactOwner; artifactRequest++; artifactLoading = false; }
     if (nextOwner !== owner) {
-      owner = nextOwner; argsValue = structuredClone(input?.args ?? {}); nodeSettings = structuredClone(input?.nodeSettings ?? {});
-      parametersSignature = ""; nodeDirty = false; nodeKey = "";
+      owner = nextOwner; argsValue = structuredClone(input?.args ?? {}); nodeSettings = structuredClone(input?.nodeSettings ?? {}); workspaceModeValue = workspaceSourceMode = input?.workspaceMode ?? "snapshot";
+      parametersSignature = ""; parameterSnapshot = undefined; nodeDirty = false; nodeKey = "";
       if (nodeDialog.open) nodeDialog.close();
       if (processDialog.open) processDialog.close();
       if (parameterDialog.open) parameterDialog.close();
@@ -1158,6 +1192,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       queueMicrotask(() => { if (controller.state.selectedTemplate === template.id && !controller.state.selectedRun) void controller.loadTemplate(template.id); });
     }
     const live = executing();
+    if (workspaceSourceMode !== (input?.workspaceMode ?? "snapshot") || !canChangeWorkspaceMode(input)) workspaceModeValue = workspaceSourceMode = input?.workspaceMode ?? "snapshot";
     const stale = state.connection !== "connected" || state.reconnecting;
     root.dataset.connection = state.connection;
     root.dataset.reconnecting = String(state.reconnecting);
@@ -1212,6 +1247,10 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const observedNow = stale && run && Number.isFinite(Date.parse(run.updatedAt)) ? Date.parse(run.updatedAt) : Date.now();
     const elapsed = elapsedLabel(run?.startedAt ?? run?.preparation?.startedAt, run?.endedAt, observedNow);
     const recent = latestAt && Number.isFinite(Date.parse(latestAt)) ? Math.max(0, Math.floor((Date.now() - Date.parse(latestAt)) / 1000)) : undefined;
+    const modeBadge = element("#wf-workspace-mode");
+    modeBadge.textContent = input ? workspaceModeLabel(workspaceModeValue, input.allowWrite ?? false) : "";
+    modeBadge.hidden = !input;
+    modeBadge.title = input ? workspaceModeDescription(workspaceModeValue, input.allowWrite ?? false) : "";
     element("#wf-activity-time").textContent = run ? `${elapsed ? `已运行 ${elapsed} · ` : ""}${live && recent !== undefined ? `最近活动 ${recent < 60 ? `${recent} 秒` : `${Math.floor(recent / 60)} 分钟`}前` : `${run.tasks.filter(task => task.status === "completed").length}/${run.tasks.length} 个任务完成`}` : summary ? `当前状态：${executionLabels[summary.execution] ?? summary.execution}；完整详情尚未就绪` : "任务由 AI 生成，启动后显示实际进度";
     const preparationHtml = run?.preparation?.stages.map(value => `<li data-tone="${value.status === "completed" ? "green" : value.status === "failed" ? "red" : value.status === "running" ? "blue" : "amber"}"><span class="wf-icon${value.status === "running" ? " is-spinning" : ""}" data-icon="${value.status === "running" ? "loader-2" : value.status === "completed" ? "circle-check" : value.status === "failed" ? "alert-circle" : "circle"}" aria-hidden="true"></span><button type="button" id="wf-preparation-${escapeHtml(value.id)}" data-process-scope="workflow" aria-label="${escapeHtml(`查看 ${value.label} 的启动过程`)}">${escapeHtml(value.label)}${value.status === "running" ? ` · ${elapsedLabel(value.startedAt)}` : ""}</button></li>`).join("") ?? "";
     if (element("#wf-preparation").innerHTML !== preparationHtml) {
@@ -1226,9 +1265,13 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       catch (error) { parameterFields.textContent = "无法读取参数"; parameterError.textContent = errorMessage(error); parameterError.hidden = false; }
     }
     parameterFields.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-parameter]").forEach(value => { value.disabled = !controller.canAct || live || !!run?.deletionPending; });
+    for (const option of Array.from(workspaceModeSelect.options)) option.disabled = !!workspaceModeRestriction(input, option.value as WorkspaceMode);
+    workspaceModeSelect.value = workspaceModeValue;
+    workspaceModeSelect.disabled = !controller.canAct || !input?.allowWrite || !canChangeWorkspaceMode(input);
+    element("#wf-workspace-mode-help").textContent = `${workspaceModeDescription(workspaceModeValue, input?.allowWrite ?? false)}${input && !canChangeWorkspaceMode(input) ? " 工作方式已固定；请从工作流库创建新运行以更改。" : input?.maintenance ? " 维护操作需要 Git 隔离工作区。" : !input?.allowWrite ? " 本地修改需要写入授权，请在对话中让 AI 调整执行范围。" : " 工作方式将在启动后固定。"}`;
     element("#wf-parameter-status").textContent = live ? "运行期间参数固定。" : "保存后用于下次启动；已执行的记录不会被改写。";
     element<HTMLButtonElement>("#wf-save-parameters").disabled = !controller.canAct || live || !!run?.deletionPending;
-    element("#wf-execution-scope").textContent = input ? `本工作流范围：${input.allowWrite ? "允许在隔离工作区修改文件" : "只读"} · ${input.networkAccess ? "允许联网" : "网络关闭"}${input.allowedMcpServers?.length ? ` · MCP：${input.allowedMcpServers.join("、")}` : ""}${maintenanceProtectedPathsSummary(input.maintenance) ? ` · 命令目录授权：${maintenanceProtectedPathsSummary(input.maintenance)}（仅对应命令）` : ""}。调整执行范围可在对话中告诉 AI。` : "选择工作流后显示已声明的执行范围。";
+    element("#wf-execution-scope").textContent = input ? `本工作流范围：${workspaceModeLabel(workspaceModeValue, input.allowWrite ?? false)} · ${input.allowWrite ? workspaceModeValue === "local" ? "允许直接修改当前项目" : "允许在隔离工作区修改文件" : "只读"} · ${input.networkAccess ? "允许联网" : "网络关闭"}${input.allowedMcpServers?.length ? ` · MCP：${input.allowedMcpServers.join("、")}` : ""}${maintenanceProtectedPathsSummary(input.maintenance) ? ` · 命令目录授权：${maintenanceProtectedPathsSummary(input.maintenance)}（仅对应命令）` : ""}。${workspaceModeValue === "local" ? "停止或删除运行不会撤销原项目改动。" : ""}调整执行范围可在对话中告诉 AI。` : "选择工作流后显示已声明的执行范围。";
     const settings = state.settings, models = settings?.models ?? [];
     const signature = JSON.stringify([state.settingsProjectPath, settings?.settings.revision, models]);
     if (signature !== settingsSignature) { settingsSignature = signature; defaultModel.innerHTML = modelSelectOptions(models, settings?.settings.model ?? "", "继承 Codex 配置"); defaultEffort.innerHTML = effortSelectOptions(models, defaultModel.value || settings?.codexDefaults.model, settings?.settings.reasoningEffort ?? "", "继承 Codex 配置"); }
@@ -1278,6 +1321,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
         element("#wf-review-body").innerHTML = run ? `${run.result !== undefined ? `<div class="wf-process-result">${escapeHtml(formatted(run.result))}</div>` : ""}${renderWorkflowDiff(run, artifactPage)}` : '<p class="wf-muted">暂无运行记录</p>';
       }
       const apply = element<HTMLButtonElement>("#wf-apply-changes");
+      apply.hidden = run?.workspaceMode === "local";
       apply.disabled = !controller.canAct || !run || !canApply(run, "diff");
       apply.textContent = run?.application === "partial" ? "重试未完成步骤" : run?.diff?.previewTruncated ? "应用完整变更" : "应用改动";
     }
@@ -1300,7 +1344,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   };
   for (const dialog of Array.from(root.querySelectorAll<HTMLDialogElement>("dialog"))) {
     dialog.addEventListener("close", () => {
-      if (dialog === parameterDialog && !parametersSaved && parameterSnapshot !== undefined) { argsValue = parameterSnapshot; parametersSignature = ""; render(); }
+      if (dialog === parameterDialog && !parametersSaved && parameterSnapshot !== undefined) { argsValue = parameterSnapshot; workspaceModeValue = workspaceModeSnapshot; parametersSignature = ""; render(); }
       if (dialog === nodeDialog) { nodeDirty = false; nodeSignature = ""; }
       if (dialog === settingsDialog) { settingsSignature = ""; render(); }
       if (dialog === processDialog) { processTarget = undefined; processRequest++; processLoading = false; developerLogs.open = false; developerRequested = false; element("#wf-process-developer").textContent = ""; }
@@ -1329,13 +1373,22 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   project.addEventListener("change", () => { void controller.selectProject(project.value); });
   element("#wf-refresh-projects").addEventListener("click", () => { void controller.refreshProjects(); });
   element<HTMLSelectElement>("#wf-template-select").addEventListener("change", event => { const value = (event.target as HTMLSelectElement).value; templateRequest = ""; void controller.selectWorkflow(value).finally(render); });
-  element("#wf-parameters-toggle").addEventListener("click", event => { parameterSnapshot = structuredClone(argsValue); parametersSaved = false; parameterError.hidden = true; openDialog(parameterDialog, event.currentTarget as HTMLElement); });
+  element("#wf-parameters-toggle").addEventListener("click", event => { parameterSnapshot = structuredClone(argsValue); workspaceModeSnapshot = workspaceModeValue; parametersSaved = false; parameterError.hidden = true; openDialog(parameterDialog, event.currentTarget as HTMLElement); });
   element<HTMLFormElement>("#wf-parameters-form").addEventListener("submit", event => {
     event.preventDefault();
-    try { argsValue = readInput().args; parametersSaved = true; parameterError.hidden = true; parameterDialog.close(); controller.state.error = ""; render(); }
+    try { const input = readInput(); argsValue = input.args; workspaceModeValue = input.workspaceMode ?? "snapshot"; parametersSaved = true; parameterError.hidden = true; parameterDialog.close(); controller.state.error = ""; render(); }
     catch (error) { parameterError.textContent = errorMessage(error); parameterError.hidden = false; }
   });
   parameterFields.addEventListener("input", () => { parameterError.hidden = true; });
+  workspaceModeSelect.addEventListener("change", () => {
+    if (!controller.canAct || !source()?.allowWrite || !canChangeWorkspaceMode(source())) return;
+    if (!["snapshot", "git-worktree", "local"].includes(workspaceModeSelect.value)) return;
+    const mode = workspaceModeSelect.value as WorkspaceMode;
+    const restriction = workspaceModeRestriction(source(), mode);
+    if (restriction) { parameterError.textContent = restriction; parameterError.hidden = false; render(); return; }
+    workspaceModeValue = mode;
+    parameterError.hidden = true; render();
+  });
   element("#wf-settings-toggle").addEventListener("click", event => { openDialog(settingsDialog, event.currentTarget as HTMLElement); if (!controller.state.settings || controller.state.settingsError) void controller.refreshExecutionSettings(controller.selected?.projectPath ?? activeProject()?.path); });
   element("#wf-refresh-settings").addEventListener("click", () => { settingsSignature = ""; void controller.refreshExecutionSettings(); });
   defaultModel.addEventListener("change", () => { defaultEffort.innerHTML = effortSelectOptions(controller.state.settings?.models ?? [], defaultModel.value || controller.state.settings?.codexDefaults.model, defaultEffort.value, "继承 Codex 配置"); controller.state.settingsError = ""; });
@@ -1449,7 +1502,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (action.dataset.action === "retry-review") { void controller.perform("resume", true); return; }
     if (action.dataset.action === "start") {
       try { const input = readInput(); argsValue = input.args; parameterError.hidden = true; void controller.startWithInput(input); }
-      catch (error) { parameterSnapshot = structuredClone(argsValue); parametersSaved = false; parameterError.textContent = errorMessage(error); parameterError.hidden = false; openDialog(parameterDialog, element("#wf-parameters-toggle")); }
+      catch (error) { parameterSnapshot = structuredClone(argsValue); workspaceModeSnapshot = workspaceModeValue; parametersSaved = false; parameterError.textContent = errorMessage(error); parameterError.hidden = false; openDialog(parameterDialog, element("#wf-parameters-toggle")); }
     }
   });
   render();

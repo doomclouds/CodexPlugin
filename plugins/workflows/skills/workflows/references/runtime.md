@@ -4,7 +4,7 @@
 
 ## 工具流程
 
-常用流程：代理根据用户任务生成脚本 → `workflow_preview` → 已授权时 `workflow_start` → `workflow_get_run` → 核对结果与差异 → 已授权时 `workflow_apply`。面板是查看与操作入口，不是聊天执行的前置要求。
+常用流程：代理根据用户任务生成脚本 → `workflow_preview` → 已授权时 `workflow_start` → `workflow_get_run` → 核对结果与差异。隔离模式再按授权调用 `workflow_apply`；`workspaceMode: "local"` 已直接写入原项目，不调用应用。面板是查看与操作入口，不是聊天执行的前置要求。
 
 | 工具 | 关键输入与结果 |
 | --- | --- |
@@ -24,7 +24,7 @@
 | `workflow_delete` | 预览的同一目标字段及最新 `fingerprint`；返回 `deletion.deleted`、`partial`、已删对象和 `remaining`，仅在全部清理完成时报告成功 |
 | `workflow_stop` | `id`；停止派发、中断活跃执行，等待退出并保存 |
 | `workflow_cancel_task` | `id`、`taskId`；按用户请求取消一个任务 |
-| `workflow_apply` | `id`、当前 `revision`；按应用授权处理完成的审查，保留冲突与当前项目改动 |
+| `workflow_apply` | `id`、当前 `revision`；仅隔离模式按应用授权处理完成的审查，本地模式拒绝应用 |
 | `workflow_open_panel` | 从项目聊天打开实际任务面板，不开始执行；只注册 thread 入口，无项目归属时显示提示并禁用操作 |
 
 `workflow_panel_lease` 仅供面板维护生命周期。聊天启动不需要面板租约，不借用其他面板租约。
@@ -61,7 +61,11 @@ macOS 桌面项目接口通过宿主动态环境提供。启动器优先选宿�
 
 `deletion.deleted: true` 表示全部清理完成。`partial: true` 或非空 `remaining` 需要报告实际剩余对象；相关记录只保留用于重试的只读摘要和 `deletionTarget`，禁止启动、恢复、更新和应用。按摘要中的原目标重新预览，取得新指纹后继续清理；全部完成后摘要和删除元数据也删除。删除不承诺回滚原项目已接受的改动。
 
-`args` 可为任意 JSON 值，默认对象。写入需要 Git 仓库根目录、`allowWrite: true` 和对应任务 `mode: "write"`。`networkAccess` 默认 `false`，`workspaceMode` 默认 `"snapshot"`；`"git-worktree"` 用于需要 Git 元数据的隔离维护，也支持子模块及嵌套模块的提交、初始化状态、独立副本与产物检查点。未初始化模块不会自动下载，初始化须显式计划和授权。快照写入含子模块时提示改用 Git 模式。网络与写入授权相互独立：只读任务可以用 `allowWrite: false`、`networkAccess: true` 进行已授权 native fetch/search，仍不能写文件。联网须有用户授权且预览显式声明。`allowedMcpServers` 默认空数组，仅列出用户已配置且本任务授权的 MCP 服务名称，不包含 Workflows；`allowedMcpTools` 按服务映射到实际工具名称数组，与用户已有配置取交集并保留审批。只读 worker 仅允许明确 readOnlyHint=true 的 MCP 工具，写入按工具授权限制。不继承父聊天专有 apps/连接器。
+`args` 可为任意 JSON 值，默认对象。写入需要 `allowWrite: true` 和对应任务 `mode: "write"`；隔离写入要求 Git 仓库根目录。`networkAccess` 默认 `false`，`workspaceMode` 默认 `"snapshot"`；`"git-worktree"` 用于需要 Git 元数据的隔离维护，也支持子模块及嵌套模块的提交、初始化状态、独立副本与产物检查点。未初始化模块不会自动下载，初始化须显式计划和授权。快照写入含子模块时提示改用 Git 模式。网络与写入授权相互独立：只读任务可以用 `allowWrite: false`、`networkAccess: true` 进行已授权 native fetch/search，仍不能写文件。联网须有用户授权且预览显式声明。`allowedMcpServers` 默认空数组，仅列出用户已配置且本任务授权的 MCP 服务名称，不包含 Workflows；`allowedMcpTools` 按服务映射到实际工具名称数组，与用户已有配置取交集并保留审批。只读 worker 仅允许明确 readOnlyHint=true 的 MCP 工具，写入按工具授权限制。不继承父聊天专有 apps/连接器。
+
+AI 创建计划时主动选择并显式传入模式：用户要求直接开发或修 Bug、立即在当前项目看到改动，选 `local`；要求试验或先审差异再采用，选 `snapshot`；需要拉取并固定提交、分支或子模块的隔离维护，选 `git-worktree`。只读分析使用 `allowWrite: false` 与任务 `mode: "read"`；写入权限和工作位置是独立设置，已允许写入的运行中也可安排只读节点。未说明原地修改且上下文不明确的普通编程请求保留 `snapshot`，API 默认不变。复用定义沿用已保存模式，不自动改动；用户无需手写脚本，改变执行范围须说明后新建预览。
+
+`workspaceMode: "local"` 直接修改原项目，必须显式传 `allowWrite: true`。预览只保存计划；启动后，写入 worker 的 `cwd` 与可写根目录是原项目，读取任务仍只读。文件变更立即生效，允许保留已有未提交编辑，也支持普通非 Git 项目。共用同一 Workflows 数据目录时，同一项目的本地写入运行串行；外部编辑器与其他数据目录不受此锁协调；不创建可供应用的隔离副本，`workflow_apply` 拒绝此模式，`application: "none"` 不代表原项目尚未修改。停止、异常或删除只处理执行与运行数据，不回滚或删除原项目文件。本地差异是从运行基线到检查时的项目变化，不能把并发用户编辑归因于工作流。恢复核对本地检查点；项目变化或已派发 worker 却缺少检查点时拒绝继续，先核对既有副作用再新建预览。确定性 `operation()` 和 `maintenance.activation` 仍只支持 Git 隔离模式；本地编程、命令与测试通过通用 `agent()` 原生工具执行。
 
 `limits` 支持 `maxReadWorkers`、`maxCalls`、`timeoutMs`、`maxTokens`。默认只读并发 4，最多 16；写入同时最多一个。默认调用上限 1000、总时限 1 小时，token 门槛 0 表示不限。token 门槛控制后续派发，不代表账单上限。
 
@@ -117,7 +121,7 @@ return await agent(`核实并汇总：${JSON.stringify(reports.filter(Boolean))}
 
 ## 原生工具与可选维护计划
 
-worker 通过官方 app-server 具备原生文件读取、命令执行和补丁修改能力；写入由任务 mode 与隔离沙箱限制，网络命令需 networkAccess 授权。脚本中的 `agent()` 交给 worker 自主使用这些工具及明确开放的 MCP。一般分析、修改和测试不必预声明为维护步骤；脚本可直接根据 worker 结果分支、循环和并行调度。
+worker 通过官方 app-server 具备原生文件读取、命令执行和补丁修改能力；写入由任务 mode 与声明的工作区沙箱限制，网络命令需 networkAccess 授权。脚本中的 `agent()` 交给 worker 自主使用这些工具及明确开放的 MCP。一般分析、修改和测试不必预声明为维护步骤；脚本可直接根据 worker 结果分支、循环和并行调度。
 
 桌面专有工具、Image Gen、原生 UI、父聊天专有 apps 或连接器不全量继承，不把这些能力混入已配置 MCP 白名单。需要上述能力时按实际宿主工具可用性处理。
 
@@ -158,6 +162,6 @@ const maintenance = {
 
 恢复按调用序校验输入、任务和执行范围，复用有效完成结果；第一个失败或指纹变化使后续缓存失效。跨项目复用必须创建新运行。项目变化、工作区缺失、锁和版本冲突按实际工具错误处理。
 
-完成后统一检查差异、维护审查、测试输出和报告。聊天可在已有应用授权时调用 `workflow_apply`，无需再进入编辑器；面板按钮仍保留。冲突时不覆盖。应用成功、激活配置更新、宿主重新加载、工具版本验证、提交和发布是不同结果，分别核对与报告。
+完成后统一检查差异、维护审查、测试输出和报告。隔离模式下，聊天可在已有应用授权时调用 `workflow_apply`，无需再进入编辑器；面板按钮仍保留。本地模式已直接写入原项目，核对实际文件与测试后报告，不再应用。冲突时不覆盖。应用成功、激活配置更新、宿主重新加载、工具版本验证、提交和发布是不同结果，分别核对与报告。
 
 `application: "partial"` 表示已有部分应用，但仍有阶段未完成；可能是子模块应用尚未完成，也可能是仓库及子模块均已应用后激活失败。先用 `workflow_get_run` 核对应用记录、实际错误和当前项目状态，再以新读取的 revision 按已有授权重试 `workflow_apply`，核验已完成部分并继续未完成阶段。只有仓库及子模块均已应用、仅激活失败时，重试才只处理激活并核对配置版本。

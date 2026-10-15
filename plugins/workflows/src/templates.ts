@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { validateScript } from "./script.ts";
 import type { WorkflowMeta } from "./script.ts";
 import { RunStore } from "./store.ts";
-import type { Limits, MaintenancePlan } from "./types.ts";
+import type { Limits, MaintenancePlan, WorkspaceMode } from "./types.ts";
 import { validateMaintenance } from "./maintenance.ts";
 import { validateNodeSettings } from "./execution-settings.ts";
 import type { NodeSettings } from "./execution-settings.ts";
@@ -14,7 +14,7 @@ export interface SavedTemplate {
   meta: WorkflowMeta;
   nodeSettings?: NodeSettings;
   source: "saved"; revision: number; updatedAt: string; limits?: Partial<Limits>;
-  networkAccess?: boolean; workspaceMode?: "snapshot" | "git-worktree"; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; maintenance?: MaintenancePlan;
+  networkAccess?: boolean; workspaceMode?: WorkspaceMode; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; maintenance?: MaintenancePlan;
 }
 export class TemplateStore {
   private store: RunStore;
@@ -68,10 +68,11 @@ export class TemplateStore {
       await rm(filename);
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
-  async save(input: { script: string; args?: unknown; allowWrite?: boolean; networkAccess?: boolean; workspaceMode?: "snapshot" | "git-worktree"; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; maintenance?: MaintenancePlan; revision?: number; limits?: Partial<Limits>; nodeSettings?: NodeSettings }) {
+  async save(input: { script: string; args?: unknown; allowWrite?: boolean; networkAccess?: boolean; workspaceMode?: WorkspaceMode; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; maintenance?: MaintenancePlan; revision?: number; limits?: Partial<Limits>; nodeSettings?: NodeSettings }) {
     const { meta } = validateScript(input.script);
     const nodeSettings = validateNodeSettings(input.nodeSettings, meta);
     if (input.allowedMcpServers?.some(name => !/^[a-zA-Z0-9_.-]{1,128}$/.test(name) || /workflows/i.test(name))) throw new Error("Invalid or recursive MCP server grant");
+    if (input.workspaceMode === "local" && input.allowWrite !== true) throw new Error("Local project mode requires allowWrite: true");
     if (input.maintenance && (!input.allowWrite || input.workspaceMode !== "git-worktree")) throw new Error("Maintenance operations require git-worktree isolation and allowWrite");
     if (input.maintenance) input.maintenance = validateMaintenance(input.maintenance, input.networkAccess ?? false);
     const id = `saved:${meta.name}`;
