@@ -6,6 +6,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer } from "../src/server.ts";
+import { nodeProcess } from "../src/node-process.ts";
 import { RunStore } from "../src/store.ts";
 import type { WorkflowEngine } from "../src/engine.ts";
 import type { ProjectsProvider } from "../src/projects.ts";
@@ -23,6 +24,7 @@ async function fixture(projects?: ProjectsProvider) {
       try { return await engine.store.load(id); }
       catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return baseRun(); throw error; }
     },
+    getNodeProcess: async (id: string, input: Parameters<typeof nodeProcess>[1]) => nodeProcess(await engine.get(id), input),
     list: async (projectPath?: string) => (await engine.store.list()).filter(run => !projectPath || run.projectPath === projectPath),
     forgetDeletedRuns: (ids: string[]) => { record("forget-deleted", ids); },
     preview: async (input: unknown) => record("preview", input),

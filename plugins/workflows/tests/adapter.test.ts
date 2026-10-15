@@ -489,7 +489,8 @@ for (const [scenario, request, error] of [
   ["recursive-mcp", { mcpServers: ["fixture"] }, /inventory could not/],
   ["mcp-user-disabled", { mcpServers: ["fixture"] }, /disabled in the user's/],
   ["mcp-user-filter", { mcpServers: ["fixture"], mcpTools: { fixture: ["write_tool"] } }, /existing user tool filters/],
-  ["complete", { mcpServers: ["fixture"], mcpTools: { fixture: ["write_tool"] } }, /not declared read-only/],
+  ["complete", { mcpServers: ["fixture"], mcpTools: { fixture: ["write_tool", "missing_tool"] } }, /absent or disabled/],
+  ["mcp-user-filter", { mcpServers: ["fixture"], mcpTools: { fixture: ["read_tool", "write_tool"] } }, /existing user tool filters/],
   ["complete", { mode: "write", mcpServers: ["fixture"] }, /explicit MCP tool grant/],
 ] as const) {
   test(`MCP request fails closed: ${error.source}`, async () => {
@@ -508,6 +509,66 @@ test("explicit write-task MCP tool grant does not expose unrequested tools", asy
     assert.deepEqual(thread.params.config.mcp_servers.fixture.enabled_tools, ["write_tool"]);
   } finally { await context.cleanup(); }
 });
+
+test("a shared workflow MCP grant narrows read nodes and preserves the exact write-node grant", async () => {
+  const globalGrant = { fixture: ["read_tool", "write_tool"] };
+  const originalGrant = structuredClone(globalGrant);
+  for (const mode of ["read", "write"] as const) {
+    const context = await setup("complete");
+    try {
+      await context.adapter.run({ ...context.request, mode, mcpServers: ["fixture"], mcpTools: globalGrant }, context.controller.signal, () => {});
+      const trace = await context.transcript();
+      const thread = trace.find(item => item.method === "thread/start")!;
+      assert.deepEqual(thread.params.config.mcp_servers.fixture.enabled_tools, mode === "read" ? ["read_tool"] : ["read_tool", "write_tool"]);
+      assert.equal(thread.params.config.mcp_servers.fixture.enabled, true);
+      assert.equal(thread.params.config.mcp_servers.fixture.required, true);
+      assert.equal(trace.some(item => item.method === "turn/start"), true);
+      assert.deepEqual(globalGrant, originalGrant);
+    } finally { await context.cleanup(); }
+  }
+});
+
+for (const [scenario, tools] of [
+  ["mcp-no-readonly", undefined],
+  ["mcp-no-readonly", ["write_tool"]],
+  ["mcp-unannotated", ["unannotated_tool", "write_tool"]],
+  ["mcp-unannotated", []],
+] as const) {
+  test(`read nodes disable empty MCP intersections and retain native commands: ${scenario}/${tools?.join(",") ?? "automatic"}`, async () => {
+    const context = await setup(scenario);
+    try {
+      const result = await context.adapter.run({ ...context.request, mcpServers: ["fixture"], ...(tools ? { mcpTools: { fixture: [...tools] } } : {}) }, context.controller.signal, () => {});
+      const trace = await context.transcript();
+      const thread = trace.find(item => item.method === "thread/start")!;
+      assert.deepEqual(thread.params.config.mcp_servers.fixture, { enabled: false, required: false });
+      assert.match(thread.params.developerInstructions, /No external MCP tools are authorized/);
+      assert.equal(thread.params.sandbox, "read-only");
+      assert.ok(result.toolsUsed?.includes("native:commandExecution"));
+      assert.equal(trace.some(item => item.method === "turn/start"), true);
+    } finally { await context.cleanup(); }
+  });
+}
+
+test("unannotated MCP tools cannot enter a read node's mixed explicit grant", async () => {
+  const context = await setup("mcp-unannotated");
+  try {
+    await context.adapter.run({ ...context.request, mcpServers: ["fixture"], mcpTools: { fixture: ["unannotated_tool", "read_tool", "write_tool"] } }, context.controller.signal, () => {});
+    const thread = (await context.transcript()).find(item => item.method === "thread/start")!;
+    assert.deepEqual(thread.params.config.mcp_servers.fixture.enabled_tools, ["read_tool"]);
+  } finally { await context.cleanup(); }
+});
+
+for (const scenario of ["mcp-readonly-flipped", "mcp-readonly-missing-runtime"]) {
+  test(`changed runtime MCP read-only declarations prevent the worker turn: ${scenario}`, async () => {
+    const context = await setup(scenario);
+    try {
+      await assert.rejects(context.adapter.run({ ...context.request, mcpServers: ["fixture"], mcpTools: { fixture: ["read_tool", "write_tool"] } }, context.controller.signal, () => {}), /read-only tool declarations changed/);
+      const trace = await context.transcript();
+      assert.equal(trace.some(item => item.method === "thread/start"), true);
+      assert.equal(trace.some(item => item.method === "turn/start"), false);
+    } finally { await context.cleanup(); }
+  });
+}
 
 test("automatic read-only MCP grants intersect existing user filters", async () => {
   const context = await setup("mcp-user-filter");

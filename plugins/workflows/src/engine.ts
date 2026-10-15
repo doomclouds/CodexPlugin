@@ -9,6 +9,7 @@ import { listGitlinks, gitAwareContextDigest, readOnlyGitContextDigest } from ".
 import { snapshotFingerprint } from "./snapshot-checkpoint.ts";
 import { createLocalWorkspace, validateLocalWorkspace, localWorkspaceDiff, localWorkspaceFingerprint } from "./local-workspace.ts";
 import { stopSummary } from "./stop-context.ts";
+import { nodeProcess } from "./node-process.ts";
 import type { WorkflowStopReason } from "./stop-context.ts";
 import { applyWorkspace, contextDigest, createWorkspace, workspaceDiff } from "./workspace.ts";
 import { createGitWorkspace, validateMaintenance, reviewMaintenance, applyMaintenance, maintenanceFingerprint, validateGitWorkspace } from "./maintenance.ts";
@@ -163,6 +164,11 @@ export class WorkflowEngine {
     // A terminal script result is not ready until review, checkpoint and lock cleanup finish.
     if (active && !["preparing", "running", "stopping"].includes(run.execution)) { await active.done; run = await this.load(id); }
     return structuredClone(run);
+  }
+  async getNodeProcess(id: string, input: Parameters<typeof nodeProcess>[1]) {
+    // Diagnostics remain readable while terminal checkpoint and lock cleanup
+    // finish; this bounded projection never supplies an actionable run scope.
+    return nodeProcess(await this.load(id), input);
   }
   async list(projectPath?: string) {
     await this.initialization;

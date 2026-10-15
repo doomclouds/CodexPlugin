@@ -16,6 +16,8 @@ let commandId;
 const configuredName = scenario === "dotted-mcp" ? "fixture.docs" : "fixture";
 const declaredTools = { read_tool: { name: "read_tool", annotations: { readOnlyHint: true } }, write_tool: { name: "write_tool", annotations: { readOnlyHint: false } } };
 if (scenario === "mcp-user-filter") declaredTools.filtered_read_tool = { name: "filtered_read_tool", annotations: { readOnlyHint: true } };
+if (scenario === "mcp-no-readonly") delete declaredTools.read_tool;
+if (scenario === "mcp-unannotated") declaredTools.unannotated_tool = { name: "unannotated_tool" };
 const send = value => process.stdout.write(JSON.stringify(value) + "\n");
 const response = (id, result) => send({ id, result });
 const notify = (method, params) => send({ method, params });
@@ -97,7 +99,10 @@ createInterface({ input: process.stdin }).on("line", line => {
     response(id, { thread: { id: threadId }, model: params.model ?? "test-inherited-model", reasoningEffort: params.config.model_reasoning_effort ?? "medium", sandbox: scenario === "unsafe-sandbox" ? { type: "dangerFullAccess" } : sandbox });
   } else if (method === "mcpServerStatus/list") {
     const selected = threadParams?.config.mcp_servers?.[configuredName];
-    const tools = params.serverName && !params.threadId ? declaredTools : selected?.enabled ? Object.fromEntries(Object.entries(declaredTools).filter(([name]) => selected.enabled_tools?.includes(name))) : {};
+    let tools = params.serverName && !params.threadId ? declaredTools : selected?.enabled ? Object.fromEntries(Object.entries(declaredTools).filter(([name]) => selected.enabled_tools?.includes(name))) : {};
+    if (params.threadId && tools.read_tool && ["mcp-readonly-flipped", "mcp-readonly-missing-runtime"].includes(scenario)) {
+      tools = { ...tools, read_tool: { name: "read_tool", ...(scenario === "mcp-readonly-flipped" ? { annotations: { readOnlyHint: false } } : {}) } };
+    }
     const data = scenario === "enabled-mcp" ? [{ name: configuredName, runtimeStatus: "connected", tools: { unsafe: {} } }] : [{ name: configuredName, runtimeStatus: params.threadId ? selected?.enabled ? "connected" : "disabled" : null, tools, serverInfo: { name: scenario === "recursive-mcp" ? "workflows" : "fixture-server" } }];
     response(id, { data, nextCursor: null });
   } else if (method === "turn/start") {
@@ -143,6 +148,9 @@ createInterface({ input: process.stdin }).on("line", line => {
       notify("item/completed", { threadId, turnId, item: { type: "commandExecution", id: "native-command", status: "completed" } });
       notify("item/completed", { threadId, turnId, item: { type: "fileChange", id: "native-edit", status: "completed" } });
       notify("item/completed", { threadId, turnId, item: { type: "webSearch", id: "native-search" } });
+    }
+    if (["mcp-no-readonly", "mcp-unannotated"].includes(scenario)) {
+      notify("item/completed", { threadId, turnId, item: { type: "commandExecution", id: "native-read-command", status: "completed", exitCode: 0 } });
     }
     notify("item/completed", { threadId, turnId, item: { type: "agentMessage", id: "commentary", text: "working commentary", phase: "commentary" } });
     setTimeout(() => finish(["public-url", "credential-url"].includes(scenario) ? JSON.stringify(sourceOutput) : scenario === "structured" ? '{"answer":42}' : scenario === "bad-structured" ? "not structured" : "worker complete"), 20);

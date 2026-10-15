@@ -336,7 +336,10 @@ export class WorkflowPanelController {
   private shutdown: Promise<void> | undefined;
   private pollingProject: string | undefined;
   private pollRequest = 0;
-  private heartbeatAttempt: Promise<void> | undefined;
+  private heartbeatAttempt: Promise<boolean | undefined> | undefined;
+  private synchronizationAttempt: Promise<void> | undefined;
+  private metadataRefresh: Promise<void> | undefined;
+  private metadataProject: string | undefined;
   private reconnectFailures = 0;
   private reconnectAfter = 0;
   private initializing = false;
@@ -434,11 +437,9 @@ export class WorkflowPanelController {
     try {
       await this.heartbeat(true);
       if (this.closing) return;
-      this.startPolling();
-      if ((this.state.connection as PanelState["connection"]) !== "connected") return;
-      await this.refreshProjects();
-      await Promise.all([this.refresh(true), this.refreshTemplates()]);
-      if (!this.closing && (this.state.connection as PanelState["connection"]) === "connected") await this.refreshExecutionSettings();
+      // Initial callers can await the auxiliary catalogue without keeping the
+      // main view or its lease blocked by model discovery.
+      await this.metadataRefresh;
     } finally { this.initializing = false; this.changed(); }
   }
 
@@ -497,22 +498,28 @@ export class WorkflowPanelController {
     } catch (error) { this.state.error = errorMessage(error); this.changed(); }
   }
 
-  heartbeat(force = false): Promise<void> {
-    if (this.closing) return Promise.resolve();
-    if (this.heartbeatAttempt) return this.heartbeatAttempt;
-    if (!force && this.state.connection === "degraded" && (this.reconnectFailures >= 6 || this.now() < this.reconnectAfter)) return Promise.resolve();
-    this.state.reconnecting = force || this.state.connection !== "connected" || !this.leaseId;
-    this.changed();
-    this.heartbeatAttempt = this.readConnection(force).finally(() => {
-      this.heartbeatAttempt = undefined;
-      this.state.reconnecting = false;
-      this.changed();
-    });
-    return this.heartbeatAttempt;
+  async heartbeat(force = false): Promise<void> {
+    if (this.closing) return;
+    if (!force && !this.heartbeatAttempt && this.state.connection === "degraded" && (this.reconnectFailures >= 6 || this.now() < this.reconnectAfter)) return;
+    const synchronize = force || this.state.connection !== "connected" || !this.leaseId;
+    if (synchronize) { this.state.reconnecting = true; this.changed(); }
+    // Only the lease request is shared. Slow project, run or catalogue reads
+    // must never prevent later timer ticks from renewing the live lease.
+    if (!this.heartbeatAttempt) {
+      const attempt = this.readConnection().finally(() => { if (this.heartbeatAttempt === attempt) this.heartbeatAttempt = undefined; });
+      this.heartbeatAttempt = attempt;
+    }
+    const recovered = await this.heartbeatAttempt;
+    if (this.closing) return;
+    if (recovered === undefined) {
+      if (!this.synchronizationAttempt) { this.state.reconnecting = false; this.changed(); }
+      return;
+    }
+    if (synchronize || recovered) await this.synchronizeConnection();
   }
 
-  private async readConnection(force: boolean): Promise<void> {
-    let synchronize = force || this.state.connection !== "connected" || !this.leaseId;
+  private async readConnection(): Promise<boolean | undefined> {
+    let synchronize = this.state.connection !== "connected" || !this.leaseId;
     try {
       let data: Record<string, unknown>;
       try { data = await this.request("workflow_panel_lease", this.leaseId ? { leaseId: this.leaseId } : {}); }
@@ -524,26 +531,59 @@ export class WorkflowPanelController {
         synchronize = true;
         this.state.reconnecting = true;
         this.changed();
-        if (this.closing) return;
+        if (this.closing) return undefined;
         data = await this.request("workflow_panel_lease", {});
       }
       if (typeof data.leaseId !== "string" || !data.leaseId) throw new Error("宿主未返回有效的面板租约");
-      if (this.closing) { await this.request("workflow_panel_lease", { leaseId: data.leaseId, release: true }); return; }
+      if (this.closing) { await this.request("workflow_panel_lease", { leaseId: data.leaseId, release: true }); return undefined; }
       this.leaseId = data.leaseId;
+      synchronize ||= this.state.connection !== "connected";
       this.state.connection = "connected";
-      if (!this.initializing) this.startPolling();
-      if (synchronize && !this.initializing) {
+      this.startPolling();
+      if (!synchronize && !this.state.reconnecting) {
+        this.reconnectFailures = 0;
+        this.reconnectAfter = 0;
+      }
+      return synchronize;
+    } catch (error) { this.disconnected(error); return undefined; }
+  }
+
+  private synchronizeConnection(): Promise<void> {
+    if (this.closing) return Promise.resolve();
+    if (this.synchronizationAttempt) return this.synchronizationAttempt;
+    this.state.reconnecting = true;
+    this.changed();
+    const synchronize = async () => {
+      try {
         await this.refreshProjects();
         if (this.closing) return;
         if (!await this.refresh(true)) { if (this.state.connection === "connected") this.disconnected(new Error("无法确认最新运行状态，请重新连接")); return; }
-        await this.refreshTemplates();
-        if (!this.closing) await this.refreshExecutionSettings();
-      }
-      if (this.closing) return;
-      this.reconnectFailures = 0;
-      this.reconnectAfter = 0;
-      if (this.state.error.startsWith("宿主连接中断：")) this.state.error = "";
-    } catch (error) { this.disconnected(error); }
+        if (this.closing || this.state.connection !== "connected") return;
+        this.reconnectFailures = 0;
+        this.reconnectAfter = 0;
+        if (this.state.error.startsWith("宿主连接中断：")) this.state.error = "";
+      } catch (error) { this.disconnected(error); }
+    };
+    const attempt = synchronize().finally(() => {
+      this.initializing = false;
+      this.state.reconnecting = false;
+      if (this.synchronizationAttempt === attempt) this.synchronizationAttempt = undefined;
+      this.changed();
+      if (!this.closing && this.state.connection === "connected") void this.refreshMetadata();
+    });
+    this.synchronizationAttempt = attempt;
+    return attempt;
+  }
+
+  private refreshMetadata(): Promise<void> {
+    const projectPath = this.state.projectPath;
+    if (this.metadataRefresh && this.metadataProject === projectPath) return this.metadataRefresh;
+    this.metadataProject = projectPath;
+    const attempt = Promise.all([this.refreshTemplates(), this.refreshExecutionSettings(projectPath)]).then(() => {}).finally(() => {
+      if (this.metadataRefresh === attempt) { this.metadataRefresh = undefined; this.metadataProject = undefined; }
+    });
+    this.metadataRefresh = attempt;
+    return attempt;
   }
 
   async refresh(force = false): Promise<boolean> {
@@ -617,7 +657,7 @@ export class WorkflowPanelController {
       });
       this.state.templatesLoaded = true;
       if (!this.state.templates.some(template => template.id === this.state.selectedTemplate)) this.state.selectedTemplate = this.definitionSelected ? undefined : this.state.templates[0]?.id;
-    } catch (error) { this.state.error = `读取工作流库失败：${errorMessage(error)}`; }
+    } catch (error) { if (!this.closing) this.state.error = `读取工作流库失败：${errorMessage(error)}`; }
     finally { this.changed(); }
   }
 
@@ -629,7 +669,7 @@ export class WorkflowPanelController {
     this.changed();
     try {
       const settings = executionSettingsPayload(await this.request("workflow_get_execution_settings", projectPath ? { projectPath } : {}));
-      if (this.closing || request !== this.settingsRequest) return;
+      if (this.closing || request !== this.settingsRequest || projectPath !== this.currentProject?.path) return;
       this.state.settings = settings;
       this.state.settingsProjectPath = projectPath;
     } catch (error) {
@@ -843,6 +883,7 @@ export class WorkflowPanelController {
     if (this.shutdown) return this.shutdown;
     this.closing = true;
     this.state.connection = "closed";
+    this.state.reconnecting = false;
     this.timers.splice(0).forEach(dispose => dispose());
     this.changed();
     this.shutdown = (async () => {
@@ -966,6 +1007,66 @@ export interface NodeProcess {
   currentActivity?: WorkflowActivity; activities: WorkflowActivity[]; summary: string; error?: string;
   logs?: Array<{ at: string; level: string; message: string; taskId?: string }>;
 }
+export interface NodeProcessTarget { id: string; taskId?: string; phase?: string; scope?: "workflow" | "unphased" }
+export type NodeProcessDetail = "brief" | "developer";
+
+// Keep one transport request alive while newer progress merely queues a refresh.
+// Session changes discard results, not the in-flight ownership of that request.
+export class NodeProcessReader {
+  private session = 0;
+  private target: NodeProcessTarget | undefined;
+  private pending = new Map<NodeProcessDetail, string>();
+  private completed = new Map<NodeProcessDetail, string>();
+  private failed = new Set<NodeProcessDetail>();
+  private active: { session: number; detail: NodeProcessDetail; signature: string } | undefined;
+  private readonly read: (target: NodeProcessTarget, detail: NodeProcessDetail) => Promise<NodeProcess>;
+  private readonly receive: (target: NodeProcessTarget, detail: NodeProcessDetail, process: NodeProcess) => void;
+  private readonly reject: (target: NodeProcessTarget, detail: NodeProcessDetail, error: unknown) => void;
+  constructor(
+    read: (target: NodeProcessTarget, detail: NodeProcessDetail) => Promise<NodeProcess>,
+    receive: (target: NodeProcessTarget, detail: NodeProcessDetail, process: NodeProcess) => void,
+    reject: (target: NodeProcessTarget, detail: NodeProcessDetail, error: unknown) => void,
+  ) { this.read = read; this.receive = receive; this.reject = reject; }
+  open(target: NodeProcessTarget): void {
+    this.close();
+    this.target = { ...target };
+  }
+  close(): void {
+    this.session++;
+    this.target = undefined;
+    this.pending.clear();
+    this.completed.clear();
+    this.failed.clear();
+  }
+  cancel(detail: NodeProcessDetail): void { this.pending.delete(detail); }
+  request(detail: NodeProcessDetail, signature: string, retry = false): void {
+    if (!this.target || this.failed.has(detail) && !retry) return;
+    if (retry) this.failed.delete(detail);
+    else if (this.completed.get(detail) === signature || this.active?.session === this.session && this.active.detail === detail && this.active.signature === signature) return;
+    this.pending.set(detail, signature);
+    this.drain();
+  }
+  private drain(): void {
+    if (this.active || !this.target) return;
+    const next = this.pending.entries().next().value;
+    if (!next) return;
+    const [detail, signature] = next;
+    this.pending.delete(detail);
+    const target = { ...this.target }, active = { session: this.session, detail, signature };
+    this.active = active;
+    void (async () => {
+      try {
+        const process = await this.read(target, detail);
+        if (active.session === this.session && this.target) { this.completed.set(detail, signature); this.receive(target, detail, process); }
+      } catch (error) {
+        if (active.session === this.session && this.target) { this.failed.add(detail); this.pending.delete(detail); this.reject(target, detail, error); }
+      } finally {
+        if (this.active === active) this.active = undefined;
+        this.drain();
+      }
+    })();
+  }
+}
 export interface DeletionTarget { kind: "run" | "definition"; id: string; revision: number; runIds?: string[]; includeAssociatedRuns?: true }
 export interface DeletionPreview {
   fingerprint: string; target: DeletionTarget; runs: Array<{ id: string; revision: number; name: string; projectPath: string }>;
@@ -1022,8 +1123,8 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   let argsValue: unknown = {}, nodeSettings: NodeSettings = {}, nodeKey = "", nodeNotice = "", nodeDirty = false;
   let parameterSnapshot: unknown, parametersSaved = false, nodeSignature = "", zoom = 1;
   let workspaceModeValue: WorkspaceMode = "snapshot", workspaceModeSnapshot: WorkspaceMode = "snapshot", workspaceSourceMode: WorkspaceMode = "snapshot";
-  let processTarget: { id: string; taskId?: string; phase?: string; scope?: "workflow" | "unphased" } | undefined;
-  let processLoading = false, processRequest = 0, processSignature = "", developerRequested = false;
+  let processTarget: NodeProcessTarget | undefined;
+  let processSignature = "", developerRequested = false;
   let reviewSignature = "";
   let artifactPage: unknown, artifactOwner = "", artifactRequest = 0, artifactLoading = false;
   let deletionPreview: DeletionPreview | undefined, deletionLoading = false, deletionRequest = 0;
@@ -1075,23 +1176,26 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (choice.reasoningEffort && !models.some(model => model.supportedReasoningEfforts.includes(choice.reasoningEffort!))) throw new Error("请选择可用的思考深度");
     if (model && effort && !model.supportedReasoningEfforts.includes(effort)) throw new Error(`模型 ${model.displayName || model.id} 不支持 ${effort} 思考深度`);
   };
-  const fetchProcess = async (developer = false): Promise<void> => {
-    if (!processTarget || !processDialog.open || processLoading && !developer) return;
-    const target = processTarget, request = ++processRequest;
-    if (!developer) processLoading = true;
-    try {
-      const data = await controller.request("workflow_get_node_process", { ...target, detail: developer ? "developer" : "brief" });
-      if (request !== processRequest || !processDialog.open || JSON.stringify(target) !== JSON.stringify(processTarget)) return;
+  const processReader = new NodeProcessReader(async (target, detail) => {
+      const data = await controller.request("workflow_get_node_process", { ...target, detail });
       const process = data.process as NodeProcess | undefined;
       if (!process || !Array.isArray(process.activities) || typeof process.summary !== "string" || typeof process.label !== "string") throw new Error("节点过程格式无效");
+      return process;
+    }, (target, detail, process) => {
+      if (!processDialog.open || JSON.stringify(target) !== JSON.stringify(processTarget)) return;
       const run = controller.selected, failure = run && resultCheckFailure(run);
       element("#wf-process-title").textContent = run && failureContext(run)?.kind === "review" && target.scope === "workflow" ? "改动审查失败" : process.label;
       const relatedFailure = run?.execution === "failed" && (target.scope === "workflow" || failure && (failure.afterTaskId && target.taskId === failure.afterTaskId || failure.phase && target.phase === failure.phase));
       element("#wf-process-body").innerHTML = renderNodeProcess(process) + (relatedFailure && run?.error ? fullFailureDetails(run.error) : "");
-      if (developer && developerLogs.open) element("#wf-process-developer").textContent = process.logs?.map(log => `${displayTime(log.at)} ${log.level} ${log.message}`).join("\n") || "此节点暂无开发日志。";
-    } catch (error) {
-      if (request === processRequest && processDialog.open) element(developer ? "#wf-process-developer" : "#wf-process-body").textContent = `读取过程失败：${errorMessage(error)}`;
-    } finally { if (!developer) processLoading = false; }
+      if (detail === "developer") element("#wf-process-developer").textContent = process.logs?.map(log => `${displayTime(log.at)} ${log.level} ${log.message}`).join("\n") || "此节点暂无开发日志。";
+    }, (target, detail, error) => {
+      if (!processDialog.open || JSON.stringify(target) !== JSON.stringify(processTarget)) return;
+      element(detail === "developer" ? "#wf-process-developer" : "#wf-process-body").innerHTML = `${escapeHtml(`读取${detail === "developer" ? "开发日志" : "节点过程"}失败：${errorMessage(error)}`)}\n<button type="button" data-retry-process="${detail}">重试</button>`;
+    });
+  const fetchProcess = (developer = false, retry = false): void => {
+    if (!processTarget || !processDialog.open) return;
+    if (retry) element(developer ? "#wf-process-developer" : "#wf-process-body").textContent = developer ? "正在读取开发日志…" : "正在读取简要过程…";
+    processReader.request(developer ? "developer" : "brief", processSignature, retry);
   };
   const loadArtifactPage = async (offset: number): Promise<void> => {
     const run = controller.selected;
@@ -1121,6 +1225,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const knownPhase = failure?.phase && ((run.meta.phases ?? []).some(phase => (typeof phase === "string" ? phase : phase.title ?? phase.name) === failure.phase) || run.tasks.some(task => task.phase === failure.phase));
     if (task) controller.state.task = task.id;
     processTarget = { id: run.id, ...(task ? { taskId: task.id } : knownPhase ? { phase: failure!.phase! } : { scope: "workflow" as const }) };
+    processReader.open(processTarget);
     processSignature = ""; developerRequested = false; developerLogs.open = false;
     element("#wf-process-title").textContent = failureContext(run)?.kind === "review" ? "改动审查失败" : "结果检查失败";
     element("#wf-process-body").textContent = failureContext(run)?.kind === "review" ? "正在读取改动审查错误，已完成任务的有效结果保留。" : "正在读取失败原因与关联任务。重新执行需明确选择‘从此节点重试’。";
@@ -1339,15 +1444,16 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     processSettings.disabled = !controller.canAct || live || !!run?.deletionPending;
     if (selectedProcessTask) processSettings.dataset.nodeSettings = `task:${selectedProcessTask.index}`;
     const nextProcess = JSON.stringify([run?.revision, run?.progressSequence, processTarget]);
-    if (processDialog.open && nextProcess !== processSignature) { processSignature = nextProcess; void fetchProcess(developerRequested && developerLogs.open); }
+    if (processDialog.open && nextProcess !== processSignature) { processSignature = nextProcess; fetchProcess(); if (developerRequested && developerLogs.open) fetchProcess(true); }
     if (state.connection === "closed") for (const dialog of Array.from(root.querySelectorAll<HTMLDialogElement>("dialog[open]"))) dialog.close();
   };
   for (const dialog of Array.from(root.querySelectorAll<HTMLDialogElement>("dialog"))) {
     dialog.addEventListener("close", () => {
+      if (dialog.open) return;
       if (dialog === parameterDialog && !parametersSaved && parameterSnapshot !== undefined) { argsValue = parameterSnapshot; workspaceModeValue = workspaceModeSnapshot; parametersSignature = ""; render(); }
       if (dialog === nodeDialog) { nodeDirty = false; nodeSignature = ""; }
       if (dialog === settingsDialog) { settingsSignature = ""; render(); }
-      if (dialog === processDialog) { processTarget = undefined; processRequest++; processLoading = false; developerLogs.open = false; developerRequested = false; element("#wf-process-developer").textContent = ""; }
+      if (dialog === processDialog) { processTarget = undefined; processReader.close(); developerLogs.open = false; developerRequested = false; element("#wf-process-developer").textContent = ""; }
       if (dialog === deleteDialog) { deletionRequest++; deletionPreview = undefined; deletionLoading = false; }
       restoreFocus(dialog);
     });
@@ -1442,7 +1548,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   element("#wf-cancel-task").addEventListener("click", () => { if (processTarget?.taskId) void controller.perform("cancel", true, processTarget.taskId); });
   element("#wf-error-details").addEventListener("click", event => openFailureProcess(event.currentTarget as HTMLElement));
   element("#wf-retry-task").addEventListener("click", () => { if (processTarget?.taskId) { const taskId = processTarget.taskId; processDialog.close(); void controller.perform("resume", true, taskId); } });
-  developerLogs.addEventListener("toggle", () => { if (developerLogs.open && !developerRequested) { developerRequested = true; element("#wf-process-developer").textContent = "正在读取开发日志…"; void fetchProcess(true); } });
+  developerLogs.addEventListener("toggle", () => { if (developerLogs.open) { if (!developerRequested) element("#wf-process-developer").textContent = "正在读取开发日志…"; developerRequested = true; fetchProcess(true); } else processReader.cancel("developer"); });
   nodeModel.addEventListener("change", () => { nodeDirty = true; nodeEffort.innerHTML = effortSelectOptions(controller.state.settings?.models ?? [], nodeModel.value || inheritedChoice().model, nodeEffort.value, "继承上级配置"); nodeNotice = ""; });
   nodeEffort.addEventListener("change", () => { nodeDirty = true; nodeNotice = ""; });
   element("#wf-close-node-settings").addEventListener("click", () => nodeDialog.close());
@@ -1455,6 +1561,8 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   });
   root.addEventListener("click", event => {
     const target = event.target instanceof Element ? event.target : undefined;
+    const processRetry = target?.closest<HTMLButtonElement>("[data-retry-process]");
+    if (processRetry) { fetchProcess(processRetry.dataset.retryProcess === "developer", true); return; }
     const artifactButton = target?.closest<HTMLButtonElement>("[data-artifact-offset]");
     if (artifactButton && !artifactButton.disabled) { void loadArtifactPage(Number(artifactButton.dataset.artifactOffset)); return; }
     if (target?.closest("[data-load-runs]")) { void controller.loadMoreRuns(); return; }
@@ -1481,7 +1589,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (taskButton && controller.selected) {
       const failure = resultCheckFailure(controller.selected);
       if (!taskButton.dataset.task && failure && (failure.phase && (taskButton.dataset.phase ?? taskButton.dataset.phaseContainer) === failure.phase || taskButton.dataset.processScope)) { openFailureProcess(taskButton); return; }
-      controller.state.task = taskButton.dataset.task; processTarget = { id: controller.selected.id, ...(taskButton.dataset.task ? { taskId: taskButton.dataset.task } : taskButton.dataset.processScope ? { scope: taskButton.dataset.processScope as "workflow" | "unphased" } : { phase: taskButton.dataset.phase ?? taskButton.dataset.phaseContainer! }) }; processSignature = ""; developerRequested = false; developerLogs.open = false; element("#wf-process-title").textContent = "节点过程"; element("#wf-process-body").textContent = "正在读取简要过程…"; openDialog(processDialog, taskButton); render(); return;
+      controller.state.task = taskButton.dataset.task; processTarget = { id: controller.selected.id, ...(taskButton.dataset.task ? { taskId: taskButton.dataset.task } : taskButton.dataset.processScope ? { scope: taskButton.dataset.processScope as "workflow" | "unphased" } : { phase: taskButton.dataset.phase ?? taskButton.dataset.phaseContainer! }) }; processReader.open(processTarget); processSignature = ""; developerRequested = false; developerLogs.open = false; element("#wf-process-title").textContent = "节点过程"; element("#wf-process-body").textContent = "正在读取简要过程…"; openDialog(processDialog, taskButton); render(); return;
     }
     const historyRun = target?.closest<HTMLButtonElement>("[data-history-run]");
     if (historyRun) { historyDialog.close(); void controller.select(historyRun.dataset.historyRun!); return; }

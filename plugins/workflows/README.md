@@ -2,7 +2,7 @@
 
 <img src="assets/workflows-icon.png" alt="Workflows 产品图标" width="64" height="64">
 
-`0.6.1` 提供工具栏、横向执行图、节点过程弹窗和彻底删除。脚本由 Agent 创建和维护；每个工作流声明自己的输入项，面板把填写的值传入脚本的 `args`，点击启动后才执行。JavaScript 表达分支、循环、并行和按结果调度；真实 Codex worker 使用原生文件、命令和修改工具，以及本次授权的 MCP。运行可保存、停止、恢复、审查和跨项目复用。
+`0.6.2` 提供工具栏、横向执行图、节点过程弹窗和彻底删除。脚本由 Agent 创建和维护；每个工作流声明自己的输入项，面板把填写的值传入脚本的 `args`，点击启动后才执行。JavaScript 表达分支、循环、并行和按结果调度；真实 Codex worker 使用原生文件、命令和修改工具，以及本次授权的 MCP。运行可保存、停止、恢复、审查和跨项目复用。
 
 0.5.1 修复删除指纹与表单主题；0.5.2 修复临时 worker 子代理上下文、内置库来源及长错误容错。0.5.3 增加节点显式重试、完整快照恢复检查和只读 Git 状态缓存失效。
 
@@ -50,13 +50,15 @@ worker 正常返回不等于结果已通过业务验收。脚本判断结果后�
 
 启动先进入 `preparing`，显示环境核对、项目检查和工作区准备等阶段。执行图显示正在读取、修改、运行命令或调用工具的简要动作与耗时；节点过程弹窗说明做了什么、在哪一步失败。开发详情按节点提供有限日志，普通过程视图不展示任务提示词和原始输出。`progressSequence` 用于刷新过程数据，修改或执行操作仍核对当前 `revision`。
 
+节点过程仅读取有界诊断，任务收尾检查点尚未完成时也可查看；完整执行结果与操作仍等待收尾确认。弹窗合并连续刷新，简要过程和开发日志分别排队，慢响应不会被新进度一直废弃；失败明确显示原因，可点击重试。
+
 断线时保留最后一次读到的记录并暂停操作；重新连接会重建面板租约、读取服务端实际状态，不自动重跑或恢复任务。聊天启动不要求面板租约；面板启动绑定其生命周期，租约丢失会停止对应运行。确认状态后，用户明确继续时再恢复。
 
 ## 可表达的任务与工具
 
 脚本通过 `agent()` 请求真实任务，代理可以读取项目、分析代码、运行命令、修改代码并测试。网络授权与文件写入授权分别声明；网络权限不代表发送消息、发布、部署或修改外部数据的业务授权。
 
-外部 MCP 通过 `allowedMcpServers` 声明，`allowedMcpTools` 可进一步指定工具。有效集合保留用户已有的 allow/deny 和审批限制。只读文件沙箱不能让外部 MCP 自动只读；只读 worker 仅开放有只读声明的 MCP 工具，声明仍依赖服务端身份与实际权限。
+外部 MCP 通过 `allowedMcpServers` 声明，`allowedMcpTools` 可进一步指定工具。有效集合保留用户已有的 allow/deny 和审批限制。只读文件沙箱不能让外部 MCP 自动只读；只读 worker 仅开放工作流授权与明确只读工具的交集；没有可用只读工具的服务在该节点禁用，原生只读工具继续可用。写节点保持显式工具授权，用户过滤和审批规则保留；声明仍依赖服务端身份与实际权限。
 
 这些能力足以组合审查与核实、批量处理、按发现修复和测试、联网研究、依赖构建和 Git 维护。具体命令、规则和结束条件是每次工作流的输入，不需要针对每种业务修改插件代码。独立 app-server 不能自动取得父桌面聊天的全部专属 apps、Image Gen、界面控制或交互式权限回调；缺少能力时明确报告，不返回模拟结果。
 
@@ -132,6 +134,7 @@ npm run smoke
 npm run smoke:host
 npm run smoke:real
 node --experimental-strip-types scripts/local-real-smoke.ts --real-workers
+node --experimental-strip-types scripts/mcp-scope-real-smoke.ts --real-workers
 node --experimental-strip-types scripts/real-protocol-smoke.ts --real-workers
 node --experimental-strip-types scripts/real-repository-smoke.ts --project <repository> --real-commands
 ```

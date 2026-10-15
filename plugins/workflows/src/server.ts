@@ -13,7 +13,6 @@ import type { ProjectsProvider } from "./projects.ts";
 import { DeletionService } from "./deletion.ts";
 import type { DeleteInput } from "./deletion.ts";
 import { readDeletionConfig } from "./deletion-config.ts";
-import { nodeProcess } from "./node-process.ts";
 import { assertControlPlaneTransportable, projectRunForTransport, TransportProjectionError } from "./run-view.ts";
 import type { WorkflowRun } from "./types.ts";
 
@@ -100,7 +99,7 @@ function registerPanelToolWithIcons(server: McpServer, register: () => void) {
 }
 
 export function createServer(engine: WorkflowEngine, options: { projects?: ProjectsProvider; readDeletionConfig?: (projectPaths: string[]) => Promise<Record<string, unknown>> } = {}) {
-  const serverInfo = { name: "workflows", version: "0.6.1", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.6.2", icons: panelIcons };
   const panelHtml = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server = new McpServer(serverInfo);
   const templates = new TemplateStore(engine.store);
@@ -248,7 +247,7 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
     title: "查看节点过程",
     description: "Read concise node or phase activities and errors. Brief view excludes task prompts and raw diagnostics; developer detail explicitly adds bounded node logs. Does not execute a workflow.",
     inputSchema: { id, taskId: z.string().min(1).max(128).optional(), phase: z.string().min(1).max(256).optional(), scope: z.enum(["workflow", "unphased"]).optional(), detail: z.enum(["brief", "developer"]).optional() }, annotations, _meta: { ui: { visibility: ["model", "app"] } },
-  }, async input => safe(async () => ({ process: nodeProcess(await engine.get(input.id), { ...(input.taskId ? { taskId: input.taskId } : {}), ...(input.phase ? { phase: input.phase } : {}), ...(input.scope ? { scope: input.scope } : {}), ...(input.detail ? { detail: input.detail } : {}) }) })));
+  }, async input => safe(async () => ({ process: await engine.getNodeProcess(input.id, { ...(input.taskId ? { taskId: input.taskId } : {}), ...(input.phase ? { phase: input.phase } : {}), ...(input.scope ? { scope: input.scope } : {}), ...(input.detail ? { detail: input.detail } : {}) }) })));
   server.registerTool("workflow_preview_deletion", {
     title: "预览工作流彻底清理",
     description: "Inspect complete owned-data deletion of one run, or a saved definition and its reliably associated runs. Explicit runIds may select legacy records; names never establish association. Returns exact scope, bytes and blockers, without deleting or stopping anything.",
