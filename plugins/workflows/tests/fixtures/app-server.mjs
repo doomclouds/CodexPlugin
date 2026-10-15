@@ -142,6 +142,33 @@ createInterface({ input: process.stdin }).on("line", line => {
       notify("turn/completed", { threadId, turn: { id: turnId, status: "failed", items: [], error: { message: "token=private-test-token https://private.example.test/path" } } });
       return;
     }
+    if (scenario.startsWith("mcp-diagnostic-")) {
+      const call = { type: "mcpToolCall", id: "mcp-diagnostic-call", server: configuredName, tool: "write_tool", arguments: { prompt: "MCP_PRIVATE_PROMPT", token: "MCP_PRIVATE_ARGUMENT" }, status: "failed", error: null, result: null };
+      if (scenario === "mcp-diagnostic-transport") call.error = { message: 'MCP error -32000: unavailable; \u001b[31m"password"\u001b[0m: "quoted credential with spaces\nand multiline value"; \'authorization\': \'Bearer private-mcp-auth with spaces\'; token=private-mcp-token; ' + credentialSource + '; input validation {"arguments":{"payload":"MCP_PRIVATE_EMBEDDED_ARGUMENT"}}' };
+      if (scenario === "mcp-diagnostic-payload") {
+        call.status = "completed";
+        call.result = { isError: true, content: [{ type: "text", text: JSON.stringify({ error: { code: "TARGET_MISSING", message: "No active REA context", detail: '"secret": "private-mcp-secret with spaces"' }, arguments: { prompt: "MCP_PRIVATE_RESULT_ARGUMENT" }, result: "MCP_PRIVATE_SUCCESS_RESULT" }) }, { type: "image", data: "MCP_PRIVATE_IMAGE" }, { type: "resource", resource: { text: "MCP_PRIVATE_RESOURCE" } }] };
+      }
+      if (scenario === "mcp-diagnostic-structured") call.result = { content: [], structuredContent: { ok: false, data: { error: { code: -32001, message: "Nested MCP error", detail: '"api_key":"private-mcp-key"', details: { prompt: "MCP_PRIVATE_DETAILS" } } }, arguments: { prompt: "MCP_PRIVATE_RESULT_ARGUMENT" }, value: "MCP_PRIVATE_SUCCESS_RESULT" } };
+      if (scenario === "mcp-diagnostic-success") {
+        call.status = "completed";
+        call.result = { isError: false, content: [{ type: "text", text: "MCP_PRIVATE_SUCCESS_TEXT" }], structuredContent: { status: "failed", error: "MCP_PRIVATE_SUCCESS_RESULT" } };
+      }
+      if (scenario === "mcp-diagnostic-malformed") {
+        call.error = { message: { nested: "MCP_PRIVATE_MALFORMED" } };
+        call.result = { content: { text: "MCP_PRIVATE_INVALID_CONTENT" }, structuredContent: { nested: { error: "MCP_PRIVATE_DEEP_ERROR" } } };
+      }
+      notify("item/started", { threadId, turnId, item: { ...call, status: "inProgress", error: null, result: null } });
+      if (scenario === "mcp-diagnostic-late-error") {
+        notify("item/completed", { threadId, turnId, item: { ...call, status: "completed" } });
+        call.status = "completed";
+        call.result = { isError: true, content: [{ type: "text", text: "Late MCP error" }] };
+      }
+      notify("item/completed", { threadId, turnId, item: call });
+      notify("item/completed", { threadId, turnId, item: call });
+      finish("worker recovered", "final_answer", [call]);
+      return;
+    }
     if (["terminal-command-output", "terminal-command-long", "streamed-terminal-command", "terminal-command-no-output"].includes(scenario)) {
       const command = { type: "commandExecution", id: "terminal-command", command: ["node", "-e", "full-command-private-marker"], status: "completed", exitCode: scenario === "terminal-command-output" ? -9 : 0,
         aggregatedOutput: scenario === "terminal-command-long" ? "LONG_BEGIN\n" + "x".repeat(32_740) + "\nsk-abcdefghijklmnopqrstuvwxyz1234567890\n" + "tail".repeat(10_000)

@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { commandActivityLabel, itemActivity } from "./activity.ts";
 import { normalizeProtectedPaths } from "./protected-paths.ts";
 import { captureLocalGitScope, validateLocalGitScope } from "./local-git-scope.ts";
+import { McpFailureDiagnostics, mcpItemFailed } from "./mcp-diagnostics.ts";
 import type { Activity } from "./types.ts";
 
 export interface WorkerRequest {
@@ -431,7 +432,7 @@ export class CodexAdapter implements WorkerAdapter {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.4" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.5" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config = object(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config, cwd);
@@ -546,7 +547,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.4" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.5" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer); startupTimer = undefined;
       if (canceled || signal.aborted) throw canceled ?? abortError();
@@ -597,6 +598,7 @@ export class CodexAdapter implements WorkerAdapter {
     const streamedCommands = new Set<string>();
     const aggregatedCommands = new Set<string>();
     const failedCommands = new Set<string>();
+    const mcpDiagnostics = new McpFailureDiagnostics(redact);
     const toolsUsed = new Set<string>();
     let messageBytes = 0;
     let threadId = "";
@@ -623,8 +625,8 @@ export class CodexAdapter implements WorkerAdapter {
     const observedItem = (itemValue: unknown, status: Activity["status"]) => {
       const item = object(itemValue);
       const old = activities.get(String(item.id));
-      if (old && old.status !== "running") return;
-      const failed = item.status === "failed" || item.type === "commandExecution" && typeof item.exitCode === "number" && item.exitCode !== 0;
+      const failed = item.status === "failed" || item.type === "commandExecution" && typeof item.exitCode === "number" && item.exitCode !== 0 || mcpItemFailed(item);
+      if (old && old.status !== "running" && !(item.type === "mcpToolCall" && old.status !== "failed" && status === "completed" && failed)) return;
       const activity = itemActivity(item, status === "completed" && failed ? "failed" : status, old?.startedAt);
       if (activity) {
         const waiting = activities.get(`${request.id}:waiting`);
@@ -678,7 +680,12 @@ export class CodexAdapter implements WorkerAdapter {
       }
       if (item.type === "fileChange") { toolsUsed.add("native:fileChange"); emit({ type: "log", message: `Native file change status: ${String(item.status)}.` }); return; }
       if (item.type === "webSearch") { toolsUsed.add("native:webSearch"); return; }
-      if (item.type === "mcpToolCall" && typeof item.server === "string" && typeof item.tool === "string") { toolsUsed.add(`mcp:${item.server}/${item.tool}`); return; }
+      if (item.type === "mcpToolCall") {
+        if (typeof item.server === "string" && typeof item.tool === "string") toolsUsed.add(`mcp:${item.server}/${item.tool}`);
+        const diagnostic = mcpDiagnostics.capture(item);
+        if (diagnostic) emit({ type: "log", message: diagnostic });
+        return;
+      }
       if (item.type !== "agentMessage" || typeof item.text !== "string") return;
       const id = String(item.id);
       logChunk(`agent:${id}`, logBuffers.has(`agent:${id}`) ? "" : item.text, true);
@@ -747,7 +754,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.4" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.5" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object(object(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== undefined || request.reasoningEffort !== undefined) {

@@ -21,7 +21,7 @@ description: 根据用户任务生成、保存并执行 Workflows 动态工作�
 
 核对目标项目、允许写入的范围、是否需要网络、MCP 服务及工具授权、工作区类型、维护命令和激活配置。用户已授权创建并执行时，用预览返回的 `id` 和当前 `revision` 调用 `workflow_start`；聊天调用不传 `leaseId`。不要把已有授权拆成重复确认。用户只要求规划时，完成预览，不自行开始。
 
-执行中用 `workflow_get_run` 读取真实状态、任务尝试、用量与结果；需要多个记录时用 `workflow_list_runs`。`preparing` 表示仍在核对环境、项目或准备工作区，不等于尚未响应。过程刷新查看准备阶段、任务活动和 `progressSequence`；写入、启动、恢复和应用仍使用最新 `revision`。用户只需简要过程时，用 `workflow_get_node_process` 的默认 `brief` 视图说明当前动作、耗时和错误位置，不输出提示词和原始日志。需要定位开发问题时显式选择 `detail: "developer"`，读取相关节点的有限日志。
+执行中用 `workflow_get_run` 读取真实状态、任务尝试、用量与结果；需要多个记录时用 `workflow_list_runs`。`preparing` 表示仍在核对环境、项目或准备工作区，不等于尚未响应。过程刷新查看准备阶段、任务活动和 `progressSequence`；写入、启动、恢复和应用仍使用最新 `revision`。用户只需简要过程时，用 `workflow_get_node_process` 的默认 `brief` 视图说明当前动作、耗时和错误位置，不输出提示词和原始日志。需要定位开发问题时显式选择 `detail: "developer"`，读取相关节点的有限日志。失败的 MCP 调用日志包含脱敏、有界的原始错误；成功载荷和工具参数不写入这些诊断。旧版本未保存的错误不能从 `isError` 摘要推断具体原因，应报告证据缺失并按授权做最小复核，不无条件重跑整个流程。
 
 `workflow_list_runs` 返回 `listSummary: true` 的轻量摘要页，按 `nextOffset` 继续读取，`totalRuns` 是真实总数。摘要没有完整脚本、输入、任务或授权范围，不能据此构造启动或编辑参数；先用 `workflow_get_run` 读取目标详情。同一版本的摘要不能覆盖已读取的完整控制范围。详情也是有界传输视图，完整存储和指纹不被裁切；默认差异文本最多 256 KiB、日志最多 128 KiB、维护产物 20 项。产物以 `artifactCount` 表示真实总数，按 `nextArtifactOffset` 传 `artifactOffset`、`artifactLimit` 读取后续页，单页最多 200 项；不能把当前样本数当成总数。
 
@@ -45,7 +45,7 @@ description: 根据用户任务生成、保存并执行 Workflows 动态工作�
 
 执行模式由 AI 在创建计划时按任务选择，并显式传入 `workspaceMode`，用户无需改脚本：明确要求直接开发、修 Bug 并立即在当前项目看到改动时用 `local`；试验、希望先看差异再采用时用 `snapshot`；拉取并固定 Git 提交、分支或子模块的隔离维护用 `git-worktree`。只读分析保持 `allowWrite: false` 和任务 `mode: "read"`，不因“在本机执行”就开放写入。写入权限与工作位置分别配置；本地写入运行里的分析节点仍可只读。普通“写代码”没有说明是否原地且上下文无法确定时，保留 `snapshot`，不猜测用户已同意立即修改原项目。API 默认仍是 `snapshot`；复用已有定义保留其模式，需要改变时明确说明并创建新预览，不自动迁移已有运行。
 
-`networkAccess` 默认 `false`，与 `allowWrite` 独立。只读联网研究可保持 `allowWrite: false` 和 `agent` 默认只读模式，仅按授权打开 `networkAccess: true`；这不会开放文件写入。只有用户任务已授权相应网络访问时设置 `true`；维护步骤仍须声明自己的 `networkAccess: true` 才能联网。不能用命令、临时环境或其他工具绕过关闭的网络。worker 不隐式继承外部工具或父聊天能力。需要已配置的 MCP 时，在 `allowedMcpServers` 明确列出授权服务名称，并以 `allowedMcpTools` 按服务列出授权的实际工具名称；默认服务和工具均未开放。只使用现有配置工具的交集，不绕过审批。只读 worker 仅使用明确 `readOnlyHint: true` 的工具；写入 worker 也按工具授权限制。不包含 Workflows 自身，避免递归调度。父聊天专有 apps/连接器不属于用户 MCP 配置，不能声称已继承或可调用。
+`networkAccess` 默认 `false`，与 `allowWrite` 独立。只读联网研究可保持 `allowWrite: false` 和 `agent` 默认只读模式，仅按授权打开 `networkAccess: true`；这不会开放文件写入。只有用户任务已授权相应网络访问时设置 `true`；维护步骤仍须声明自己的 `networkAccess: true` 才能联网。不能用命令、临时环境或其他工具绕过关闭的网络。worker 不隐式继承外部工具或父聊天能力。需要已配置的 MCP 时，在 `allowedMcpServers` 明确列出授权服务名称，并以 `allowedMcpTools` 按服务列出授权的实际工具名称；默认服务和工具均未开放。只使用现有配置工具的交集，不绕过审批。只读 worker 仅使用明确 `readOnlyHint: true` 的工具；写入 worker 也按工具授权限制。worker 当前为非交互执行，工具白名单不代替原生审批。遇到 `MCP tool call requires approval, but approval policy is never` 时，报告具体工具需要用户审批配置，不反复调用，也不改注解、直接连接服务或开放全部工具绕过。只有用户明确授权对应工具的预批准设置时，才按 Codex 支持的逐工具配置最小调整；不因工作流授权就自行削弱原生审批策略。不包含 Workflows 自身，避免递归调度。父聊天专有 apps/连接器不属于用户 MCP 配置，不能声称已继承或可调用。
 
 工作区默认 `workspaceMode: "snapshot"`，写入先在隔离工作区完成。需要 Git 元数据的隔离维护使用 `"git-worktree"`，并明确 Git 仓库根目录。用户明确要求直接修改当前项目时，使用 `workspaceMode: "local"`、`allowWrite: true`，修改任务仍传 `{ mode: "write" }`。本地模式的 worker 直接在原项目读取、修改和测试，保留已有未提交编辑，不要求工作区干净或必须是 Git 仓库。改动立即生效，不需要也不能调用 `workflow_apply`。停止、失败和删除运行都不撤销已写入的项目文件。共用同一 Workflows 数据目录时，同一项目的本地写入运行串行；外部编辑器与其他数据目录不受此锁协调。预览应明确说明即时写入的范围；已有直接修改授权不重复确认。
 

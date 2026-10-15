@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { CodexAdapter } from "../src/adapter.ts";
 import type { CommandRequest, WorkerEvent, WorkerRequest } from "../src/adapter.ts";
 import { normalizeProtectedPaths } from "../src/protected-paths.ts";
+import { McpFailureDiagnostics, mcpItemFailed } from "../src/mcp-diagnostics.ts";
 
 const fixture = fileURLToPath(new URL("fixtures/app-server.mjs", import.meta.url));
 
@@ -70,6 +71,110 @@ test("temporary-file command guidance is scoped to the enforced read-only sandbo
         assert.equal(thread.params.developerInstructions.includes("temporary-file writes"), false);
       }
     } finally { await context.cleanup(); }
+  }
+});
+
+for (const [scenario, expected] of [
+  ["transport", /MCP error -32000: unavailable/],
+  ["payload", /TARGET_MISSING.*No active REA context/],
+  ["structured", /-32001.*Nested MCP error/],
+  ["malformed", /without a supported error message/],
+  ["late-error", /Late MCP error/],
+] as const) {
+  test(`MCP ${scenario} failures retain bounded diagnostics without failing a recovered worker`, async () => {
+    const context = await setup(`mcp-diagnostic-${scenario}`);
+    try {
+      const result = await context.adapter.run({ ...context.request, mode: "write", mcpServers: ["fixture"], mcpTools: { fixture: ["write_tool"] } }, context.controller.signal, event => context.events.push(event));
+      assert.equal(result.output, "worker recovered");
+      assert.ok(result.toolsUsed?.includes("mcp:fixture/write_tool"));
+      const diagnostics = context.events.filter((event): event is Extract<WorkerEvent, { type: "log" }> => event.type === "log" && event.message.startsWith("MCP tool call failed"));
+      assert.equal(diagnostics.length, 1, "Repeated item/completed and terminal items must not duplicate the error.");
+      assert.match(diagnostics[0]!.message, expected);
+      assert.match(diagnostics[0]!.message, /^MCP tool call failed \(fixture\/write_tool\): /);
+      assert.ok(Buffer.byteLength(diagnostics[0]!.message) <= 8192);
+      const diagnostic = diagnostics[0]!.message;
+      assert.doesNotMatch(diagnostic, /MCP_PRIVATE_|private-mcp-|quoted credential with spaces|multiline value|credential-pass|credential-token|credential-key|credential-signature|fragment-secret|\x1b/);
+      const activities = context.events.filter((event): event is Extract<WorkerEvent, { type: "activity" }> => event.type === "activity" && event.activity.id === "mcp-diagnostic-call");
+      assert.equal(activities.at(-1)?.activity.status, "failed");
+    } finally { await context.cleanup(); }
+  });
+}
+
+test("successful MCP results and business status fields do not enter failure diagnostics", async () => {
+  const context = await setup("mcp-diagnostic-success");
+  try {
+    const result = await context.adapter.run({ ...context.request, mode: "write", mcpServers: ["fixture"], mcpTools: { fixture: ["write_tool"] } }, context.controller.signal, event => context.events.push(event));
+    assert.equal(result.output, "worker recovered");
+    assert.ok(result.toolsUsed?.includes("mcp:fixture/write_tool"));
+    assert.equal(context.events.some(event => event.type === "log" && /MCP tool call failed|MCP_PRIVATE/.test(event.message)), false);
+    assert.equal(context.events.findLast(event => event.type === "activity" && event.activity.id === "mcp-diagnostic-call")?.type, "activity");
+    assert.equal(context.events.some(event => event.type === "activity" && event.activity.id === "mcp-diagnostic-call" && event.activity.status === "failed"), false);
+  } finally { await context.cleanup(); }
+});
+
+test("MCP diagnostic projection ignores cyclic/deep data, resources, malformed fields and large JSON payloads", () => {
+  const diagnostics = new McpFailureDiagnostics(value => value);
+  const cyclic: Record<string, unknown> = { arguments: { prompt: "MCP_PRIVATE_PROMPT" } }; cyclic.error = cyclic;
+  const deep = { nested: { nested: { nested: { error: "MCP_PRIVATE_DEEP" } } } };
+  const items = [
+    { error: { message: cyclic }, result: { structuredContent: cyclic } },
+    { result: { structuredContent: deep, content: [{ type: "image", data: "MCP_PRIVATE_IMAGE" }, { type: "resource", resource: { text: "MCP_PRIVATE_RESOURCE" } }, { type: "text", text: 4 }] } },
+    { result: { content: [{ type: "text", text: '{"arguments":"' + "MCP_PRIVATE_LARGE".repeat(100_000) + '"}' }] } },
+    { result: { content: [{ type: "text", text: "{" + "[".repeat(4000) + "}" }] } },
+  ];
+  for (const [index, item] of items.entries()) {
+    const result = diagnostics.capture({ ...item, id: String(index), type: "mcpToolCall", status: "failed" });
+    assert.ok(result);
+    assert.ok(Buffer.byteLength(result) <= 8192);
+    assert.doesNotMatch(result, /MCP_PRIVATE/);
+  }
+  assert.equal(mcpItemFailed({ type: "mcpToolCall", status: "completed", result: { structuredContent: { status: "failed", error: "business result" } } }), false);
+});
+
+test("MCP diagnostics cap total errors and UTF-8 bytes while preserving ID deduplication", () => {
+  for (const detail of ["small error", "失败。".repeat(10_000)]) {
+    const diagnostics = new McpFailureDiagnostics(value => value);
+    const logs: string[] = [];
+    for (let index = 0; index < 1000; index++) {
+      const item = { id: String(index), type: "mcpToolCall", status: "failed", error: { message: detail } };
+      const result = diagnostics.capture(item);
+      if (result) logs.push(result);
+      assert.equal(diagnostics.capture(item), undefined);
+    }
+    assert.ok(logs.length <= 101);
+    assert.ok(logs.every(log => Buffer.byteLength(log) <= 8192));
+    assert.ok(logs.reduce((sum, log) => sum + Buffer.byteLength(log), 0) <= 65_536);
+    assert.match(logs.at(-1)!, /limit reached/);
+    assert.equal(logs.some(log => log.includes("\ufffd")), false, "Truncation preserves UTF-8 boundaries.");
+  }
+});
+
+test("MCP error redaction handles escaped JSON keys and truncation inside a quoted credential", () => {
+  const diagnostics = new McpFailureDiagnostics(value => value);
+  for (const [index, message] of [
+    'validation error: "{\\"password\\":\\"private escaped credential\\"}"',
+    'validation error: {"password":"' + "private quoted credential ".repeat(1000) + '"}',
+    'validation error: {"arguments":{"unknownKey":"private input payload"}}',
+  ].entries()) {
+    const log = diagnostics.capture({ id: String(index), type: "mcpToolCall", status: "failed", error: { message } });
+    assert.ok(log);
+    assert.match(log, /validation error/);
+    assert.doesNotMatch(log, /private escaped|private quoted|quoted credential|private input|unknownKey/);
+  }
+});
+
+test("MCP error diagnostics include only ordinary validated server and tool names", () => {
+  const diagnostics = new McpFailureDiagnostics(value => value);
+  const call = { type: "mcpToolCall", status: "failed", error: { message: "Protocol failed" } };
+  assert.match(diagnostics.capture({ ...call, id: "valid", server: "rea", tool: "binary_session" })!, /^MCP tool call failed \(rea\/binary_session\): /);
+  for (const [index, names] of [
+    { server: "secret-private-server", tool: "read_tool" },
+    { server: "rea", tool: "token-private-tool" },
+    { server: "https://private.example.test/server", tool: "read_tool" },
+    { server: "rea", tool: "x".repeat(81) },
+    { server: "rea", tool: "bad\nprivate-tool" },
+  ].entries()) {
+    assert.equal(diagnostics.capture({ ...call, ...names, id: String(index) }), "MCP tool call failed: message: Protocol failed");
   }
 });
 
