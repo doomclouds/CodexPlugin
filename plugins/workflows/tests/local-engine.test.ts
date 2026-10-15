@@ -244,7 +244,7 @@ test("a local crash without a reliable checkpoint cannot replay previously start
 
 test("local write permission is explicit and cannot be removed or converted after creating its project baseline", async t => {
   const f = await fixture(t, async () => "verified");
-  await assert.rejects(f.engine.preview({ ...localInput(f.project, 'return "no";'), allowWrite: false }), /explicit allowWrite/);
+  await assert.rejects(f.engine.preview({ ...localInput(f.project, 'return "no";'), allowWrite: false }), /allowWrite/);
   const preview = await f.engine.preview(localInput(f.project, 'await agent("Verify"); throw new Error("Stop");'));
   await f.engine.start({ id: preview.id, revision: preview.revision }); const failed = await f.engine.wait(preview.id);
   await assert.rejects(f.engine.update({ id: failed.id, revision: failed.revision, script: failed.script, args: failed.args, workspaceMode: "snapshot" }), /Changing execution scope/);

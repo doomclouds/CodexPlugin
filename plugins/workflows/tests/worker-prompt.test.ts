@@ -69,6 +69,17 @@ test("a missing current phase stays unknown rather than being inferred from decl
   assert.equal(contextOf(buildWorkerPrompt(value)).currentPhase, null);
 });
 
+test("ordinary tool errors can be corrected while evidence survives cleanup and refusals remain final", () => {
+  const prompt = buildWorkerPrompt(input());
+  assert.match(prompt, /ordinary tool error is feedback/);
+  assert.match(prompt, /retry within this same task/);
+  assert.match(prompt, /Respect an explicit stop-on-error instruction and any recovery budget/);
+  assert.match(prompt, /Do not repeat an operation whose side effects are unknown/);
+  assert.match(prompt, /surface its exit code and bounded stderr\/stdout/);
+  assert.match(prompt, /before throwing or removing temporary files/);
+  assert.match(prompt, /Do not replace an available reason with only an isError flag, retry a denied action/);
+});
+
 test("queued workers retain their dispatched phase and unchanged script, task and permission scope", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "workflows-worker-scope-")), project = path.join(root, "project");
   await mkdir(project); await writeFile(path.join(project, "source.txt"), "fixture source\n");

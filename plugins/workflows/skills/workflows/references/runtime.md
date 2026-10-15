@@ -78,7 +78,7 @@ macOS 桌面项目接口通过宿主动态环境提供。启动器优先选宿�
 
 AI 创建计划时主动选择并显式传入模式：用户要求直接开发或修 Bug、立即在当前项目看到改动，选 `local`；要求试验或先审差异再采用，选 `snapshot`；需要拉取并固定提交、分支或子模块的隔离维护，选 `git-worktree`。只读分析使用 `allowWrite: false` 与任务 `mode: "read"`；写入权限和工作位置是独立设置，已允许写入的运行中也可安排只读节点。未说明原地修改且上下文不明确的普通编程请求保留 `snapshot`，API 默认不变。复用定义沿用已保存模式，不自动改动；用户无需手写脚本，改变执行范围须说明后新建预览。
 
-`workspaceMode: "local"` 直接修改原项目，必须显式传 `allowWrite: true`。预览只保存计划；启动后，写入 worker 的 `cwd` 与可写根目录是原项目，读取任务仍只读。文件变更立即生效，允许保留已有未提交编辑，也支持普通非 Git 项目。共用同一 Workflows 数据目录时，同一项目的本地写入运行串行；外部编辑器与其他数据目录不受此锁协调；不创建可供应用的隔离副本，`workflow_apply` 拒绝此模式，`application: "none"` 不代表原项目尚未修改。停止、异常或删除只处理执行与运行数据，不回滚或删除原项目文件。本地差异是从运行基线到检查时的项目变化，不能把并发用户编辑归因于工作流。恢复核对本地检查点；项目变化或已派发 worker 却缺少检查点时拒绝继续，先核对既有副作用再新建预览。确定性 `operation()` 和 `maintenance.activation` 仍只支持 Git 隔离模式；本地编程、命令与测试通过通用 `agent()` 原生工具执行。
+`workspaceMode: "local"` 直接修改原项目，必须显式传 `allowWrite: true`。预览只保存计划；启动后，写入 worker 的 `cwd` 与可写根目录是原项目，读取任务仍只读。文件变更立即生效，允许保留已有未提交编辑，也支持普通非 Git 项目。共用同一 Workflows 数据目录时，同一项目的本地写入运行串行；外部编辑器与其他数据目录不受此锁协调；不创建可供应用的隔离副本，`workflow_apply` 拒绝此模式，`application: "none"` 不代表原项目尚未修改。停止、异常或删除只处理执行与运行数据，不回滚或删除原项目文件。本地差异是从运行基线到检查时的项目变化，不能把并发用户编辑归因于工作流。恢复核对本地检查点；项目变化或已派发 worker 却缺少检查点时拒绝继续，先核对既有副作用再新建预览。确定性 `operation()` 支持三个工作区模式下的显式可写计划；`maintenance.activation` 和步骤 `protectedPaths` 仍只支持 Git 隔离。本地旧记录缺少原 Git 写入授权时，须新建预览才能声明 operation。
 
 `limits` 支持 `maxReadWorkers`、`maxCalls`、`timeoutMs`、`maxTokens`。默认只读并发 4，最多 16；写入同时最多一个。默认调用上限 1000、总时限 1 小时，token 门槛 0 表示不限。token 门槛控制后续派发，不代表账单上限。
 
@@ -128,7 +128,7 @@ return await agent(`核实并汇总：${JSON.stringify(reports.filter(Boolean))}
 | `phase(title)`、`log(message)` | 设置默认阶段或写入实际运行日志 |
 | `return value` | 返回最终 JSON 值或文本 |
 
-`agent` 选项包含 `label`、`phase`、`mode`、`model`、`reasoningEffort`、`schema`、`isolation`。默认只读；模型按用户选项或可用默认配置处理。只接受 JSON schema，不接受可执行函数。脚本自身不能直接访问文件、shell、网络、模块、时钟、随机数或定时器；没有未列出的 Claude API。
+`agent` 选项包含 `label`、`phase`、`mode`、`model`、`reasoningEffort`、`schema`、`accept`、`maxRecoveryAttempts`、`isolation`。默认只读；模型按用户选项或可用默认配置处理。只接受 JSON schema，不接受可执行函数。脚本自身不能直接访问文件、shell、网络、模块、时钟、随机数或定时器；没有未列出的 Claude API。
 
 预览、更新和定义保存可传 `nodeSettings`，值为 `{ model?, reasoningEffort? }`，键为 `phase:<已声明阶段标题>` 或 `task:<实际任务的零起始 index>`。节点设置优先于脚本设置，未设置则使用本次运行默认快照；首次启动解析插件默认或 Codex CLI 配置。模型和深度按实际目录校验，不自行替换为其他模型。运行期间不要修改节点配置，改变已停止运行的节点配置时创建新预览。主对话模型目前不由标准面板自动提供。
 
@@ -138,7 +138,7 @@ worker 通过官方 app-server 具备原生文件读取、命令执行和补丁�
 
 桌面专有工具、Image Gen、原生 UI、父聊天专有 apps 或连接器不全量继承，不把这些能力混入已配置 MCP 白名单。需要上述能力时按实际宿主工具可用性处理。
 
-`agent` 是适用于多种任务的通用 worker，可按白名单复用真实配置的 MCP。维护操作并非每个工作流必需；只读联网研究不需要开放写入或声明步骤。shell/build 维护要求 `allowWrite: true` 和 `workspaceMode: "git-worktree"`；需要确定性维护命令时，维护配置随预览和定义保存，不能由脚本增加命令：
+`agent` 是适用于多种任务的通用 worker，可按白名单复用真实配置的 MCP。维护操作并非每个工作流必需；只读联网研究不需要开放写入或声明步骤。预声明命令要求 `allowWrite: true`，支持 `local`、`snapshot` 和 `git-worktree`；配置激活与 `protectedPaths` 仍仅限 Git 隔离；需要确定性维护命令时，维护配置随预览和定义保存，不能由脚本增加命令：
 
 ```javascript
 const maintenance = {
@@ -178,3 +178,26 @@ const maintenance = {
 完成后统一检查差异、维护审查、测试输出和报告。隔离模式下，聊天可在已有应用授权时调用 `workflow_apply`，无需再进入编辑器；面板按钮仍保留。本地模式已直接写入原项目，核对实际文件与测试后报告，不再应用。冲突时不覆盖。应用成功、激活配置更新、宿主重新加载、工具版本验证、提交和发布是不同结果，分别核对与报告。
 
 `application: "partial"` 表示已有部分应用，但仍有阶段未完成；可能是子模块应用尚未完成，也可能是仓库及子模块均已应用后激活失败。先用 `workflow_get_run` 核对应用记录、实际错误和当前项目状态，再以新读取的 revision 按已有授权重试 `workflow_apply`，核验已完成部分并继续未完成阶段。只有仓库及子模块均已应用、仅激活失败时，重试才只处理激活并核对配置版本。
+
+## 节点验收与同线程恢复
+
+普通工具错误留在同一原生 Agent 上下文，模型可以根据真实输出修正调用。用户未要求失败即停时，不自行添加一刀切的停止约束。审批拒绝、取消及无法确认结果的副作用不能借恢复绕过。模型自选工具的纠错受整体时限和 token 预算限制；`maxRecoveryAttempts` 专门约束额外的结果校验回合，并不声称拦截所有底层工具尝试。
+
+`schema` 校验返回形状，`accept` 可选且必须与 `schema` 一起声明，单独校验业务成功条件。两者都是 JSON Schema 对象，不接受函数。执行前检查安全子集：支持 type、properties、required、additionalProperties、items、enum、const、anyOf/oneOf/allOf/not、if/then/else、数值/长度/数量限制；不支持外部或本地 `$ref`、pattern、format、未知关键词。schema 最多 64 KiB、512 个节点、深度 24；组合和数组唯一性校验受额外复杂度限制。无类型转换、默认填值、额外字段删除或远端解析，失败消息不回显输出值。
+
+```javascript
+const result = await agent("执行检查，普通工具错误可按真实原因纠正；无法通过时如实报告。", {
+  schema: {
+    type: "object",
+    properties: { status: { type: "string", enum: ["passed", "failed"] }, detail: { type: "string" } },
+    required: ["status", "detail"],
+    additionalProperties: false,
+  },
+  accept: { type: "object", properties: { status: { const: "passed" } }, required: ["status"] },
+  maxRecoveryAttempts: 2,
+});
+```
+
+`maxRecoveryAttempts` 为 0 到 2，默认 0。返回 JSON 无法解析、格式不符或明确验收不通过时，执行器可在同一临时线程增加对应次数的结果修正回合；历史上下文保留，当前节点和权限不变，总 timeout 不重置，完成的动作不能无依据重复。JSON/格式错误只要求修正输出；业务验收未通过时根据原任务授权检查原因、修正工具调用并重新验证。原生回合失败、审核拒绝/超时/中止、用户取消和协议异常不进入这个恢复循环。不猜测任意 status 字段；没有 accept 的状态对象可继续作为分支数据使用。
+
+恢复活动与实际恢复次数记录在当前 attempt，耗尽后保留最后输出与真实失败节点。脚本捕获异常后可以运行自己的 finally 清理；用 `throw originalError` 保留 task/attempt/phase 的原始来源，字符串化后丢失的来源不自动推断。预声明 operation 的 stdout/stderr、退出码在执行器中记录，清理命令缓存不删除这些已保存的结果；模型自行创建的子程序若吞掉输出，宿主无法还原从未收到的数据，必须在清理前显式输出诊断。

@@ -4,7 +4,7 @@ import { chmod, lstat, mkdir, open, readFile, readdir, readlink, realpath, renam
 import path from "node:path";
 import { ProtocolSession } from "./adapter.ts";
 import { cloneInitializedSubmodules, flattenGitArtifacts, gitCommand, gitCommandPreview, inspectGitManifest, listGitlinks, type GitManifest } from "./submodules.ts";
-import type { ActivationResult, Diff, MaintenanceArtifact, MaintenancePlan, MaintenanceReview, Workspace } from "./types.ts";
+import type { ActivationResult, Diff, MaintenanceArtifact, MaintenancePlan, MaintenanceReview, Workspace, WorkspaceMode } from "./types.ts";
 import { normalizeProtectedPaths } from "./protected-paths.ts";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -52,6 +52,19 @@ export function validateMaintenance(plan: MaintenancePlan, networkGrant: boolean
     }) };
   }
   return result;
+}
+
+export function validateMaintenanceScope(scope: { maintenance?: MaintenancePlan | undefined; workspaceMode?: WorkspaceMode | undefined; allowWrite?: boolean | undefined; networkAccess?: boolean | undefined }): MaintenancePlan | undefined {
+  const mode = scope.workspaceMode ?? "snapshot";
+  if (!["snapshot", "git-worktree", "local"].includes(mode)) throw new Error("Unsupported workflow workspace mode");
+  if (mode === "local" && scope.allowWrite !== true) throw new Error("Local project mode requires allowWrite: true");
+  if (mode === "git-worktree" && scope.allowWrite !== true) throw new Error("Git maintenance requires an isolated writable workspace");
+  if (scope.maintenance === undefined) return;
+  if (scope.allowWrite !== true) throw new Error("Maintenance operations require explicit allowWrite: true");
+  const plan = validateMaintenance(scope.maintenance, scope.networkAccess === true);
+  if (mode !== "git-worktree" && plan.activation) throw new Error("Maintenance activation requires git-worktree isolation");
+  if (mode !== "git-worktree" && plan.steps.some(step => step.protectedPaths !== undefined)) throw new Error("Protected maintenance paths require git-worktree isolation");
+  return plan;
 }
 
 async function git(cwd: string, args: string[]): Promise<string> {

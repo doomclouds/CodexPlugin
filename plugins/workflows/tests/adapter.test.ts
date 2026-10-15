@@ -10,6 +10,7 @@ import { CodexAdapter } from "../src/adapter.ts";
 import type { CommandRequest, WorkerEvent, WorkerRequest } from "../src/adapter.ts";
 import { normalizeProtectedPaths } from "../src/protected-paths.ts";
 import { McpFailureDiagnostics, mcpItemFailed } from "../src/mcp-diagnostics.ts";
+import { TaskOutputValidationError } from "../src/task-output.ts";
 
 const fixture = fileURLToPath(new URL("fixtures/app-server.mjs", import.meta.url));
 
@@ -758,6 +759,272 @@ test("malformed structured output fails instead of producing invented data", asy
   const context = await setup("bad-structured");
   try {
     await assert.rejects(context.adapter.run({ ...context.request, outputSchema: { type: "object" } }, context.controller.signal, () => {}), /valid structured JSON/);
+  } finally { await context.cleanup(); }
+});
+
+const recoverySchema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false };
+const recoveryAccept = { type: "object", properties: { ok: { const: true } }, required: ["ok"] };
+
+for (const scenario of ["accept", "json", "shape", "late"] as const) {
+  test(`explicit result recovery retains one thread and the complete permission scope (${scenario})`, async () => {
+    const context = await setup(`recovery-${scenario}`);
+    try {
+      const result = await context.adapter.run({ ...context.request, mode: "write", model: "explicit-test-model", reasoningEffort: "high", networkAccess: true, approvalMode: "auto-review", mcpServers: ["fixture"], mcpTools: { fixture: ["write_tool"] }, outputSchema: recoverySchema, accept: recoveryAccept, maxRecoveryAttempts: 1 }, context.controller.signal, event => context.events.push(event));
+      assert.deepEqual(result.data, { ok: true });
+      assert.equal(result.threadId, "test-thread"); assert.equal(result.turnId, "test-turn-2"); assert.equal(result.recoveryAttempts, 1);
+      assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 14, totalTokens: 36 });
+      assert.deepEqual(result.toolsUsed, ["native:commandExecution", "native:webSearch"]);
+      const transcript = await context.transcript(), turns = transcript.filter(item => item.method === "turn/start");
+      assert.equal(transcript.filter(item => item.method === "thread/start").length, 1);
+      assert.equal(turns.length, 2);
+      for (const turn of turns) {
+        assert.equal(turn.params.threadId, "test-thread");
+        assert.equal(turn.params.approvalPolicy, "on-request"); assert.equal(turn.params.approvalsReviewer, "auto_review");
+        assert.equal(turn.params.effort, "high");
+        assert.deepEqual(turn.params.outputSchema, recoverySchema);
+        assert.deepEqual(turn.params.sandboxPolicy, { type: "workspaceWrite", writableRoots: [context.request.cwd], networkAccess: true, excludeTmpdirEnvVar: true, excludeSlashTmp: true });
+        assert.equal("accept" in turn.params, false);
+      }
+      const correction = turns[1]!.params.input[0].text;
+      assert.match(correction, /Do not invent evidence/);
+      assert.match(correction, /Do not broaden/);
+      if (scenario === "json" || scenario === "shape") assert.match(correction, /Do not call tools, rerun commands/);
+      else assert.match(correction, /Do not repeat already successful commands/);
+      assert.equal(context.events.some(event => event.type === "activity" && event.activity.id === "test-worker:recovery:1" && event.activity.status === "completed"), true);
+      assert.doesNotMatch(JSON.stringify(context.events), /PRIVATE_STALE_OUTPUT/);
+      const recoveryLogs = context.events.filter(event => event.type === "log" && event.message.startsWith("Worker result recovery requested"));
+      assert.doesNotMatch(JSON.stringify(recoveryLogs), /PRIVATE_INVALID_OUTPUT|PRIVATE_BAD_SHAPE/);
+    } finally { await context.cleanup(); }
+  });
+}
+
+test("a legitimate failed branch remains data without an explicit acceptance contract", async () => {
+  const context = await setup("recovery-accept");
+  try {
+    const result = await context.adapter.run({ ...context.request, outputSchema: recoverySchema, maxRecoveryAttempts: 2 }, context.controller.signal, () => {});
+    assert.deepEqual(result.data, { ok: false });
+    assert.equal(result.recoveryAttempts, undefined);
+    assert.equal((await context.transcript()).filter(item => item.method === "turn/start").length, 1);
+  } finally { await context.cleanup(); }
+});
+
+for (const maximum of [0, 1, 2]) {
+  test(`acceptance recovery stops exactly at its explicit budget (${maximum}) and retains non-enumerable evidence`, async () => {
+    const context = await setup("recovery-exhaust");
+    try {
+      let failure: unknown;
+      try { await context.adapter.run({ ...context.request, outputSchema: recoverySchema, accept: recoveryAccept, maxRecoveryAttempts: maximum }, context.controller.signal, event => context.events.push(event)); }
+      catch (error) { failure = error; }
+      assert.ok(failure instanceof TaskOutputValidationError);
+      assert.equal(failure.code, "output-accept-rejected");
+      assert.deepEqual(failure.outputData, { ok: false });
+      assert.equal(failure.workerResult?.threadId, "test-thread");
+      assert.equal(failure.workerResult?.recoveryAttempts ?? 0, maximum);
+      assert.equal(failure.workerResult?.usage.totalTokens, (maximum + 1) * 18);
+      assert.equal(Object.getOwnPropertyDescriptor(failure, "outputData")?.writable, false);
+      assert.equal(Object.getOwnPropertyDescriptor(failure, "outputData")?.enumerable, false);
+      assert.equal(Object.keys(failure).includes("workerResult"), false);
+      assert.equal((await context.transcript()).filter(item => item.method === "turn/start").length, maximum + 1);
+    } finally { await context.cleanup(); }
+  });
+}
+
+test("invalid result contracts and recovery settings fail before launching a worker", async () => {
+  for (const request of [
+    { accept: recoveryAccept }, { outputSchema: { $ref: "https://private.example/schema" } },
+    { outputSchema: recoverySchema, accept: { pattern: "(a+)+$" } },
+    { maxRecoveryAttempts: -1 }, { maxRecoveryAttempts: 3 }, { maxRecoveryAttempts: 0.5 },
+    { remainingTokenBudget: -1 }, { remainingTokenBudget: 0.5 }, { remainingTokenBudget: Infinity },
+    { recoveryBudget: { remainingTokens: -1 } }, { recoveryBudget: { remainingTokens: 0.5 } }, { recoveryBudget: { remainingTokens: Infinity } },
+    { recoveryBudget: new (class { remainingTokens = 100; })() },
+  ]) {
+    const context = await setup("complete");
+    try {
+      await assert.rejects(context.adapter.run({ ...context.request, ...request }, context.controller.signal, () => {}));
+      await assert.rejects(access(path.join(context.request.cwd, "protocol.jsonl")), { code: "ENOENT" });
+    } finally { await context.cleanup(); }
+  }
+});
+
+for (const scenario of ["auto-review-denied", "auto-review-timeout", "auto-review-aborted", "recovery-host-request", "recovery-interrupted"]) {
+  test(`approval, host-interaction and interruption boundaries never recover (${scenario})`, async () => {
+    const context = await setup(scenario);
+    try {
+      await assert.rejects(context.adapter.run({ ...context.request, approvalMode: "auto-review", outputSchema: recoverySchema, accept: recoveryAccept, maxRecoveryAttempts: 2 }, context.controller.signal, event => context.events.push(event)));
+      assert.equal((await context.transcript()).filter(item => item.method === "turn/start").length, 1);
+      assert.equal(context.events.some(event => event.type === "activity" && event.activity.id.includes(":recovery:")), false);
+    } finally { await context.cleanup(); }
+  });
+}
+
+for (const scenario of ["recovery-ack-mismatch", "recovery-old-ack", "recovery-protocol"]) {
+  test(`recovery rejects malformed protocol and mismatched round identities (${scenario})`, async () => {
+    const context = await setup(scenario);
+    try {
+      await assert.rejects(context.adapter.run({ ...context.request, outputSchema: recoverySchema, accept: recoveryAccept, maxRecoveryAttempts: 2 }, context.controller.signal, () => {}), /turn identity|new worker turn ID|invalid JSON/);
+      assert.equal((await context.transcript()).filter(item => item.method === "turn/start").length, 2);
+    } finally { await context.cleanup(); }
+  });
+}
+
+test("all recovery turns share one total execution timeout", async () => {
+  const context = await setup("recovery-total-timeout");
+  try {
+    await assert.rejects(context.adapter.run({ ...context.request, outputSchema: recoverySchema, accept: recoveryAccept, maxRecoveryAttempts: 2, timeoutMs: 125 }, context.controller.signal, () => {}), { name: "TimeoutError" });
+    const turns = (await context.transcript()).filter(item => item.method === "turn/start");
+    assert.equal(turns.length, 2);
+  } finally { await context.cleanup(); }
+});
+
+test("cancellation of a recovery turn interrupts only the active round", async () => {
+  const context = await setup("recovery-cancel");
+  try {
+    await assert.rejects(context.adapter.run({ ...context.request, outputSchema: recoverySchema, accept: recoveryAccept, maxRecoveryAttempts: 2 }, context.controller.signal, event => {
+      context.events.push(event);
+      if (event.type === "identity" && event.turnId === "test-turn-2") context.controller.abort();
+    }), { name: "AbortError" });
+    const transcript = await context.transcript(), interrupts = transcript.filter(item => item.method === "turn/interrupt");
+    assert.equal(transcript.filter(item => item.method === "turn/start").length, 2);
+    assert.equal(interrupts.length, 1); assert.equal(interrupts[0]!.params.turnId, "test-turn-2");
+  } finally { await context.cleanup(); }
+});
+
+test("local Git scope is revalidated before a recovery turn can execute", async () => {
+  const context = await setup("recovery-git-swap");
+  try {
+    execFileSync("git", ["init", "--quiet", context.request.cwd]);
+    await assert.rejects(context.adapter.run({ ...context.request, mode: "write", localGitWrite: true, outputSchema: recoverySchema, accept: recoveryAccept, maxRecoveryAttempts: 2 }, context.controller.signal, () => {}), /Git metadata identity or writable scope changed/);
+    assert.equal((await context.transcript()).filter(item => item.method === "turn/start").length, 1);
+  } finally { await context.cleanup(); }
+});
+
+test("native protocol failure after a terminal notification cannot enter result recovery", async () => {
+  const context = await setup("recovery-terminal-protocol");
+  try {
+    await assert.rejects(context.adapter.run({ ...context.request, outputSchema: recoverySchema, accept: recoveryAccept, maxRecoveryAttempts: 2 }, context.controller.signal, event => context.events.push(event)), /invalid JSON/);
+    assert.equal((await context.transcript()).filter(item => item.method === "turn/start").length, 1);
+    assert.equal(context.events.some(event => event.type === "activity" && event.activity.id.includes(":recovery:")), false);
+  } finally { await context.cleanup(); }
+});
+
+test("native approval blocking prevents result recovery without trusting arbitrary MCP result text", async () => {
+  for (const scenario of ["recovery-permission-blocked", "recovery-result-permission-text"]) {
+    const context = await setup(scenario);
+    try {
+      const operation = context.adapter.run({ ...context.request, mcpServers: ["fixture"], mcpTools: { fixture: ["read_tool"] }, outputSchema: recoverySchema, accept: recoveryAccept, maxRecoveryAttempts: 1 }, context.controller.signal, event => context.events.push(event));
+      if (scenario === "recovery-permission-blocked") {
+        await assert.rejects(operation, /Codex native approval blocked the MCP call.*requires approval/);
+        const transcript = await context.transcript();
+        assert.equal(transcript.filter(item => item.method === "turn/start").length, 1);
+        assert.equal(transcript.filter(item => item.method === "turn/interrupt").length, 1);
+        assert.equal(transcript.some(item => item.type === "native-after-approval-block"), false);
+        assert.equal(context.events.some(event => event.type === "activity" && event.activity.id.includes("forbidden-follow-on")), false);
+        assert.equal(context.events.some(event => event.type === "activity" && event.activity.id.includes(":recovery:")), false);
+      } else {
+        const result = await operation;
+        assert.deepEqual(result.data, { ok: true }); assert.equal(result.recoveryAttempts, 1);
+      }
+    } finally { await context.cleanup(); }
+  }
+});
+
+for (const budget of [0, 2, 18]) {
+  test(`a known exhausted token budget forbids a result recovery turn (${budget})`, async () => {
+    const context = await setup("recovery-accept");
+    try {
+      let failure: unknown;
+      try { await context.adapter.run({ ...context.request, outputSchema: recoverySchema, accept: recoveryAccept, maxRecoveryAttempts: 2, remainingTokenBudget: budget }, context.controller.signal, event => context.events.push(event)); }
+      catch (error) { failure = error; }
+      assert.ok(failure instanceof TaskOutputValidationError);
+      assert.equal(failure.code, "output-budget-exhausted");
+      assert.deepEqual(failure.outputData, { ok: false });
+      assert.equal(failure.workerResult?.usage.totalTokens, 18);
+      assert.equal(failure.workerResult?.recoveryAttempts, undefined);
+      assert.equal((await context.transcript()).filter(item => item.method === "turn/start").length, 1);
+      assert.equal(context.events.some(event => event.type === "activity" && event.activity.id.includes(":recovery:")), false);
+    } finally { await context.cleanup(); }
+  });
+}
+
+test("a remaining token budget with capacity permits the explicit recovery", async () => {
+  const context = await setup("recovery-accept");
+  try {
+    const result = await context.adapter.run({ ...context.request, outputSchema: recoverySchema, accept: recoveryAccept, maxRecoveryAttempts: 1, remainingTokenBudget: 100 }, context.controller.signal, () => {});
+    assert.deepEqual(result.data, { ok: true }); assert.equal(result.recoveryAttempts, 1);
+  } finally { await context.cleanup(); }
+});
+
+test("an embedding caller cannot change preflighted result contracts while a worker is running", async () => {
+  const context = await setup("recovery-accept"), schema = structuredClone(recoverySchema), acceptance = structuredClone(recoveryAccept);
+  try {
+    const result = await context.adapter.run({ ...context.request, outputSchema: schema, accept: acceptance, maxRecoveryAttempts: 1 }, context.controller.signal, event => {
+      if (event.type === "identity" && !event.turnId) { schema.type = "string"; acceptance.properties.ok.const = false; }
+    });
+    assert.deepEqual(result.data, { ok: true });
+    const turns = (await context.transcript()).filter(item => item.method === "turn/start");
+    assert.equal(turns.length, 2);
+    assert.ok(turns.every(turn => JSON.stringify(turn.params.outputSchema) === JSON.stringify(recoverySchema)));
+  } finally { await context.cleanup(); }
+});
+
+for (const mutation of ["exhausted", "invalid", "accessor"] as const) {
+  test(`a live shared budget blocks recovery when another worker consumes or invalidates it (${mutation})`, async () => {
+    const context = await setup("recovery-accept"), recoveryBudget = { remainingTokens: 100 };
+    let getterCalled = false;
+    try {
+      let failure: unknown;
+      try {
+        await context.adapter.run({ ...context.request, outputSchema: recoverySchema, accept: recoveryAccept, maxRecoveryAttempts: 2, remainingTokenBudget: 100, recoveryBudget }, context.controller.signal, event => {
+          context.events.push(event);
+          if (event.type !== "usage") return;
+          if (mutation === "accessor") Object.defineProperty(recoveryBudget, "remainingTokens", { enumerable: true, get() { getterCalled = true; return 100; } });
+          else recoveryBudget.remainingTokens = mutation === "exhausted" ? 0 : NaN;
+        });
+      } catch (error) { failure = error; }
+      assert.ok(failure instanceof TaskOutputValidationError);
+      assert.equal(failure.code, "output-budget-exhausted");
+      assert.deepEqual(failure.outputData, { ok: false });
+      assert.equal(failure.workerResult?.turnId, "test-turn");
+      assert.equal(failure.workerResult?.usage.totalTokens, 18);
+      assert.equal(failure.workerResult?.recoveryAttempts, undefined);
+      assert.equal(getterCalled, false);
+      assert.equal((await context.transcript()).filter(item => item.method === "turn/start").length, 1);
+      assert.equal(context.events.some(event => event.type === "activity" && event.activity.id.includes(":recovery:")), false);
+    } finally { await context.cleanup(); }
+  });
+}
+
+test("shared recovery balance is read again across asynchronous local scope validation", async () => {
+  const context = await setup("recovery-accept"), recoveryBudget = { remainingTokens: 100 };
+  try {
+    execFileSync("git", ["init", "--quiet", context.request.cwd]);
+    let failure: unknown;
+    try {
+      await context.adapter.run({ ...context.request, mode: "write", localGitWrite: true, outputSchema: recoverySchema, accept: recoveryAccept, maxRecoveryAttempts: 2, remainingTokenBudget: 100, recoveryBudget }, context.controller.signal, event => {
+        context.events.push(event);
+        if (event.type === "usage") setImmediate(() => { recoveryBudget.remainingTokens = 0; });
+      });
+    } catch (error) { failure = error; }
+    assert.ok(failure instanceof TaskOutputValidationError);
+    assert.equal(failure.code, "output-budget-exhausted");
+    assert.deepEqual(failure.outputData, { ok: false });
+    assert.equal(failure.workerResult?.turnId, "test-turn");
+    assert.equal(failure.workerResult?.recoveryAttempts, undefined);
+    assert.equal((await context.transcript()).filter(item => item.method === "turn/start").length, 1);
+    assert.equal(context.events.some(event => event.type === "activity" && event.activity.id.includes(":recovery:")), false);
+  } finally { await context.cleanup(); }
+});
+
+test("a shared live balance with capacity permits recovery without cloning the balance", async () => {
+  const context = await setup("recovery-accept"), recoveryBudget = { remainingTokens: 100 };
+  try {
+    const result = await context.adapter.run({ ...context.request, outputSchema: recoverySchema, accept: recoveryAccept, maxRecoveryAttempts: 1, remainingTokenBudget: 100, recoveryBudget }, context.controller.signal, event => {
+      if (event.type === "usage") recoveryBudget.remainingTokens = 100 - event.totalTokens;
+    });
+    assert.deepEqual(result.data, { ok: true });
+    assert.equal(result.recoveryAttempts, 1);
+    assert.equal(recoveryBudget.remainingTokens, 64);
+    assert.equal((await context.transcript()).filter(item => item.method === "turn/start").length, 2);
   } finally { await context.cleanup(); }
 });
 

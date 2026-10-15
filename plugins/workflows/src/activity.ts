@@ -3,7 +3,7 @@ import type { Activity } from "./types.ts";
 
 // User-facing activity contains observed actions, never reasoning or raw argv.
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-const kinds: Record<string, Activity["kind"]> = { commandExecution: "command", fileChange: "files", webSearch: "search", mcpToolCall: "mcp", agentMessage: "message" };
+const kinds: Record<string, Activity["kind"]> = { commandExecution: "command", dynamicToolCall: "command", functionCallOutput: "command", fileChange: "files", webSearch: "search", mcpToolCall: "mcp", agentMessage: "message" };
 const safeName = (value: unknown) => typeof value === "string" && /^[a-zA-Z0-9_.-]{1,80}$/.test(value) && !/(?:token|secret|password|sk-|gh[pousr]_)/i.test(value) ? value : undefined;
 
 export function commandActivityLabel(command: unknown): string {
@@ -22,7 +22,10 @@ export function itemActivity(value: unknown, status: Activity["status"], started
   if (!kind) return;
   const timestamp = new Date().toISOString();
   let label: string;
-  if (kind === "command") {
+  if (item.type === "dynamicToolCall" || item.type === "functionCallOutput") {
+    const namespace = safeName(item.namespace), name = safeName(item.type === "dynamicToolCall" ? item.tool : item.name);
+    label = name ? `调用原生工具 · ${namespace ? `${namespace}/` : ""}${name}` : "调用原生工具";
+  } else if (kind === "command") {
     const actions = Array.isArray(item.commandActions) ? item.commandActions.map(object) : [];
     label = actions.some(action => action.type === "search") ? "搜索项目内容" : actions.some(action => action.type === "read") ? "读取项目文件" : actions.some(action => action.type === "listFiles") ? "查看项目文件" : commandActivityLabel(item.command);
   } else if (kind === "files") label = Array.isArray(item.changes) && item.changes.length ? `修改文件 · ${item.changes.length} 个` : "修改项目文件";

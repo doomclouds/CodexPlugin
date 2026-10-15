@@ -21,3 +21,13 @@ test("read/search/file activity uses categorical actions and preserves real star
   assert.equal(itemActivity({ type: "commandExecution", id: "search", commandActions: [{ type: "search", query: "secret" }] }, "running")!.label, "搜索项目内容");
   assert.equal(itemActivity({ type: "fileChange", id: "files", changes: [{ path: "/private/a" }, { path: "/private/b" }] }, "completed")!.label, "修改文件 · 2 个");
 });
+
+test("dynamic and function tools show safe observed names without arguments or output payloads", () => {
+  const dynamic = itemActivity({ type: "dynamicToolCall", id: "native", namespace: "functions", tool: "exec", arguments: { code: "private-input" }, contentItems: [{ type: "inputText", text: "private-output" }] }, "failed")!;
+  assert.equal(dynamic.kind, "command");
+  assert.equal(dynamic.label, "调用原生工具 · functions/exec");
+  assert.equal(dynamic.status, "failed");
+  assert.doesNotMatch(JSON.stringify(dynamic), /private|arguments|contentItems/);
+  assert.equal(itemActivity({ type: "functionCallOutput", name: "exec_command", namespace: null, output: "private-output" }, "completed")!.label, "调用原生工具 · exec_command");
+  assert.equal(itemActivity({ type: "dynamicToolCall", namespace: "functions", tool: "token=private", arguments: "private-input" }, "running")!.label, "调用原生工具");
+});

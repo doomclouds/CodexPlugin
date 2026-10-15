@@ -6,7 +6,7 @@ import type { WorkflowMeta } from "./script.ts";
 import { RunStore } from "./store.ts";
 import type { ApprovalMode, Limits, MaintenancePlan, WorkspaceMode } from "./types.ts";
 import { resolveApprovalMode } from "./approval-mode.ts";
-import { validateMaintenance } from "./maintenance.ts";
+import { validateMaintenanceScope } from "./maintenance.ts";
 import { validateNodeSettings } from "./execution-settings.ts";
 import type { NodeSettings } from "./execution-settings.ts";
 
@@ -35,6 +35,7 @@ export class TemplateStore {
       const { meta } = validateScript(template.script);
       if (template.id !== id || template.name !== meta.name || `saved:${meta.name}` !== id || template.source !== "saved" || !Number.isSafeInteger(template.revision) || template.revision < 1) throw new Error("Invalid saved workflow definition identity");
       if (template.approvalMode !== undefined) resolveApprovalMode(template.approvalMode);
+      validateMaintenanceScope(template);
       return { ...template, ...(template.nodeSettings !== undefined ? { nodeSettings: validateNodeSettings(template.nodeSettings, meta) } : {}), meta };
     }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
@@ -76,9 +77,7 @@ export class TemplateStore {
     const nodeSettings = validateNodeSettings(input.nodeSettings, meta);
     if (input.approvalMode !== undefined) resolveApprovalMode(input.approvalMode);
     if (input.allowedMcpServers?.some(name => !/^[a-zA-Z0-9_.-]{1,128}$/.test(name) || /workflows/i.test(name))) throw new Error("Invalid or recursive MCP server grant");
-    if (input.workspaceMode === "local" && input.allowWrite !== true) throw new Error("Local project mode requires allowWrite: true");
-    if (input.maintenance && (!input.allowWrite || input.workspaceMode !== "git-worktree")) throw new Error("Maintenance operations require git-worktree isolation and allowWrite");
-    if (input.maintenance) input.maintenance = validateMaintenance(input.maintenance, input.networkAccess ?? false);
+    const maintenance = validateMaintenanceScope(input);
     const id = `saved:${meta.name}`;
     const release = await this.store.acquireNamed(`template_${meta.name}`);
     try { return await this.store.withMutation(async () => {
@@ -96,7 +95,7 @@ export class TemplateStore {
       template.allowedMcpServers = input.allowedMcpServers ?? [];
       template.allowedMcpTools = input.allowedMcpTools ?? {};
       if (input.nodeSettings !== undefined) template.nodeSettings = nodeSettings;
-      if (input.maintenance) template.maintenance = input.maintenance;
+      if (maintenance) template.maintenance = maintenance;
       const json = JSON.stringify(template);
       if (Buffer.byteLength(json) > 2 * 1024 * 1024) throw new Error("Saved workflow exceeds 2 MiB");
       const filename = this.filename(id);

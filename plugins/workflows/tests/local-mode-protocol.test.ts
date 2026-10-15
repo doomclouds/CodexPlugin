@@ -52,7 +52,7 @@ test("public local mode scope survives saved definition, sourced preview and upd
   assert.deepEqual(calls[1], { action: "update", input: update });
 });
 
-test("saved local definitions require write authorization and reject isolated maintenance plans", async t => {
+test("saved local definitions require write authorization and retain declared operation scope", async t => {
   const { client, calls } = await fixture(t);
   for (const allowWrite of [undefined, false]) {
     const response = await client.callTool({ name: "workflow_save_template", arguments: { script, workspaceMode: "local", ...(allowWrite !== undefined ? { allowWrite } : {}) } });
@@ -60,11 +60,11 @@ test("saved local definitions require write authorization and reject isolated ma
     assert.match(JSON.stringify(response.content), /Local project mode requires allowWrite/);
   }
   const maintenance = await client.callTool({ name: "workflow_save_template", arguments: { script, workspaceMode: "local", allowWrite: true, maintenance: { steps: [{ id: "build", command: ["npm", "run", "build"] }] } } });
-  assert.equal(maintenance.isError, true);
-  assert.match(JSON.stringify(maintenance.content), /Maintenance operations require git-worktree/);
+  assert.equal(maintenance.isError, undefined, JSON.stringify(maintenance.content));
+  assert.deepEqual((maintenance.structuredContent?.template as WorkflowRun).maintenance, { steps: [{ id: "build", command: ["npm", "run", "build"] }] });
   assert.deepEqual(calls, []);
   const listed = await client.callTool({ name: "workflow_list_templates", arguments: {} });
-  assert.ok((listed.structuredContent?.templates as Array<{ source: string }>).every(item => item.source !== "saved"));
+  assert.ok((listed.structuredContent?.templates as Array<{ source: string }>).some(item => item.source === "saved"));
 });
 
 test("advertised local mode exposes immediate writes and no rollback or apply", async t => {
@@ -74,7 +74,7 @@ test("advertised local mode exposes immediate writes and no rollback or apply", 
   const capabilities = response.structuredContent as unknown as { execution: { defaultWorkspaceMode: string; workspaceModes: string[]; localMode: Record<string, unknown> } };
   assert.equal(capabilities.execution.defaultWorkspaceMode, "snapshot");
   assert.deepEqual(capabilities.execution.workspaceModes, ["snapshot", "git-worktree", "local"]);
-  assert.deepEqual(capabilities.execution.localMode, { requiresAllowWrite: true, writesOriginalProject: true, requiresApply: false, automaticRollback: false, deletionOwnsProject: false, maintenanceSupported: false, projectGitMetadataWrite: true, gitMetadataScope: "canonical-project-contained-only", legacyRunsKeepRecordedWriteScope: true, protectedInstructionDirectoriesAutoGranted: false, maxConcurrentProjectWriters: 1, coordinationScope: "shared-workflows-data-directory", externalEditorsSerialized: false });
+  assert.deepEqual(capabilities.execution.localMode, { requiresAllowWrite: true, writesOriginalProject: true, requiresApply: false, automaticRollback: false, deletionOwnsProject: false, maintenanceSupported: true, projectGitMetadataWrite: true, gitMetadataScope: "canonical-project-contained-only", legacyRunsKeepRecordedWriteScope: true, protectedInstructionDirectoriesAutoGranted: false, maxConcurrentProjectWriters: 1, coordinationScope: "shared-workflows-data-directory", externalEditorsSerialized: false });
   const tools = await client.listTools();
   for (const name of ["workflow_preview", "workflow_update", "workflow_save_template"]) {
     const tool = tools.tools.find(item => item.name === name)!;

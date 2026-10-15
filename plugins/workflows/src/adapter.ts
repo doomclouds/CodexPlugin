@@ -10,6 +10,8 @@ import { commandActivityLabel, itemActivity } from "./activity.ts";
 import { normalizeProtectedPaths } from "./protected-paths.ts";
 import { captureLocalGitScope, validateLocalGitScope } from "./local-git-scope.ts";
 import { McpFailureDiagnostics, mcpItemFailed } from "./mcp-diagnostics.ts";
+import { TaskOutputValidationError, validateTaskContracts, validateTaskOutput } from "./task-output.ts";
+import { NativeToolFailureDiagnostics, nativeToolItemFailed } from "./native-tool-diagnostics.ts";
 import type { Activity, ApprovalMode } from "./types.ts";
 
 export interface WorkerRequest {
@@ -21,6 +23,10 @@ export interface WorkerRequest {
   reasoningEffort?: string;
   settingsSource?: EffectiveExecutionSettings["source"];
   outputSchema?: Record<string, unknown>;
+  accept?: Record<string, unknown>;
+  maxRecoveryAttempts?: number;
+  remainingTokenBudget?: number;
+  recoveryBudget?: { remainingTokens: number };
   timeoutMs?: number;
   networkAccess?: boolean;
   mcpServers?: string[];
@@ -63,6 +69,7 @@ export interface WorkerResult {
   durationMs: number;
   toolsUsed?: string[];
   executionSettings?: EffectiveExecutionSettings;
+  recoveryAttempts?: number;
 }
 
 export interface WorkerAdapter {
@@ -129,6 +136,14 @@ function timeoutError(message: string): Error {
   const error = new Error(message);
   error.name = "TimeoutError";
   return error;
+}
+
+function recoveryBudgetBalance(value: unknown): number | undefined {
+  if (value === undefined) return;
+  if (!value || typeof value !== "object" || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value)) || Object.getOwnPropertySymbols(value).length || Object.keys(value).length !== 1) throw new Error("Worker recovery budget must be a plain balance object.");
+  const balance = Object.getOwnPropertyDescriptor(value, "remainingTokens");
+  if (!balance || !Object.hasOwn(balance, "value") || !balance.enumerable || !Number.isSafeInteger(balance.value) || balance.value < 0) throw new Error("Worker recovery budget requires a nonnegative safe integer balance.");
+  return balance.value as number;
 }
 
 function sensitiveUrlParameter(name: string): boolean {
@@ -239,6 +254,7 @@ export class ProtocolSession {
   private buffer = "";
   private readonly decoder = new StringDecoder("utf8");
   private failed = false;
+  private failureReason?: Error;
   private closing = false;
   private isExited = false;
   private closingPromise?: Promise<void>;
@@ -302,9 +318,14 @@ export class ProtocolSession {
   fail(error: Error) {
     if (this.failed) return;
     this.failed = true;
+    this.failureReason = error;
     this.failure.reject(error);
     for (const entry of this.pending.values()) { clearTimeout(entry.timer); entry.reject(error); }
     this.pending.clear();
+  }
+
+  assertHealthy(): void {
+    if (this.failureReason) throw this.failureReason;
   }
 
   send(message: JsonObject) {
@@ -390,6 +411,16 @@ export class CodexAdapter implements WorkerAdapter {
     if (request.localGitWrite !== undefined && typeof request.localGitWrite !== "boolean") return Promise.reject(new Error("Local Git write authorization must be boolean."));
     if (request.localGitWrite && request.mode !== "write") return Promise.reject(new Error("Local Git write authorization requires a write worker."));
     if (request.approvalMode !== undefined && request.approvalMode !== "auto-review" && request.approvalMode !== "never") return Promise.reject(new Error("Worker approval mode must be auto-review or never."));
+    if (request.maxRecoveryAttempts !== undefined && (!Number.isSafeInteger(request.maxRecoveryAttempts) || request.maxRecoveryAttempts < 0 || request.maxRecoveryAttempts > 2)) return Promise.reject(new Error("Worker result recovery attempts must be an integer between zero and two."));
+    if (request.remainingTokenBudget !== undefined && (!Number.isSafeInteger(request.remainingTokenBudget) || request.remainingTokenBudget < 0)) return Promise.reject(new Error("Worker remaining token budget must be a nonnegative safe integer."));
+    if (request.accept !== undefined && request.outputSchema === undefined) return Promise.reject(new TaskOutputValidationError("accept-contract-invalid", "accept", "$", "an acceptance contract requires a structured output schema"));
+    try {
+      recoveryBudgetBalance(request.recoveryBudget);
+      validateTaskContracts(request.outputSchema, request.accept);
+      // The contract used after an asynchronous turn must be the contract that
+      // was preflighted before it, even if an embedding caller retains inputs.
+      request = { ...request, ...(request.outputSchema !== undefined ? { outputSchema: structuredClone(request.outputSchema) } : {}), ...(request.accept !== undefined ? { accept: structuredClone(request.accept) } : {}) };
+    } catch (error) { return Promise.reject(error); }
     if (request.mcpServers !== undefined && (!Array.isArray(request.mcpServers) || request.mcpServers.some(name => typeof name !== "string" || !name.trim() || name.length > 128 || name.includes("\0")))) return Promise.reject(new Error("Worker MCP authorization requires exact configured server names."));
     if (request.mcpServers?.some(name => name.toLowerCase() === "workflows")) return Promise.reject(new Error("The Workflows MCP cannot be inherited recursively."));
     if (request.mcpTools !== undefined && (!request.mcpTools || typeof request.mcpTools !== "object" || Array.isArray(request.mcpTools) || Object.entries(request.mcpTools).some(([server, names]) => !request.mcpServers?.includes(server) || !Array.isArray(names) || names.some(name => typeof name !== "string" || !name.trim() || name.includes("*") || name.includes("\0"))))) return Promise.reject(new Error("MCP tool grants must be exact tool arrays for the authorized servers."));
@@ -449,7 +480,7 @@ export class CodexAdapter implements WorkerAdapter {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.6" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.7.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config = object(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config, cwd);
@@ -564,7 +595,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.6" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.7.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer); startupTimer = undefined;
       if (canceled || signal.aborted) throw canceled ?? abortError();
@@ -611,17 +642,24 @@ export class CodexAdapter implements WorkerAdapter {
     const writableRoots = localGitScope?.writableRoots ?? [request.cwd];
     const networkAccess = request.networkAccess === true;
     const started = Date.now();
-    const completion = deferred<Completion>();
+    let completion = deferred<Completion>();
     const messages = new Map<string, { text: string; phase?: string }>();
     const logBuffers = new Map<string, string>();
     const streamedCommands = new Set<string>();
     const aggregatedCommands = new Set<string>();
     const failedCommands = new Set<string>();
     const mcpDiagnostics = new McpFailureDiagnostics(redact);
+    const nativeDiagnostics = new NativeToolFailureDiagnostics(redact);
     const toolsUsed = new Set<string>();
     let messageBytes = 0;
     let threadId = "";
     let turnId = "";
+    const previousTurns = new Set<string>();
+    let turnOpen = false;
+    let recoveryAttempts = 0;
+    let recoveryActivity: Activity | undefined;
+    let pendingRecovery: TaskOutputValidationError | undefined;
+    let approvalBlockedReason: Error | undefined;
     let usage: Usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
     let executionSettings: EffectiveExecutionSettings | undefined;
     let completedSuccessfully = false;
@@ -632,6 +670,19 @@ export class CodexAdapter implements WorkerAdapter {
     let turnTimer: ReturnType<typeof setTimeout> | undefined;
     let startupTimer: ReturnType<typeof setTimeout> | undefined;
     let session!: ProtocolSession;
+    const assertRecoveryBudget = (source: TaskOutputValidationError): void => {
+      let reason: string | undefined;
+      try {
+        const shared = recoveryBudgetBalance(request.recoveryBudget);
+        if (request.remainingTokenBudget !== undefined && usage.totalTokens >= request.remainingTokenBudget || shared !== undefined && shared <= 0) reason = "worker token budget exhausted before result recovery";
+      } catch { reason = "shared worker token budget is invalid before result recovery"; }
+      if (!reason) return;
+      const exhausted = new TaskOutputValidationError("output-budget-exhausted", "output", "$", reason);
+      Object.defineProperty(exhausted, "outputData", { value: source.outputData, writable: false, enumerable: false });
+      Object.defineProperty(exhausted, "workerResult", { value: source.workerResult, writable: false, enumerable: false });
+      Object.defineProperty(exhausted, "cause", { value: source, writable: false, enumerable: false });
+      throw exhausted;
+    };
     const emit = (event: WorkerEvent) => { try { onEvent(event); } catch { session.fail(new Error("Worker event handler failed.")); } };
     const activities = new Map<string, Activity>();
     const initialization: Activity = { id: `${request.id}:initializing`, kind: "initializing", label: "连接代理并核对工具范围", status: "running", startedAt: new Date().toISOString() };
@@ -642,13 +693,14 @@ export class CodexAdapter implements WorkerAdapter {
       activities.set(value.id, value); emit({ type: "activity", activity: { ...value } });
     };
     const observedItem = (itemValue: unknown, status: Activity["status"]) => {
-      const item = object(itemValue);
+      const nativeItem = object(itemValue);
+      const item = recoveryAttempts ? { ...nativeItem, id: `${turnId}:${String(nativeItem.id)}` } : nativeItem;
       const old = activities.get(String(item.id));
-      const failed = item.status === "failed" || item.type === "commandExecution" && typeof item.exitCode === "number" && item.exitCode !== 0 || mcpItemFailed(item);
-      if (old && old.status !== "running" && !(item.type === "mcpToolCall" && old.status !== "failed" && status === "completed" && failed)) return;
+      const failed = item.status === "failed" || item.type === "commandExecution" && typeof item.exitCode === "number" && item.exitCode !== 0 || mcpItemFailed(item) || nativeToolItemFailed(item);
+      if (old && old.status !== "running" && !(old.status !== "failed" && status === "completed" && failed)) return;
       const activity = itemActivity(item, status === "completed" && failed ? "failed" : status, old?.startedAt);
       if (activity) {
-        const waiting = activities.get(`${request.id}:waiting`);
+        const waiting = activities.get(`${request.id}:waiting${recoveryAttempts ? `:${recoveryAttempts}` : ""}`);
         if (waiting?.status === "running") publishActivity({ ...waiting, status: "completed", endedAt: new Date().toISOString() });
         publishActivity(activity);
       }
@@ -701,7 +753,20 @@ export class CodexAdapter implements WorkerAdapter {
       if (item.type === "webSearch") { toolsUsed.add("native:webSearch"); return; }
       if (item.type === "mcpToolCall") {
         if (typeof item.server === "string" && typeof item.tool === "string") toolsUsed.add(`mcp:${item.server}/${item.tool}`);
-        const diagnostic = mcpDiagnostics.capture(item);
+        // This exact native envelope means the operation never received an
+        // approval route. Arbitrary MCP result text cannot establish this fact.
+        const nativeError = object(item.error).message;
+        if (typeof nativeError === "string" && /^MCP tool call requires approval, but approval policy is never\.?$/.test(nativeError.trim())) {
+          approvalBlockedReason ??= new Error(`Codex native approval blocked the MCP call: ${nativeError.trim()}`);
+          cancel(approvalBlockedReason);
+        }
+        const diagnostic = mcpDiagnostics.capture({ ...item, id: `${turnId}:${String(item.id)}` });
+        if (diagnostic) emit({ type: "log", message: diagnostic });
+        return;
+      }
+      if (item.type === "dynamicToolCall" || item.type === "functionCallOutput") {
+        toolsUsed.add(`native:${item.type}`);
+        const diagnostic = nativeDiagnostics.capture({ ...item, id: `${turnId}:${String(item.id)}` });
         if (diagnostic) emit({ type: "log", message: diagnostic });
         return;
       }
@@ -726,12 +791,23 @@ export class CodexAdapter implements WorkerAdapter {
     const abort = () => cancel(abortError());
     session = new ProtocolSession(this.options.command, [...this.options.args, ...workerIsolationArguments], request.cwd, this.options.startupTimeoutMs, this.options.shutdownTimeoutMs, (method, params) => {
       if (threadId && typeof params.threadId === "string" && params.threadId !== threadId) return;
+      const notificationTurn = method === "turn/started" || method === "turn/completed" ? object(params.turn).id : params.turnId;
+      if (typeof notificationTurn === "string" && previousTurns.has(notificationTurn)) return;
+      if (turnId && typeof notificationTurn === "string" && notificationTurn !== turnId) return;
+      // Item and usage notifications belong to exactly one active turn. Never
+      // let a late output or cumulative usage event contaminate its successor.
+      if (method.startsWith("item/") && !method.startsWith("item/autoApprovalReview/") || method === "thread/tokenUsage/updated") {
+        if (!turnOpen) return;
+        if (params.threadId !== threadId || typeof notificationTurn !== "string" || !notificationTurn) { session.fail(new Error("Codex emitted an item without its active worker thread and turn identity.")); return; }
+        if (!turnId) turnId = notificationTurn;
+      }
       if (method === "item/autoApprovalReview/started" || method === "item/autoApprovalReview/completed") {
         if (params.threadId !== threadId || typeof params.turnId !== "string" || !params.turnId) { session.fail(new Error("Codex emitted an invalid automatic approval review thread or turn identity.")); return; }
         if (turnId && params.turnId !== turnId) return;
+        if (!turnOpen) return;
         if (!autoReview) { session.fail(new Error("Codex unexpectedly started automatic approval review for a non-interactive worker.")); return; }
         if (typeof params.reviewId !== "string" || !params.reviewId || params.reviewId.length > 256) { session.fail(new Error("Codex emitted an invalid automatic approval review identity.")); return; }
-        const id = `review:${createHash("sha256").update(params.reviewId).digest("hex").slice(0, 24)}`;
+        const id = `review:${createHash("sha256").update(`${params.turnId}\0${params.reviewId}`).digest("hex").slice(0, 24)}`;
         const previous = activities.get(id);
         if (previous && previous.status !== "running") return;
         const review = object(params.review);
@@ -750,10 +826,12 @@ export class CodexAdapter implements WorkerAdapter {
         // Interrupt promptly so it cannot retry the same action indirectly.
         if (status !== "approved") cancel(new Error(explanation));
       } else if (method === "autoApprovalReview/strictReviewRequired") {
-        if (autoReview && (!turnId || params.turnId === turnId)) emit({ type: "log", message: "Codex automatic approval review requires a stricter review." });
+        if (autoReview && turnOpen && params.threadId === threadId && params.turnId === turnId) emit({ type: "log", message: "Codex automatic approval review requires a stricter review." });
       } else if (method === "turn/started" || method === "turn/completed") {
         const turn = object(params.turn);
         if (typeof turn.id !== "string") { session.fail(new Error("Codex emitted a turn without an ID.")); return; }
+        if (params.threadId !== threadId) { session.fail(new Error("Codex emitted a turn without its worker thread identity.")); return; }
+        if (!turnOpen) return;
         if (turnId && turn.id !== turnId) return;
         turnId = turn.id;
         if (threadId) emit({ type: "identity", threadId, turnId });
@@ -762,6 +840,7 @@ export class CodexAdapter implements WorkerAdapter {
           for (const item of Array.isArray(turn.items) ? turn.items : []) capture(item);
           for (const key of [...logBuffers.keys()]) logChunk(key, "", true);
           completion.resolve({ id: turnId, status: String(turn.status), items: turn.items, error: turn.error });
+          turnOpen = false;
         }
       } else if (method === "item/agentMessage/delta" && typeof params.delta === "string") {
         const id = String(params.itemId ?? "message");
@@ -782,7 +861,9 @@ export class CodexAdapter implements WorkerAdapter {
       }
       else if (method === "thread/tokenUsage/updated") {
         const total = object(object(params.tokenUsage).total);
-        usage = { inputTokens: tokenCount(total.inputTokens), outputTokens: tokenCount(total.outputTokens), totalTokens: tokenCount(total.totalTokens) };
+        // Native tokenUsage.total is cumulative for this same thread. Taking a
+        // maximum preserves it across recovery turns without double counting.
+        usage = { inputTokens: Math.max(usage.inputTokens, tokenCount(total.inputTokens)), outputTokens: Math.max(usage.outputTokens, tokenCount(total.outputTokens)), totalTokens: Math.max(usage.totalTokens, tokenCount(total.totalTokens)) };
         emit({ type: "usage", ...usage });
       }
     });
@@ -798,7 +879,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.6.6" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.7.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object(object(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== undefined || request.reasoningEffort !== undefined) {
@@ -916,33 +997,82 @@ export class CodexAdapter implements WorkerAdapter {
       startupTimer = undefined;
       if (canceled || signal.aborted) throw canceled ?? abortError();
       publishActivity({ ...initialization, status: "completed", endedAt: new Date().toISOString() });
+      const deadline = Date.now() + (request.timeoutMs ?? 30 * 60_000);
       turnTimer = setTimeout(() => cancel(timeoutError("Codex worker execution timed out.")), request.timeoutMs ?? 30 * 60_000);
-      turnSent = true;
-      publishActivity({ id: `${request.id}:waiting`, kind: "waiting", label: "等待代理执行与反馈", status: "running", startedAt: new Date().toISOString() });
       const sandboxPolicy = request.mode === "read" ? { type: "readOnly", networkAccess } : { type: "workspaceWrite", writableRoots, networkAccess, excludeTmpdirEnvVar: true, excludeSlashTmp: true };
-      const turnAck = session.request("turn/start", { threadId, input: [{ type: "text", text: request.prompt }], cwd: request.cwd, approvalPolicy, ...(autoReview ? { approvalsReviewer: "auto_review" } : {}), sandboxPolicy, ...(request.reasoningEffort !== undefined ? { effort: request.reasoningEffort } : {}), ...(request.outputSchema ? { outputSchema: request.outputSchema } : {}) }, request.timeoutMs ?? 30 * 60_000);
-      const first = object(await Promise.race([turnAck, completion.promise.then(turn => ({ turn })), session.failure.promise]));
-      const firstTurn = object(first.turn);
-      if (typeof firstTurn.id !== "string") throw new Error("Codex did not return a worker turn ID.");
-      if (turnId && firstTurn.id !== turnId) throw new Error("Codex turn identity changed during startup.");
-      turnId = firstTurn.id;
-      emit({ type: "identity", threadId, turnId });
-      interrupt();
-      const terminal = await Promise.race([completion.promise, session.failure.promise]);
-      if (canceled) throw canceled;
-      if (terminal.status === "interrupted") throw abortError();
-      if (terminal.status !== "completed") throw new Error(`Codex worker failed: ${safeMessage(object(terminal.error).message)}`);
-      const values = [...messages.values()];
-      const finalMessages = values.filter(message => message.phase === "final_answer");
-      const rawOutput = (finalMessages.length ? finalMessages : values.slice(-1)).map(message => message.text).join("\n");
-      let output: string;
-      let data: unknown;
-      if (request.outputSchema) {
-        try { data = redactData(JSON.parse(rawOutput)); } catch { throw new Error("Codex worker did not return valid structured JSON output."); }
-        output = JSON.stringify(data);
-      } else output = redact(rawOutput);
-      completedSuccessfully = true;
-      return { output, ...(request.outputSchema ? { data } : {}), ...(executionSettings ? { executionSettings } : {}), threadId, turnId, usage, durationMs: Date.now() - started, toolsUsed: [...toolsUsed] };
+      let prompt = request.prompt;
+      while (true) {
+        if (canceled || signal.aborted) throw canceled ?? abortError();
+        if (Date.now() >= deadline) throw timeoutError("Codex worker execution timed out.");
+        if (pendingRecovery) assertRecoveryBudget(pendingRecovery);
+        if (localGitScope) await validateLocalGitScope(localGitScope);
+        if (canceled || signal.aborted) throw canceled ?? abortError();
+        session.assertHealthy();
+        // Local scope validation yields to other workers. Re-read the shared
+        // balance immediately before sending, without another callback or await.
+        const recovering = pendingRecovery;
+        if (recovering) { assertRecoveryBudget(recovering); recoveryAttempts++; }
+        turnSent = true; turnOpen = true; interruptSent = false;
+        const turnAck = session.request("turn/start", { threadId, input: [{ type: "text", text: prompt }], cwd: request.cwd, approvalPolicy, ...(autoReview ? { approvalsReviewer: "auto_review" } : {}), sandboxPolicy, ...(request.reasoningEffort !== undefined ? { effort: request.reasoningEffort } : {}), ...(request.outputSchema ? { outputSchema: request.outputSchema } : {}) }, Math.max(1, deadline - Date.now()));
+        pendingRecovery = undefined;
+        if (recovering) {
+          emit({ type: "log", message: `Worker result recovery requested (${recoveryAttempts}/${request.maxRecoveryAttempts}; ${recovering.code} at ${recovering.location}); same task, thread and permissions.` });
+          recoveryActivity = { id: `${request.id}:recovery:${recoveryAttempts}`, kind: "waiting", label: `核对节点结果 · 第 ${recoveryAttempts} 次恢复`, status: "running", startedAt: new Date().toISOString() };
+          publishActivity(recoveryActivity);
+        }
+        publishActivity({ id: `${request.id}:waiting${recoveryAttempts ? `:${recoveryAttempts}` : ""}`, kind: "waiting", label: "等待代理执行与反馈", status: "running", startedAt: new Date().toISOString() });
+        // A completed notification may precede its acknowledgement, but it must
+        // never let an acknowledgement with a different turn identity succeed.
+        const first = object(await Promise.race([turnAck, session.failure.promise]));
+        session.assertHealthy();
+        const firstTurn = object(first.turn);
+        if (typeof firstTurn.id !== "string" || !firstTurn.id || previousTurns.has(firstTurn.id)) throw new Error("Codex did not return a new worker turn ID.");
+        if (turnId && firstTurn.id !== turnId) throw new Error("Codex turn identity changed during startup.");
+        turnId = firstTurn.id;
+        emit({ type: "identity", threadId, turnId });
+        interrupt();
+        const terminal = await Promise.race([completion.promise, session.failure.promise]);
+        session.assertHealthy();
+        turnSent = false;
+        if (canceled) throw canceled;
+        if (terminal.id !== turnId) throw new Error("Codex worker completion did not match the active turn.");
+        if (terminal.status === "interrupted") throw abortError();
+        if (terminal.status !== "completed") throw new Error(`Codex worker failed: ${safeMessage(object(terminal.error).message)}`);
+        if (approvalBlockedReason) throw approvalBlockedReason;
+        const values = [...messages.values()];
+        const finalMessages = values.filter(message => message.phase === "final_answer");
+        const rawOutput = (finalMessages.length ? finalMessages : values.slice(-1)).map(message => message.text).join("\n");
+        let output: string;
+        let data: unknown;
+        const metadata = (): Omit<WorkerResult, "data" | "output"> => ({ ...(executionSettings ? { executionSettings } : {}), threadId, turnId, usage: { ...usage }, durationMs: Date.now() - started, toolsUsed: [...toolsUsed], ...(recoveryAttempts ? { recoveryAttempts } : {}) });
+        try {
+          if (request.outputSchema) {
+            try { data = redactData(JSON.parse(rawOutput)); }
+            catch { throw new TaskOutputValidationError("output-syntax-invalid", "output", "$", "worker did not return valid structured JSON output"); }
+            validateTaskOutput(data, request.outputSchema, request.accept);
+            output = JSON.stringify(data);
+          } else output = redact(rawOutput);
+          if (recoveryActivity) publishActivity({ ...recoveryActivity, status: "completed", endedAt: new Date().toISOString() });
+          completedSuccessfully = true;
+          return { output, ...(request.outputSchema ? { data } : {}), ...metadata() };
+        } catch (error) {
+          if (!(error instanceof TaskOutputValidationError) || !["output-syntax-invalid", "output-shape-invalid", "output-accept-rejected"].includes(error.code)) throw error;
+          Object.defineProperty(error, "outputData", { value: data, writable: false, enumerable: false });
+          Object.defineProperty(error, "workerResult", { value: metadata(), writable: false, enumerable: false });
+          if (recoveryActivity) publishActivity({ ...recoveryActivity, status: "failed", endedAt: new Date().toISOString() });
+          if (recoveryAttempts >= (request.maxRecoveryAttempts ?? 0)) throw error;
+          assertRecoveryBudget(error);
+          pendingRecovery = error;
+          const nextAttempt = recoveryAttempts + 1;
+          const correction = error.code === "output-accept-rejected"
+            ? "The explicit success condition was not met. Use this same thread's observed evidence to inspect and complete only the remaining work of the original delegated Task within its existing authorization. Do not repeat already successful commands or side effects. Inspect partial effects before deciding whether any further action is safe."
+            : "Correct only your final structured JSON output to match the original output schema, using already observed results. Do not call tools, rerun commands, modify files or perform any additional side effects for this output correction.";
+          prompt = `The previous completed turn failed local result validation (${error.code} at ${error.location}). This is result recovery ${nextAttempt} of ${request.maxRecoveryAttempts}. ${correction} Do not invent evidence or replace a genuine failure or unknown fact with a successful value just to satisfy validation. Preserve actual bounded failure reasons. Do not broaden the task, sandbox, network or tool scope. A denied, timed-out or aborted approval, unsupported human interaction, interrupted turn or protocol failure must stop; never retry or bypass such a boundary. Return the requested structured result directly.`;
+          previousTurns.add(turnId);
+          turnId = ""; turnOpen = false; completion = deferred<Completion>();
+          messages.clear(); messageBytes = 0; logBuffers.clear(); streamedCommands.clear(); aggregatedCommands.clear(); failedCommands.clear();
+        }
+      }
     } catch (error) {
       if (canceled) throw canceled;
       throw error;

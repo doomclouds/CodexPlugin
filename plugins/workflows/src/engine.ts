@@ -1,5 +1,5 @@
 import { randomBytes, createHash } from "node:crypto";
-import { realpath, stat } from "node:fs/promises";
+import { lstat, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { CodexAdapter } from "./adapter.ts";
 import type { WorkerAdapter } from "./adapter.ts";
@@ -12,9 +12,11 @@ import { stopSummary } from "./stop-context.ts";
 import { nodeProcess } from "./node-process.ts";
 import type { WorkflowStopReason } from "./stop-context.ts";
 import { applyWorkspace, contextDigest, createWorkspace, workspaceDiff } from "./workspace.ts";
-import { createGitWorkspace, validateMaintenance, reviewMaintenance, applyMaintenance, maintenanceFingerprint, validateGitWorkspace } from "./maintenance.ts";
+import { createGitWorkspace, validateMaintenanceScope, reviewMaintenance, applyMaintenance, maintenanceFingerprint, validateGitWorkspace } from "./maintenance.ts";
 import type { Activity, ApprovalMode, Attempt, Limits, Task, WorkflowRun, MaintenancePlan, Preparation, DefinitionSource, WorkspaceMode } from "./types.ts";
 import { resolveApprovalMode } from "./approval-mode.ts";
+import { TaskOutputValidationError, validateTaskContracts, validateTaskOutput } from "./task-output.ts";
+import { WorkflowTaskError } from "./task-failure.ts";
 import { ExecutionSettingsStore, modelSettingsSchema, resolveExecutionSettings, validateExplicitModelSettings, validateNodeSettings } from "./execution-settings.ts";
 import type { EffectiveExecutionSettings, ExecutionEnvironment, ModelSettings, NodeSettings, StoredExecutionSettings } from "./execution-settings.ts";
 import { buildWorkerPrompt } from "./worker-prompt.ts";
@@ -245,11 +247,8 @@ export class WorkflowEngine {
     const approvalMode = resolveApprovalMode(input.approvalMode, "auto-review");
     const projectPath = await realpath(input.projectPath);
     if (!(await stat(projectPath)).isDirectory()) throw new Error("projectPath must be a directory");
-    if (input.workspaceMode === "local" && !input.allowWrite) throw new Error("Local project mode requires explicit allowWrite permission");
-    if (input.workspaceMode === "git-worktree" && !input.allowWrite) throw new Error("Git maintenance requires an isolated writable workspace");
-    if (input.maintenance && (!input.allowWrite || input.workspaceMode !== "git-worktree")) throw new Error("Maintenance operations require git-worktree isolation and allowWrite");
+    const maintenance = validateMaintenanceScope(input);
     if (input.allowedMcpServers?.some(name => !/^[a-zA-Z0-9_.-]{1,128}$/.test(name) || /workflows/i.test(name))) throw new Error("Invalid or recursive MCP server grant");
-    if (input.maintenance) input.maintenance = validateMaintenance(input.maintenance, input.networkAccess ?? false);
     this.validateMcpTools(input.allowedMcpServers ?? [], input.allowedMcpTools);
     const limits = { ...defaults, ...input.limits };
     if (!Number.isInteger(limits.maxReadWorkers) || limits.maxReadWorkers < 1 || limits.maxReadWorkers > 16 || !Number.isInteger(limits.maxCalls) || limits.maxCalls < 1 || limits.maxCalls > 1000 || limits.timeoutMs < 100 || limits.timeoutMs > 24 * 60 * 60 * 1000 || limits.maxTokens < 0) throw new Error("Invalid workflow limits");
@@ -257,7 +256,7 @@ export class WorkflowEngine {
       id: `wf_${randomBytes(12).toString("hex")}`, revision: 0, createdAt: now(), updatedAt: now(),
       meta, script: input.script, scriptDigest: digest(input.script), args: input.args === undefined ? {} : input.args, projectPath,
       approvalMode,
-      allowWrite: input.allowWrite ?? false, networkAccess: input.networkAccess ?? false, allowedMcpServers: input.allowedMcpServers ?? [], allowedMcpTools: input.allowedMcpTools ?? {}, workspaceMode: input.workspaceMode ?? "snapshot", ...(input.maintenance ? { maintenance: input.maintenance } : {}), ...(input.nodeSettings !== undefined ? { nodeSettings } : {}), limits, execution: "draft", review: "unavailable", application: "none", tasks: [], logs: [],
+      allowWrite: input.allowWrite ?? false, networkAccess: input.networkAccess ?? false, allowedMcpServers: input.allowedMcpServers ?? [], allowedMcpTools: input.allowedMcpTools ?? {}, workspaceMode: input.workspaceMode ?? "snapshot", ...(maintenance ? { maintenance } : {}), ...(input.nodeSettings !== undefined ? { nodeSettings } : {}), limits, execution: "draft", review: "unavailable", application: "none", tasks: [], logs: [],
       ...(input.workspaceMode === "local" && input.allowWrite ? { localGitWrite: true as const } : {}),
       ...(input.sourceDefinition ? { sourceDefinition: { ...input.sourceDefinition } } : {}),
     };
@@ -296,12 +295,10 @@ export class WorkflowEngine {
       workspaceMode: input.workspaceMode ?? run.workspaceMode ?? "snapshot",
       maintenance: input.maintenance ?? run.maintenance,
     };
-    if (scopes.maintenance) scopes.maintenance = validateMaintenance(scopes.maintenance, scopes.networkAccess);
+    scopes.maintenance = validateMaintenanceScope(scopes);
     if (run.workspace && digest(scopes) !== digest({ allowWrite: run.allowWrite, networkAccess: run.networkAccess ?? false, allowedMcpServers: run.allowedMcpServers ?? [], allowedMcpTools: run.allowedMcpTools ?? {}, workspaceMode: run.workspaceMode ?? "snapshot", maintenance: run.maintenance })) throw new Error("Changing execution scope requires a new preview and workspace");
     if (scopes.allowedMcpServers.some(name => !/^[a-zA-Z0-9_.-]{1,128}$/.test(name) || /workflows/i.test(name))) throw new Error("Invalid or recursive MCP server grant");
     this.validateMcpTools(scopes.allowedMcpServers, scopes.allowedMcpTools);
-    if (scopes.workspaceMode === "local" && !scopes.allowWrite) throw new Error("Local project mode requires explicit allowWrite permission");
-    if (scopes.maintenance && (!scopes.allowWrite || scopes.workspaceMode !== "git-worktree")) throw new Error("Maintenance operations require git-worktree isolation and allowWrite");
     const previousScope = { allowWrite: run.allowWrite, networkAccess: run.networkAccess ?? false, allowedMcpServers: run.allowedMcpServers ?? [], allowedMcpTools: run.allowedMcpTools ?? {}, workspaceMode: run.workspaceMode ?? "snapshot", maintenance: run.maintenance };
     const localWriteScopeChanged = scopes.workspaceMode !== previousScope.workspaceMode || scopes.allowWrite !== previousScope.allowWrite;
     if (!run.workspace && localWriteScopeChanged) {
@@ -310,6 +307,7 @@ export class WorkflowEngine {
         run.localGitWrite = true;
       } else delete run.localGitWrite;
     }
+    if (scopes.workspaceMode === "local" && scopes.maintenance && run.localGitWrite !== true) throw new Error("Local command operations require a new preview with recorded local Git write scope; legacy write scope cannot be expanded");
     if (digest(scopes) !== digest(previousScope)) {
       for (const task of run.tasks) task.status = "interrupted";
       this.log(run, "Execution permissions changed; saved task results will not be reused.");
@@ -444,7 +442,9 @@ export class WorkflowEngine {
   private async prepare(run: WorkflowRun, active: Active, settings: StoredExecutionSettings, needsEnvironment: boolean, resume: boolean) {
     let releaseProject: (() => Promise<void>) | undefined;
     try {
-      if (run.workspaceMode === "local" && (!run.allowWrite || run.maintenance) || run.workspace?.kind === "local" && run.workspaceMode !== "local") throw new Error("Local mode requires an explicitly writable local project plan without isolated maintenance operations");
+      validateMaintenanceScope(run);
+      if (run.workspaceMode === "local" && run.maintenance && run.localGitWrite !== true) throw new Error("Local command operations require a new preview with recorded local Git write scope; legacy write scope cannot be expanded");
+      if (run.workspace?.kind === "local" && run.workspaceMode !== "local") throw new Error("Local project workspace does not match its previewed mode");
       await this.preparationStage(run, active, "settings", "读取执行设置并核对模型", async () => {
         const environment = this.adapter.executionEnvironment && needsEnvironment ? await this.executionEnvironment(run.projectPath, AbortSignal.any([this.configAbort.signal, active.controller.signal])) : undefined;
         if (!run.executionSettings) run.executionSettings = environment ? { ...resolveExecutionSettings(environment, [{ settings, source: settings.model || settings.reasoningEffort ? "workflow-settings" : "codex-config" }]), provenance: "requested" } : {};
@@ -481,6 +481,7 @@ export class WorkflowEngine {
       });
       await this.preparationStage(run, active, "validation", "验证工作区与执行范围", async () => {
         if (run.workspace && !(await stat(run.workspace.root)).isDirectory()) throw new Error("Saved workspace is missing; cannot resume");
+        if (run.maintenance) await this.validateOperationWorkspace(run);
         if (run.workspaceMode === "local") {
           if (!run.workspace || run.workspace.kind !== "local" || run.workspacePath !== run.workspace.root) throw new Error("Local project workspace identity is missing or inconsistent");
           await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id));
@@ -525,11 +526,29 @@ export class WorkflowEngine {
       await releaseProject?.();
     }
   }
+  private async validateOperationWorkspace(run: WorkflowRun): Promise<void> {
+    validateMaintenanceScope(run);
+    const workspace = run.workspace;
+    if (!workspace || run.workspacePath !== workspace.root) throw new Error("Command operation workspace identity is missing or inconsistent");
+    if (run.workspaceMode === "local") {
+      if (run.localGitWrite !== true) throw new Error("Local command operations require a new preview with recorded local Git write scope; legacy write scope cannot be expanded");
+      await validateLocalWorkspace(workspace, run.projectPath, this.store.directory(run.id));
+      return;
+    }
+    const expectedKind = run.workspaceMode ?? "snapshot";
+    if ((workspace.kind ?? "snapshot") !== expectedKind) throw new Error("Command operation workspace kind differs from its previewed scope");
+    const owned = path.join(await realpath(await this.store.ownedDirectory(run.id)), "workspace");
+    const entry = await lstat(workspace.root);
+    if (!entry.isDirectory() || entry.isSymbolicLink() || await realpath(workspace.root) !== owned || await realpath(workspace.original) !== run.projectPath || owned === await realpath(workspace.original)) throw new Error("Command operations must remain bound to this run's owned isolated workspace");
+    if (workspace.kind === "git-worktree") await validateGitWorkspace(workspace);
+  }
   private async execute(run: WorkflowRun, active: Active) {
     const readPool = new Pool(run.limits.maxReadWorkers);
     let index = 0;
     let cacheInvalidFrom = Number.POSITIVE_INFINITY;
     let totalTokens = run.tasks.reduce((total, task) => total + task.attempts.reduce((subtotal, attempt) => subtotal + (attempt.usage?.totalTokens ?? 0), 0), 0);
+    const recoveryBudget = run.limits.maxTokens > 0 ? { remainingTokens: Math.max(0, run.limits.maxTokens - totalTokens) } : undefined;
+    const updateRecoveryBudget = () => { if (recoveryBudget) recoveryBudget.remainingTokens = Math.max(0, run.limits.maxTokens - totalTokens); };
     let phase: string | undefined;
     let reviewing = false;
     const journal = structuredClone(run.tasks);
@@ -567,16 +586,24 @@ export class WorkflowEngine {
             } catch (error) {
               cacheInvalidFrom = Math.min(cacheInvalidFrom, position);
               const errorText = message(error);
-              run.tasks[position] = { id: `task_${position + 1}`, index: position, prompt, options, mode: options.mode === "write" || options.isolation === "worktree" ? "write" : "read", status: "failed", cached: false, attempts: [...(previous?.attempts ?? []), { id: `task_${position + 1}_attempt_${(previous?.attempts.length ?? 0) + 1}`, status: "failed", error: errorText, endedAt: now() }], error: errorText, ...(configurationTarget ? { configurationTarget } : {}) };
+              run.tasks[position] = { id: `task_${position + 1}`, index: position, prompt, options, mode: options.mode === "write" || options.isolation === "worktree" ? "write" : "read", status: "failed", cached: false, attempts: [...(previous?.attempts ?? []), { id: `task_${position + 1}_attempt_${(previous?.attempts.length ?? 0) + 1}`, status: "failed", error: errorText, endedAt: now() }], error: errorText, ...(configurationTarget ? { configurationTarget } : {}), ...(taskPhase !== undefined ? { phase: taskPhase } : {}), ...(typeof options.label === "string" ? { label: options.label } : {}) };
               this.log(run, errorText, `task_${position + 1}`, "error");
               await this.persist(run);
-              throw error;
+              throw new WorkflowTaskError(error, { taskId: `task_${position + 1}`, ...(taskPhase !== undefined ? { phase: taskPhase } : {}) });
             }
             const mode = options.mode === "write" ? "write" : "read";
             const fingerprint = taskFingerprint(prompt, options, executionSettings);
             const task: Task = { id: `task_${position + 1}`, index: position, prompt, options, mode, status: "queued", cached: false, attempts: previous?.attempts ?? [], ...(configurationTarget ? { configurationTarget } : {}), ...(executionSettings ? { executionSettings } : {}), ...(typeof options.label === "string" ? { label: options.label } : {}), ...(taskPhase !== undefined ? { phase: taskPhase } : {}) };
             run.tasks[position] = task;
             if (position < cacheInvalidFrom && previous?.status === "completed" && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint && Object.hasOwn(previous, "output")) {
+              try { if (options.schema) validateTaskOutput(previous.output, options.schema, options.accept); }
+              catch (error) {
+                task.status = "failed"; task.output = previous.output;
+                task.error = "Saved task output no longer passes its declared contract. Inspect the result and explicitly retry this node; execution was not repeated.";
+                this.log(run, task.error, task.id, "error");
+                await this.persist(run);
+                throw new WorkflowTaskError(new Error(task.error, { cause: error }), { taskId: task.id, ...(taskPhase !== undefined ? { phase: taskPhase } : {}) });
+              }
               task.status = "completed"; task.cached = true; task.output = previous.output;
               if (previous.executionSettings) task.executionSettings = previous.executionSettings;
               this.log(run, "Reused completed task result.", task.id);
@@ -590,7 +617,7 @@ export class WorkflowEngine {
               task.error = `Operation ${operationId} already started in a prior attempt. Its result cannot safely be reused here and it will not be repeated automatically. Inspect its actual effects and revise the workflow before continuing.`;
               this.log(run, task.error, task.id, "error");
               await this.persist(run);
-              throw new Error(task.error);
+              throw new WorkflowTaskError(new Error(task.error), { taskId: task.id, ...(taskPhase !== undefined ? { phase: taskPhase } : {}) });
             }
             // A whole-run interruption restarts that task without discarding later completed results.
             if (!(previous?.status === "interrupted" && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint)) cacheInvalidFrom = Math.min(cacheInvalidFrom, position);
@@ -614,6 +641,7 @@ export class WorkflowEngine {
                   await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id));
                 }
                 if (operationId) {
+                  await this.validateOperationWorkspace(run);
                   const step = run.maintenance!.steps.find(step => step.id === operationId)!;
                   if (step.protectedPaths !== undefined) {
                     if (run.workspace?.kind !== "git-worktree") throw new Error("Protected maintenance paths require an independent Git workspace");
@@ -631,8 +659,12 @@ export class WorkflowEngine {
                   if (!this.adapter.command) throw new Error("This adapter cannot execute approved operations");
                   const report = await this.adapter.command({ id: attempt.id, command: step.command, cwd: run.workspacePath!, networkAccess: step.networkAccess ?? false, timeoutMs: Math.min(step.timeoutMs ?? run.limits.timeoutMs, run.limits.timeoutMs), retries: step.retries ?? 0, ...(step.protectedPaths !== undefined ? { protectedPaths: step.protectedPaths } : {}) }, controller.signal, event => { if (event.type === "log") this.log(run, event.message, task.id); else if (event.type === "activity") this.activity(run, task, attempt, event.activity); });
                   task.output = report;
+                  attempt.output = report;
                   attempt.outcome = "confirmed";
-                  if (report.exitCode !== 0) throw new Error(`Operation ${operationId} failed (exit ${report.exitCode}): ${report.stderr.slice(-1000)}`);
+                  if (report.exitCode !== 0) {
+                    const diagnostic = report.stderr.trim() || report.stdout.trim();
+                    throw new Error(`Operation ${operationId} failed (exit ${report.exitCode})${diagnostic ? `: ${diagnostic.slice(-1000)}` : ": command returned no diagnostic output"}`);
+                  }
                   task.status = "completed"; attempt.status = "completed"; attempt.output = task.output;
                   this.log(run, `Operation completed (${report.attempts} attempt(s)).`, task.id);
                   return task.output;
@@ -646,6 +678,10 @@ export class WorkflowEngine {
                   ...(executionSettings?.reasoningEffort ? { reasoningEffort: executionSettings.reasoningEffort } : {}),
                   ...(executionSettings ? { settingsSource: executionSettings.source } : {}),
                   ...(options.schema ? { outputSchema: options.schema as Record<string, unknown> } : {}),
+                  ...(options.accept ? { accept: options.accept as Record<string, unknown> } : {}),
+                  ...(options.maxRecoveryAttempts !== undefined ? { maxRecoveryAttempts: options.maxRecoveryAttempts as number } : {}),
+                  ...(run.limits.maxTokens > 0 ? { remainingTokenBudget: Math.max(0, run.limits.maxTokens - totalTokens) } : {}),
+                  ...(recoveryBudget ? { recoveryBudget } : {}),
                   timeoutMs: run.limits.timeoutMs,
                 }, controller.signal, event => {
                   if (event.type === "identity") { attempt.threadId = event.threadId; if (event.turnId) attempt.turnId = event.turnId; }
@@ -655,27 +691,46 @@ export class WorkflowEngine {
                   else if (event.type === "usage") {
                     attempt.usage = { inputTokens: event.inputTokens, outputTokens: event.outputTokens, totalTokens: event.totalTokens };
                     totalTokens += Math.max(0, event.totalTokens - accountedTokens);
+                    updateRecoveryBudget();
                     accountedTokens = Math.max(accountedTokens, event.totalTokens);
                   }
                 });
                 task.output = options.schema ? report.data : report.output;
+                attempt.output = task.output;
                 if (report.executionSettings) { task.executionSettings = report.executionSettings; attempt.executionSettings = report.executionSettings; }
-                if (options.schema && report.data === undefined) throw new Error("Worker did not return structured output");
-                if (digest(task.output).length && Buffer.byteLength(JSON.stringify(task.output) ?? "null") > 1024 * 1024) throw new Error("Task output exceeds 1 MiB");
-                task.status = "completed"; attempt.status = "completed"; attempt.output = task.output; attempt.usage = report.usage;
+                attempt.usage = report.usage;
                 attempt.threadId = report.threadId; attempt.turnId = report.turnId;
                 if (report.toolsUsed) attempt.toolsUsed = report.toolsUsed;
+                if (report.recoveryAttempts !== undefined) attempt.recoveryAttempts = report.recoveryAttempts;
                 totalTokens += Math.max(0, report.usage.totalTokens - accountedTokens);
+                updateRecoveryBudget();
+                accountedTokens = Math.max(accountedTokens, report.usage.totalTokens);
+                if (options.schema && report.data === undefined) throw new Error("Worker did not return structured output");
+                if (options.schema) validateTaskOutput(task.output, options.schema, options.accept);
+                if (digest(task.output).length && Buffer.byteLength(JSON.stringify(task.output) ?? "null") > 1024 * 1024) throw new Error("Task output exceeds 1 MiB");
+                task.status = "completed"; attempt.status = "completed";
                 this.log(run, "Worker completed.", task.id);
                 return task.output;
                 } finally { await releaseWriter?.(); }
               });
             } catch (error) {
+              if (error instanceof TaskOutputValidationError) {
+                if (error.outputData !== undefined) task.output = attempt.output = error.outputData;
+                const result = error.workerResult;
+                if (result) {
+                  attempt.threadId = result.threadId; attempt.turnId = result.turnId;
+                  attempt.usage = result.usage;
+                  if (result.toolsUsed) attempt.toolsUsed = result.toolsUsed;
+                  if (result.recoveryAttempts !== undefined) attempt.recoveryAttempts = result.recoveryAttempts;
+                  totalTokens += Math.max(0, result.usage.totalTokens - accountedTokens);
+                  updateRecoveryBudget();
+                }
+              }
               if (operationId && attempt.startedAt && attempt.outcome !== "confirmed") attempt.outcome = "unknown";
               task.status = active.controller.signal.aborted || scriptSignal?.aborted ? "interrupted" : "failed";
               attempt.status = task.status; task.error = message(error); attempt.error = task.error;
               this.log(run, task.error, task.id, "error");
-              throw error;
+              throw new WorkflowTaskError(error, { taskId: task.id, attemptId: attempt.id, ...(taskPhase !== undefined ? { phase: taskPhase } : {}) });
             } finally {
               attempt.endedAt = now(); active.tasks.delete(task.id);
               for (const activity of attempt.activities ?? []) if (activity.status === "running") { activity.status = attempt.status === "completed" ? "completed" : attempt.status === "interrupted" ? "interrupted" : "failed"; activity.endedAt = attempt.endedAt; }
@@ -715,7 +770,9 @@ export class WorkflowEngine {
       run.execution = active.controller.signal.aborted && (run.execution === "stopping" || this.closing) ? "stopped" : "failed";
       if (run.execution === "stopped") { run.stopReason ??= this.closing ? "service-shutdown" : "requested"; delete run.error; }
       else run.error = message(error);
-      if (run.execution === "failed") run.failureContext = {
+      if (run.execution === "failed") run.failureContext = !reviewing && error instanceof WorkflowTaskError ? {
+        kind: "task", ...error.origin,
+      } : {
         kind: reviewing ? "review" : "script", ...(phase ? { phase } : {}),
         ...(!reviewing && run.tasks.length && run.tasks.every(task => task.status === "completed") ? { afterTaskId: run.tasks.at(-1)!.id } : {}),
       };
@@ -760,7 +817,7 @@ export class WorkflowEngine {
     this.scheduleProgress(run);
   }
   private agentOptions(options: Record<string, unknown>) {
-    const allowed = new Set(["label", "phase", "mode", "model", "reasoningEffort", "schema", "isolation"]);
+    const allowed = new Set(["label", "phase", "mode", "model", "reasoningEffort", "schema", "accept", "maxRecoveryAttempts", "isolation"]);
     for (const key of Object.keys(options)) if (!allowed.has(key)) throw new Error(`Unsupported agent option: ${key}`);
     if (options.mode !== undefined && !["read", "write"].includes(String(options.mode))) throw new Error("mode must be read or write");
     if (options.isolation !== undefined && options.isolation !== "worktree") throw new Error("Only worktree isolation is supported");
@@ -768,6 +825,10 @@ export class WorkflowEngine {
     for (const key of ["label", "phase", "model", "reasoningEffort"]) if (options[key] !== undefined && typeof options[key] !== "string") throw new Error(`${key} must be a string`);
     modelSettingsSchema.parse({ ...(options.model !== undefined ? { model: options.model } : {}), ...(options.reasoningEffort !== undefined ? { reasoningEffort: options.reasoningEffort } : {}) });
     if (options.schema !== undefined && (!options.schema || typeof options.schema !== "object" || Array.isArray(options.schema))) throw new Error("schema must be a JSON schema object");
+    if (options.accept !== undefined && options.schema === undefined) throw new Error("accept requires a structured output schema");
+    if (options.maxRecoveryAttempts !== undefined && (!Number.isSafeInteger(options.maxRecoveryAttempts) || Number(options.maxRecoveryAttempts) < 0 || Number(options.maxRecoveryAttempts) > 2)) throw new Error("maxRecoveryAttempts must be an integer between 0 and 2");
+    if (options.maxRecoveryAttempts && options.schema === undefined) throw new Error("Structured recovery requires a structured output schema");
+    validateTaskContracts(options.schema, options.accept);
     return options;
   }
   async stop(id: string, reason: WorkflowStopReason = "requested") {

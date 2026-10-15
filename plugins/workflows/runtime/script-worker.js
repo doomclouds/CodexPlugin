@@ -3761,17 +3761,28 @@ async function main() {
     rejectResult = reject;
   });
   let resultObserved = false;
-  const errorText = (handle) => {
+  const scriptError = (handle) => {
     const dumped = context.dump(handle);
-    if (dumped && typeof dumped === "object" && "message" in dumped) return String(dumped.message);
-    return String(dumped);
+    const error = new Error(dumped && typeof dumped === "object" && "message" in dumped ? String(dumped.message) : String(dumped));
+    if (dumped && typeof dumped === "object") {
+      const identity = context.getProp(handle, "__workflowFailureId");
+      try {
+        if (context.typeof(identity) === "string") {
+          const value = context.getString(identity);
+          if (/^[a-f0-9]{32}$/.test(value)) error.failureId = value;
+        }
+      } finally {
+        identity.dispose();
+      }
+    }
+    return error;
   };
   const pump = () => {
     const result = runtime.executePendingJobs();
     if (result.error) {
-      const message = errorText(result.error);
+      const error = scriptError(result.error);
       result.error.dispose();
-      throw new Error(message);
+      throw error;
     }
     if (promise && !resultObserved) {
       const state = context.getPromiseState(promise);
@@ -3780,9 +3791,9 @@ async function main() {
         resolveResult(state.value);
       } else if (state.type === "rejected") {
         resultObserved = true;
-        const message = errorText(state.error);
+        const error = scriptError(state.error);
         state.error.dispose();
-        rejectResult(new Error(message));
+        rejectResult(error);
       }
     }
   };
@@ -3803,7 +3814,7 @@ async function main() {
       resultObserved = true;
       rejectResult(error);
     }
-    port.postMessage({ type: "error", error: error instanceof Error ? error.message : String(error) });
+    port.postMessage({ type: "error", error: error instanceof Error ? error.message : String(error), ...error instanceof Error && "failureId" in error && typeof error.failureId === "string" ? { failureId: error.failureId } : {} });
   };
   try {
     setFunction("__workflowAgent", (promptHandle, optionsHandle) => {
@@ -3897,6 +3908,14 @@ async function main() {
       try {
         if (message.error !== void 0) {
           const error = context.newError(message.error);
+          if (typeof message.failureId === "string" && /^[a-f0-9]{32}$/.test(message.failureId)) {
+            const identity = context.newString(message.failureId);
+            try {
+              context.defineProp(error, "__workflowFailureId", { value: identity, enumerable: false, configurable: false });
+            } finally {
+              identity.dispose();
+            }
+          }
           deferred.reject(error);
           error.dispose();
         } else if (message.resultJson === void 0) deferred.resolve(context.undefined);

@@ -4,12 +4,13 @@ const maximumTextBytes = 8192;
 const maximumCallBytes = 8192;
 const maximumTotalBytes = 65_536;
 const maximumCalls = 100;
-const truncated = " [MCP error diagnostics truncated.]";
-const safeName = (value: unknown) => typeof value === "string" && /^[a-zA-Z0-9_.-]{1,80}$/.test(value) && !/(?:token|secret|password|sk-|gh[pousr]_)/i.test(value) ? value : undefined;
+export const safeDiagnosticName = (value: unknown) => typeof value === "string" && /^[a-zA-Z0-9_.-]{1,80}$/.test(value) && !/(?:token|secret|password|sk-|gh[pousr]_)/i.test(value) ? value : undefined;
+const safeName = safeDiagnosticName;
 const sensitiveAssignment = /(?:\\*["'])?\b(?:api[-_ ]?key|(?:aws[-_ ]?)?(?:access|refresh|session|id)[-_ ]?token|session[-_ ]?(?:id|key)|token|password|passwd|secret|client[-_ ]?secret|private[-_ ]?key|(?:aws[-_ ]?)?(?:secret[-_ ]?)?access[-_ ]?key(?:[-_ ]?id)?|credentials?|authorization|authentication|auth|(?:set[-_ ]?|session[-_ ]?)?cookies?)\b(?:\\*["'])?\s*[:=]/i;
 const inputAssignment = /(?:\\*["'])?\b(?:arguments|args|prompt|input|payload|params)\b(?:\\*["'])?\s*[:=]/i;
 
-function bounded(value: string, bytes: number): string {
+export function boundedDiagnosticText(value: string, bytes: number, source: "MCP" | "Native" = "MCP"): string {
+  const truncated = ` [${source} error diagnostics truncated.]`;
   const clipped = value.length > bytes;
   const sample = clipped ? value.slice(0, bytes) : value;
   const buffer = Buffer.from(sample);
@@ -17,6 +18,17 @@ function bounded(value: string, bytes: number): string {
   let end = Math.max(0, bytes - Buffer.byteLength(truncated));
   while (end > 0 && (buffer[end]! & 0xc0) === 0x80) end--;
   return buffer.subarray(0, end).toString("utf8") + truncated;
+}
+const bounded = (value: string, bytes: number) => boundedDiagnosticText(value, bytes);
+
+export function failureDiagnosticText(value: string, redact: (value: string) => string, source: "MCP" | "Native" = "MCP"): string {
+  // Bound before redaction, and bound again in case redaction expands a match.
+  let error = boundedDiagnosticText(value, maximumCallBytes, source).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+  const sensitiveDetails = error.search(sensitiveAssignment), inputDetails = error.search(inputAssignment);
+  // Omit the remainder of echoed assignments rather than guessing value ends.
+  if (sensitiveDetails >= 0 && (inputDetails < 0 || sensitiveDetails <= inputDetails)) error = error.slice(0, sensitiveDetails) + `[${source} sensitive details omitted.]`;
+  else if (inputDetails >= 0) error = error.slice(0, inputDetails) + `[${source} input details omitted.]`;
+  return boundedDiagnosticText(redact(error), maximumCallBytes, source);
 }
 
 export function mcpItemFailed(value: unknown): boolean {
@@ -96,14 +108,7 @@ export class McpFailureDiagnostics {
       return "MCP error diagnostics limit reached; further error payloads were omitted.";
     }
     this.seen.add(id);
-    // Bound before redaction, and bound again in case redaction expands a match.
-    let error = bounded(errorMessage(item), maximumCallBytes).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
-    const sensitiveDetails = error.search(sensitiveAssignment), inputDetails = error.search(inputAssignment);
-    // Error messages can echo serialized arguments or unquoted credentials with
-    // spaces. Omit the remainder rather than guessing where their values end.
-    if (sensitiveDetails >= 0 && (inputDetails < 0 || sensitiveDetails <= inputDetails)) error = error.slice(0, sensitiveDetails) + "[MCP sensitive details omitted.]";
-    else if (inputDetails >= 0) error = error.slice(0, inputDetails) + "[MCP input details omitted.]";
-    const message = bounded(this.redact(error), maximumCallBytes);
+    const message = failureDiagnosticText(errorMessage(item), this.redact);
     const server = safeName(item.server), tool = safeName(item.tool);
     const identity = server && tool ? ` (${server}/${tool})` : "";
     const log = bounded(`MCP tool call failed${identity}: ${message}`, maximumCallBytes);

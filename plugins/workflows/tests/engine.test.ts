@@ -615,8 +615,9 @@ test("protected operations reject a retained command cwd redirected to the origi
   const refused = await engine.wait(run.id);
   assert.equal(refused.execution, "failed");
   assert.equal(commands, 1, "The redirected command must never receive protected roots on the original project.");
-  assert.match(refused.tasks[0]?.error ?? "", /bound to this run's owned isolated workspace/);
-  assert.equal(refused.tasks[0]?.attempts.at(-1)?.startedAt, undefined);
+  assert.match(refused.error ?? "", /Command operation workspace identity is missing or inconsistent/);
+  assert.equal(refused.failureContext?.kind, "preparation");
+  assert.equal(refused.tasks[0]?.attempts.length, first.tasks[0]?.attempts.length, "Preparing rejects redirected command scope before another attempt is created.");
   assert.equal(await readFile(path.join(project, "source.txt"), "utf8"), "original\n");
   assert.equal((await exec("git", ["status", "--porcelain=v1"], { cwd: project })).stdout, "");
 });

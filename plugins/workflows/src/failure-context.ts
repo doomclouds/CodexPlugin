@@ -1,6 +1,8 @@
 export interface WorkflowFailureContext {
-  kind: "script" | "preparation" | "review" | "checkpoint";
+  kind: "script" | "preparation" | "review" | "checkpoint" | "task";
   phase?: string;
+  taskId?: string;
+  attemptId?: string;
   afterTaskId?: string;
   recovery?: "new-preview";
 }

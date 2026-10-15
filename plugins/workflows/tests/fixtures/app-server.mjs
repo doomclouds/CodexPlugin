@@ -22,7 +22,9 @@ const send = value => process.stdout.write(JSON.stringify(value) + "\n");
 const response = (id, result) => send({ id, result });
 const notify = (method, params) => send({ method, params });
 const threadId = "test-thread";
-const turnId = "test-turn";
+let turnId = "test-turn";
+let turnCount = 0;
+const interruptedTurns = new Set();
 const publicSource = "https://docs.example.test/guide?lang=zh&section=workflow#native-tools";
 const privateBusinessSource = "https://workspace.example.test/review?project=source#L42";
 const credentialSource = "https://demo-user:credential-pass@docs.example.test/guide?lang=zh&access_token=credential-token&api%5Fkey=credential-key&X-Amz-Signature=credential-signature&access_token=credential-again#access_token=fragment-secret&section=source";
@@ -34,12 +36,12 @@ if (scenario === "stubborn" || scenario === "command-stubborn") {
   record({ type: "descendant", pid: descendant.pid });
 }
 
-function finish(output, phase = "final_answer", terminalItems = []) {
-  notify("item/agentMessage/delta", { threadId, turnId, itemId: "final", delta: output.slice(0, 4) });
-  notify("item/agentMessage/delta", { threadId, turnId, itemId: "final", delta: output.slice(4) });
-  notify("item/completed", { threadId, turnId, item: { type: "agentMessage", id: "final", text: output, phase } });
-  notify("thread/tokenUsage/updated", { threadId, turnId, tokenUsage: { total: { inputTokens: 11, outputTokens: 7, totalTokens: 18 } } });
-  notify("turn/completed", { threadId, turn: { id: turnId, status: "completed", items: terminalItems } });
+function finish(output, phase = "final_answer", terminalItems = [], activeTurn = turnId, totalTurns = turnCount) {
+  notify("item/agentMessage/delta", { threadId, turnId: activeTurn, itemId: "final", delta: output.slice(0, 4) });
+  notify("item/agentMessage/delta", { threadId, turnId: activeTurn, itemId: "final", delta: output.slice(4) });
+  notify("item/completed", { threadId, turnId: activeTurn, item: { type: "agentMessage", id: "final", text: output, phase } });
+  notify("thread/tokenUsage/updated", { threadId, turnId: activeTurn, tokenUsage: { total: { inputTokens: 11 * totalTurns, outputTokens: 7 * totalTurns, totalTokens: 18 * totalTurns } } });
+  notify("turn/completed", { threadId, turn: { id: activeTurn, status: "completed", items: terminalItems } });
 }
 
 createInterface({ input: process.stdin }).on("line", line => {
@@ -124,6 +126,8 @@ createInterface({ input: process.stdin }).on("line", line => {
     const data = scenario === "enabled-mcp" ? [{ name: configuredName, runtimeStatus: "connected", tools: { unsafe: {} } }] : [{ name: configuredName, runtimeStatus: params.threadId ? selected?.enabled ? "connected" : "disabled" : null, tools, serverInfo: { name: scenario === "recursive-mcp" ? "workflows" : "fixture-server" } }];
     response(id, { data, nextCursor: null });
   } else if (method === "turn/start") {
+    turnCount++;
+    turnId = turnCount === 1 ? "test-turn" : `test-turn-${turnCount}`;
     if (!threadParams || params.approvalPolicy !== threadParams.approvalPolicy || params.approvalsReviewer !== threadParams.approvalsReviewer || params.sandboxPolicy.networkAccess !== threadParams.config["sandbox_workspace_write.network_access"] || params.sandboxPolicy.type !== (threadParams.sandbox === "read-only" ? "readOnly" : "workspaceWrite")) process.exit(6);
     notify("turn/started", { threadId, turn: { id: turnId, status: "inProgress" } });
     if (scenario === "cancel-before-ack") return;
@@ -132,7 +136,53 @@ createInterface({ input: process.stdin }).on("line", line => {
       setTimeout(() => response(id, { turn: { id: turnId, status: "inProgress" } }), 50);
       return;
     }
-    response(id, { turn: { id: turnId, status: "inProgress" } });
+    response(id, { turn: { id: scenario === "recovery-ack-mismatch" && turnCount > 1 ? "wrong-new-turn" : scenario === "recovery-old-ack" && turnCount > 1 ? "test-turn" : turnId, status: "inProgress" } });
+    if (scenario.startsWith("recovery-")) {
+      if (scenario === "recovery-protocol" && turnCount > 1) { process.stdout.write("not-json\n"); return; }
+      if (scenario === "recovery-interrupted") { notify("turn/completed", { threadId, turn: { id: turnId, status: "interrupted", items: [] } }); return; }
+      if (scenario === "recovery-host-request") { send({ id: "server-approval", method: "item/permissions/requestApproval", params: { threadId, turnId, permissions: { network: true } } }); return; }
+      if (scenario === "recovery-terminal-protocol") {
+        const activeTurn = turnId;
+        setTimeout(() => process.stdout.write([
+          JSON.stringify({ method: "item/completed", params: { threadId, turnId: activeTurn, item: { type: "agentMessage", id: "final", text: '{"ok":false}', phase: "final_answer" } } }),
+          JSON.stringify({ method: "turn/completed", params: { threadId, turn: { id: activeTurn, status: "completed", items: [] } } }),
+          "not-json",
+        ].join("\n") + "\n"), 10);
+        return;
+      }
+      if (scenario === "recovery-permission-blocked" || scenario === "recovery-result-permission-text") {
+        const permission = "MCP tool call requires approval, but approval policy is never";
+        const call = { type: "mcpToolCall", id: `permission-${turnCount}`, server: configuredName, tool: "read_tool", status: "failed", error: scenario === "recovery-permission-blocked" ? { message: permission } : null, result: scenario === "recovery-result-permission-text" ? { isError: true, content: [{ type: "text", text: permission }] } : null };
+        notify("item/completed", { threadId, turnId, item: call });
+        if (scenario === "recovery-permission-blocked") {
+          const blockedTurn = turnId;
+          setTimeout(() => {
+            if (interruptedTurns.has(blockedTurn)) return;
+            record({ type: "native-after-approval-block", turnId: blockedTurn });
+            notify("item/completed", { threadId, turnId: blockedTurn, item: { type: "commandExecution", id: "forbidden-follow-on", status: "completed", exitCode: 0 } });
+            finish('{"ok":true}', "final_answer", [], blockedTurn);
+          }, 80);
+          return;
+        }
+      }
+      if (scenario === "recovery-cancel" && turnCount > 1) return;
+      if (scenario === "recovery-late" && turnCount > 1) {
+        finish('{"ok":false,"secret":"PRIVATE_STALE_OUTPUT"}', "final_answer", [], "test-turn", 900);
+        notify("turn/started", { threadId, turn: { id: "test-turn", status: "inProgress" } });
+        notify("item/completed", { threadId, turnId: "test-turn", item: { type: "fileChange", id: "stale-edit", status: "completed" } });
+      }
+      if (scenario === "recovery-git-swap" && turnCount === 1) {
+        renameSync(path.join(process.cwd(), ".git"), path.join(process.cwd(), "original-git"));
+        symlinkSync(path.join(process.cwd(), "original-git"), path.join(process.cwd(), ".git"), process.platform === "win32" ? "junction" : "dir");
+      }
+      notify("item/completed", { threadId, turnId, item: turnCount === 1 ? { type: "commandExecution", id: "recovery-command", status: "failed", exitCode: 1, aggregatedOutput: "temporary fixture failure\n" } : { type: "webSearch", id: "recovery-search" } });
+      const output = scenario === "recovery-exhaust" || scenario === "recovery-git-swap" || turnCount === 1 && scenario !== "recovery-json" && scenario !== "recovery-shape"
+        ? '{"ok":false}' : turnCount === 1 && scenario === "recovery-json" ? "not JSON PRIVATE_INVALID_OUTPUT"
+        : turnCount === 1 && scenario === "recovery-shape" ? '{"ok":"PRIVATE_BAD_SHAPE"}' : '{"ok":true}';
+      const selectedTurn = turnId, selectedCount = turnCount;
+      setTimeout(() => finish(output, "final_answer", [], selectedTurn, selectedCount), scenario === "recovery-total-timeout" ? 80 : 10);
+      return;
+    }
     if (scenario.startsWith("auto-review-")) {
       if (scenario === "auto-review-host-request") { send({ id: "server-approval", method: "item/permissions/requestApproval", params: { threadId, turnId, permissions: { network: true } } }); return; }
       if (scenario === "auto-review-no-request") { finish("no review necessary"); return; }
@@ -219,6 +269,7 @@ createInterface({ input: process.stdin }).on("line", line => {
     notify("item/completed", { threadId, turnId, item: { type: "agentMessage", id: "commentary", text: "working commentary", phase: "commentary" } });
     setTimeout(() => finish(["public-url", "credential-url"].includes(scenario) ? JSON.stringify(sourceOutput) : scenario === "structured" ? '{"answer":42}' : scenario === "bad-structured" ? "not structured" : "worker complete"), 20);
   } else if (method === "turn/interrupt") {
+    interruptedTurns.add(params.turnId);
     response(id, {});
     if (scenario !== "stubborn") setTimeout(() => notify("turn/completed", { threadId, turn: { id: turnId, status: "interrupted", items: [] } }), 10);
   } else if (method === "command/exec") {

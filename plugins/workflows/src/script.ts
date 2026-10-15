@@ -1,6 +1,7 @@
 import { parse } from "acorn";
 import { Worker } from "node:worker_threads";
 import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 
 export interface WorkflowMeta {
   name: string;
@@ -236,6 +237,9 @@ export async function executeScript(source: string, args: unknown, hooks: Script
   const worker = new Worker(scriptWorkerDataUrl, { workerData: { body, argsJson, limits: resolvedLimits, moduleBaseUrl: scriptWorkerUrl.href }, execArgv: [] });
   const controller = new AbortController();
   const pending = new Set<Promise<void>>();
+  // Keep host failures out of the VM. A matching opaque identity can carry the
+  // original cause through catch/finally/rethrow without guessing from text.
+  const failures = new Map<string, Error>();
   return await new Promise<unknown>((resolve, reject) => {
     let finishing = false;
     const finish = async (error?: Error, result?: unknown): Promise<void> => {
@@ -254,7 +258,7 @@ export async function executeScript(source: string, args: unknown, hooks: Script
     signal.addEventListener("abort", abort, { once: true });
     worker.on("error", error => { void finish(error); });
     worker.on("exit", code => { if (!finishing) void finish(new Error(`Workflow sandbox exited before returning a result (${code})`)); });
-    worker.on("message", (message: { type: string; id?: number; prompt?: string; options?: Record<string, unknown>; text?: string; resultJson?: string; error?: string }) => {
+    worker.on("message", (message: { type: string; id?: number; prompt?: string; options?: Record<string, unknown>; text?: string; resultJson?: string; error?: string; failureId?: string }) => {
       if (finishing) return;
       if (message.type === "agent" || message.type === "operation") {
         const task = Promise.resolve().then(() => message.type === "operation"
@@ -262,7 +266,12 @@ export async function executeScript(source: string, args: unknown, hooks: Script
           : hooks.agent(message.prompt!, message.options!, controller.signal)).then(result => {
           if (!finishing) worker.postMessage({ type: "agent-result", id: message.id, resultJson: encode(result) });
         }).catch(error => {
-          if (!finishing) worker.postMessage({ type: "agent-result", id: message.id, error: error instanceof Error ? error.message : String(error) });
+          if (!finishing) {
+            const original = error instanceof Error ? error : new Error(String(error));
+            const failureId = randomBytes(16).toString("hex");
+            failures.set(failureId, original);
+            worker.postMessage({ type: "agent-result", id: message.id, error: original.message, failureId });
+          }
         }).finally(() => { pending.delete(task); });
         pending.add(task);
       } else if (message.type === "phase" || message.type === "log") {
@@ -271,7 +280,7 @@ export async function executeScript(source: string, args: unknown, hooks: Script
       } else if (message.type === "done") {
         try { void finish(undefined, message.resultJson === undefined ? undefined : JSON.parse(message.resultJson)); }
         catch (error) { void finish(abortError(error)); }
-      } else if (message.type === "error") void finish(new Error(message.error ?? "Workflow sandbox failed"));
+      } else if (message.type === "error") void finish(typeof message.failureId === "string" && failures.has(message.failureId) ? failures.get(message.failureId)! : new Error(message.error ?? "Workflow sandbox failed"));
     });
     if (signal.aborted) abort();
   });

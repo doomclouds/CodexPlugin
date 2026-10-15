@@ -23,6 +23,7 @@ export interface Attempt {
   id: string; status: TaskStatus; startedAt?: string; endedAt?: string;
   threadId?: string; turnId?: string; output?: unknown; error?: string;
   toolsUsed?: string[];
+  recoveryAttempts?: number;
   executionSettings?: EffectiveExecutionSettings;
   outcome?: "confirmed" | "unknown";
   activities?: Activity[];
