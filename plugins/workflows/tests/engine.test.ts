@@ -360,7 +360,7 @@ test("the first failed task invalidates every subsequent saved result", async t 
   assert.deepEqual(complete.tasks.map(task => task.attempts.length), [1, 2, 2]);
 });
 
-test("an input-induced prompt change invalidates that task and every later cache", async t => {
+test("an explicitly edited plan invalidates all retained observations before replay", async t => {
   const { project, engine, adapter } = await fixture(t);
   const source = script('const a = await agent("A"); const b = await agent(args.middle); const c = await agent("C"); return [a, b, c];');
   const run = await engine.preview({ projectPath: project, script: source, args: { middle: "old B" } });
@@ -370,8 +370,9 @@ test("an input-induced prompt change invalidates that task and every later cache
   await engine.start({ id: run.id, revision: updated.revision });
   const after = await engine.wait(run.id);
   assert.equal(after.execution, "completed", after.error);
-  assert.deepEqual(after.tasks.map(task => task.cached), [true, false, false]);
-  assert.deepEqual(adapter.calls, ["A", "old B", "C", "new B", "C"]);
+  assert.deepEqual(after.tasks.map(task => task.cached), [false, false, false]);
+  assert.deepEqual(after.tasks.map(task => task.attempts.length), [2, 2, 2]);
+  assert.deepEqual(adapter.calls, ["A", "old B", "C", "A", "new B", "C"]);
 });
 
 test("loading retained crash state marks it stopped without automatically starting workers", async t => {
@@ -590,10 +591,10 @@ test("protected operations revalidate independent Git ownership after an earlier
   const failed = await engine.wait(run.id);
   assert.equal(failed.execution, "failed");
   assert.equal(commands, 0);
-  assert.equal(failed.tasks[1]?.status, "failed");
-  assert.match(failed.tasks[1]?.error ?? "", /Git metadata.*independent checkout/);
-  assert.equal(failed.tasks[1]?.attempts.at(-1)?.startedAt, undefined, "Ownership rejection must not claim the command started.");
-  assert.equal(failed.tasks[1]?.attempts.at(-1)?.outcome, undefined);
+  assert.equal(failed.tasks[1], undefined, "A failed node checkpoint must prevent dispatch of the protected operation.");
+  assert.equal(failed.failureContext?.kind, "checkpoint");
+  assert.equal(failed.checkpointState?.status, "failed");
+  assert.match(failed.checkpointState?.error ?? "", /checkpoint.*(independent|redirect|metadata)/i);
   assert.equal(await readFile(path.join(project, "source.txt"), "utf8"), "original\n");
 });
 

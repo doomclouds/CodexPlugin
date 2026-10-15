@@ -155,7 +155,7 @@ test("legacy local checkpoints migrate only when an exact full or reserved-ref-f
     const f = await pausedFixture(child, variant === "full-state-match");
     const captured = await captureLocalWorkspaceCheckpoints(f.stopped.workspace!);
     assert.ok(captured.legacy);
-    f.stopped.workspaceCheckpoint = captured.legacy; await f.store.save(f.stopped);
+    f.stopped.workspaceCheckpoint = captured.legacy; delete f.stopped.nodeCheckpoint; delete f.stopped.checkpointState; await f.store.save(f.stopped);
     if (variant === "only-new-host-ref") await fixtureGit(f.project, ["update-ref", "refs/codex/turn-diffs/checkpoints/after-stop", "HEAD"]);
     await f.engine.start({ id: f.stopped.id, revision: f.stopped.revision }, true);
     const done = await f.engine.wait(f.stopped.id);
@@ -171,7 +171,7 @@ test("legacy local checkpoints with an unknown historical subset of host refs re
   const f = await pausedFixture(t, true);
   const captured = await captureLocalWorkspaceCheckpoints(f.stopped.workspace!); assert.ok(captured.legacy);
   const saved = captured.legacy;
-  f.stopped.workspaceCheckpoint = saved; await f.store.save(f.stopped);
+  f.stopped.workspaceCheckpoint = saved; delete f.stopped.nodeCheckpoint; delete f.stopped.checkpointState; await f.store.save(f.stopped);
   await fixtureGit(f.project, ["update-ref", "refs/codex/turn-diffs/checkpoints/new-after-stop", "HEAD"]);
   await f.engine.start({ id: f.stopped.id, revision: f.stopped.revision }, true);
   const refused = await f.engine.wait(f.stopped.id);
@@ -236,7 +236,7 @@ test("a local crash without a reliable checkpoint cannot replay previously start
   const f = await fixture(t, async () => "verified");
   const preview = await f.engine.preview(localInput(f.project, 'await agent("Verify"); throw new Error("Stop");'));
   await f.engine.start({ id: preview.id, revision: preview.revision }); const failed = await f.engine.wait(preview.id);
-  delete failed.workspaceCheckpoint; await f.store.save(failed);
+  delete failed.workspaceCheckpoint; delete failed.nodeCheckpoint; delete failed.checkpointState; await f.store.save(failed);
   await f.engine.start({ id: failed.id, revision: failed.revision }, true); const refused = await f.engine.wait(failed.id);
   assert.equal(refused.execution, "failed"); assert.match(refused.error!, /without a reliable checkpoint/); assert.equal(f.calls.length, 1);
   assert.equal(refused.failureContext?.recovery, "new-preview");

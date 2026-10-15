@@ -214,6 +214,18 @@ export interface LocalWorkspaceCheckpoints {
   current: string; legacy?: string; legacyWithoutHostCheckpoints: string;
   filesDigest: string; gitDigest: string | null;
 }
+// Read-only workflows need the same bounded file/Git evidence without creating
+// a writable workspace or a baseline directory in the user's project.
+export async function readOnlyProjectCheckpoint(project: string, signal?: AbortSignal): Promise<string> {
+  const root = await directory(await realpath(project)), identity = await lstat(root);
+  const isGit = await gitRoot(root);
+  const before = isGit ? await readOnlyGitContextDigest(root, { ignoreHostCheckpoints: true }) : null;
+  const captured = await scan(root, true, checkpointLimit, signal);
+  const after = isGit ? await readOnlyGitContextDigest(root, { ignoreHostCheckpoints: true }) : null;
+  const current = await lstat(root);
+  if (before !== after || !current.isDirectory() || current.isSymbolicLink() || identity.dev !== current.dev || identity.ino !== current.ino || await realpath(project) !== root) throw new Error("Read-only project changed while capturing its node checkpoint");
+  return `readonly-v1:${hash({ rootIdentity: { dev: identity.dev, ino: identity.ino }, files: captured.records, git: after })}`;
+}
 export async function captureLocalWorkspaceCheckpoints(workspace: Workspace, signal?: AbortSignal): Promise<LocalWorkspaceCheckpoints> {
   signal?.throwIfAborted();
   await validate(workspace); await baseline(workspace);

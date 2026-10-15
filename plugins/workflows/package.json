@@ -1,6 +1,6 @@
 {
   "name": "@codex-plugin/workflows",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -12,6 +12,7 @@
     "smoke": "node scripts/smoke.mjs && node --experimental-strip-types --test tests/*.test.ts",
     "smoke:host": "node scripts/host-loader-smoke.mjs",
     "smoke:real": "node --experimental-strip-types scripts/real-smoke.ts --real-workers",
+    "smoke:checkpoint": "node --experimental-strip-types scripts/checkpoint-real-smoke.ts --real-workers",
     "prototype": "node prototypes/serve.mjs"
   },
   "dependencies": {

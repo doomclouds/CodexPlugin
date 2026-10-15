@@ -138,3 +138,27 @@ test("new plan preflight reserves transport room without changing or executing t
   cyclic.args.self = cyclic.args;
   assert.throws(() => assertControlPlaneTransportable(cyclic), /CONTROL_PLANE_NOT_SERIALIZABLE/);
 });
+
+test("checkpoint references and state remain exact while checkpoint diagnostics use a bounded preview", () => {
+  const run = fixture();
+  run.nodeCheckpoint = { id: "cp_" + "a".repeat(24), sequence: 23, createdAt: "2026-10-15T00:00:00.000Z", digest: "b".repeat(64), reason: "node", completedTasks: 7 };
+  run.checkpointState = { status: "failed", error: "检查点错误😀".repeat(100000) };
+  const original = JSON.stringify(run);
+  const projected = projectRunForTransport(run);
+  assert.deepEqual(projected.nodeCheckpoint, run.nodeCheckpoint);
+  const state = projected.checkpointState as Record<string, unknown>;
+  assert.equal(state.status, "failed"); assert.ok(Buffer.byteLength(state.error as string) <= 4 * KiB);
+  assert.ok(!(state.error as string).includes("\ufffd")); assert.ok(run.checkpointState.error!.startsWith(state.error as string));
+  assert.ok((projected.transportProjection as { fields: string[] }).fields.includes("checkpointState.error"));
+  assert.equal(JSON.stringify(run), original);
+  assertControlPlaneTransportable(run as unknown as Record<string, unknown>);
+});
+
+test("oversized checkpoint identity fails control transport instead of dropping integrity metadata", () => {
+  const run = fixture();
+  run.nodeCheckpoint = { id: "cp_" + "x".repeat(3 * 1024 * KiB), sequence: 1, createdAt: "2026-10-15T00:00:00.000Z", digest: "b".repeat(64), reason: "node", completedTasks: 0 };
+  const original = JSON.stringify(run);
+  assert.throws(() => assertControlPlaneTransportable(run as unknown as Record<string, unknown>), /CONTROL_PLANE_TOO_LARGE/);
+  assert.throws(() => projectRunForTransport(run), /CONTROL_PLANE_TOO_LARGE/);
+  assert.equal(JSON.stringify(run), original);
+});

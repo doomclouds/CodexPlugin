@@ -39,7 +39,7 @@ try {
     "workflow_get_capabilities", "workflow_get_template", "workflow_list_templates", "workflow_open_panel",
     "workflow_get_execution_settings", "workflow_update_execution_settings",
     "workflow_get_projects",
-    "workflow_get_node_process", "workflow_preview_deletion", "workflow_delete",
+    "workflow_get_node_process", "workflow_preview_recovery", "workflow_get_checkpoints", "workflow_get_task_history", "workflow_preview_deletion", "workflow_delete",
     "workflow_save_template", "workflow_preview", "workflow_update", "workflow_list_runs", "workflow_get_run", "workflow_stop", "workflow_panel_lease", "workflow_start", "workflow_resume", "workflow_cancel_task", "workflow_apply",
   ].sort());
   const panelTool = tools.find(tool => tool.name === "workflow_open_panel");

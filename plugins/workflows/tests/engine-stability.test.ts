@@ -225,6 +225,8 @@ test("legacy snapshots with already started workers require a new preview before
   await engine.start({ id: run.id, revision: run.revision });
   const first = await engine.wait(run.id);
   delete first.workspaceCheckpoint;
+  delete first.nodeCheckpoint;
+  delete first.checkpointState;
   await engine.store.save(first);
   await engine.start({ id: run.id, revision: first.revision }, true);
   const resumed = await engine.wait(run.id);
@@ -392,7 +394,10 @@ for (const redirection of ["gitdir-file", "external-common-dir", "external-alter
     assert.equal(first.tasks[0]?.status, "completed");
     assert.equal(first.execution, "failed");
     assert.match(first.error ?? "", /checkpoint.*snapshot.*(independent|alternate|redirect)/i);
-    assert.equal(first.workspaceCheckpoint, undefined);
+    assert.match(first.workspaceCheckpoint ?? "", /^snapshot-v1:/);
+    assert.equal(first.nodeCheckpoint?.completedTasks, 0, "The previous good checkpoint must survive a failed node commit.");
+    assert.equal(first.checkpointState?.status, "failed");
+    assert.equal(first.failureContext?.kind, "checkpoint");
     assert.equal((await exec("git", ["rev-parse", "HEAD"], { cwd: project })).stdout, originalHead);
     assert.equal(await readFile(path.join(project, "source.txt"), "utf8"), "original\n");
   });

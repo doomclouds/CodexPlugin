@@ -62,7 +62,7 @@ test("default SDK stdio reads large saved runs and artifact/list pages from an i
     const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(packageRoot, "runtime/index.js")], cwd: root, env, stderr: "pipe" });
     transport.stderr?.on("data", () => {});
     await client.connect(transport);
-    assert.equal((await client.listTools()).tools.length, 21);
+    assert.equal((await client.listTools()).tools.length, 24);
     const original = originals[0]!.run;
     let maximumWireBytes = 0;
     const call = async (name: string, args: Record<string, unknown> = {}) => {

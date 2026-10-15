@@ -155,7 +155,7 @@ async function variant(name, mutation) {
     assert.equal(server.runtimeStatus, "connected", server.toolsError ?? "Native plugin MCP did not connect");
     assert.equal(server.toolsError, null);
     const tools = Object.values(server.tools);
-    assert.equal(tools.length, 21);
+    assert.equal(tools.length, 24);
     const entrypoint = tools.find(tool => tool.name === "workflow_open_panel");
     assert.ok(entrypoint, "Actual host discovers the Workflows entrypoint tool");
     assert.deepEqual(entrypoint._meta["openai/ui"].entrypoints, [{ type: "thread" }]);

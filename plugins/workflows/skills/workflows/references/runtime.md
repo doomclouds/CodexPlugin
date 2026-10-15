@@ -17,10 +17,13 @@
 | `workflow_preview` | `projectPath`、`script`；可选输入、执行范围、`approvalMode`、`sourceDefinition: { id, revision }`；服务端校验来源版本与实际脚本，返回未执行的 `run` |
 | `workflow_update` | `id`、当前 `revision`、`script`、`args`；可选执行范围及 `approvalMode`；已有工作区时不能改变文件、网络和 MCP 范围 |
 | `workflow_start` | `id`、当前 `revision`；使用预览已保存的审批方式，不接受模式覆盖；已授权聊天调用不传 `leaseId`，面板调用传活跃租约 |
-| `workflow_resume` | `id`、当前 `revision`；可选 `retryFromTaskId` 显式重跑节点、`approvalMode` 显式选择后续 worker 的审批方式；省略模式保留旧行为；租约规则同启动 |
+| `workflow_preview_recovery` | `id`、当前 `revision`；可选实际 `retryFromTaskId`；只读返回 `preview`，包含 `fingerprint`、`canResume`、复用/重跑/失效任务、阻碍与说明；保留当前文件，不执行 |
+| `workflow_resume` | `id`、当前 `revision`、恢复预览的 `recoveryFingerprint`；可选与预览相同的 `retryFromTaskId`、`approvalMode`；执行锁内再次核对，省略审批模式保留旧行为；租约规则同启动 |
+| `workflow_get_checkpoints` | `id`；可选 `offset`、`limit`（默认 20、最多 100）；返回 `checkpoints`、`total`、可选 `nextOffset`、最近引用 `latest` 与保存 `state`，不回滚文件 |
+| `workflow_get_task_history` | `id`；可选 `offset`、`limit`（默认 20、最多 100）、`taskId` 过滤；返回 `history`、`total`、可选 `nextOffset`；指定 `historyId` 读一条，默认 brief，开发详情显式 `detail: "developer"` |
 | `workflow_list_runs` | 可选 `projectPath`、`offset`、`limit`（默认 100、最多 200）；返回 `listSummary: true`、`totalRuns`、`nextOffset` 和轻量运行摘要，不包含完整控制范围 |
 | `workflow_get_run` | `id`；返回保留完整脚本、输入和授权范围的有界详情；可选 `artifactOffset`、`artifactLimit`（默认 20、最多 200）读取维护产物页 |
-| `workflow_get_node_process` | `id`；以 `taskId`、`phase` 或 `scope: "workflow" | "unphased"` 选择过程，默认 `detail: "brief"`；开发详情显式传 `"developer"` |
+| `workflow_get_node_process` | `id`；以 `taskId`、`phase` 或 `scope: "workflow" | "unphased"` 选择过程，默认 `detail: "brief"`；任务默认显示最新实际 attempt，可附 `attemptId` 选择旧尝试（只允许 taskId 模式）；开发详情显式传 `"developer"` |
 | `workflow_preview_deletion` | `kind: "run" | "definition"`、`id`、当前 `revision`；定义可传额外 `runIds`；返回 `preview`，含实际范围、`fingerprint`、`canDelete`、大小和 `blocked` |
 | `workflow_delete` | 预览的同一目标字段及最新 `fingerprint`；返回 `deletion.deleted`、`partial`、已删对象和 `remaining`，仅在全部清理完成时报告成功 |
 | `workflow_stop` | `id`；停止派发、中断活跃执行，等待退出并保存 |
@@ -50,7 +53,7 @@
 
 审核状态作为节点的简要活动展示；有界脱敏理由保留在 `detail: "developer"` 的日志中，不记录审核动作的原始参数。拒绝、超时或中止立即停止当前 worker，不自动重试或绕过决定；脚本仍按原有任务异常处理执行。现场人工审批与用户输入请求继续拒绝并停止；`never` 模式没有审核器可处理的审批请求。确定性 `operation()` 命令保持禁止审批，不受此设置影响。
 
-例如，用户明确选择自动审核后，可用 `workflow_resume({ id, revision, approvalMode: "auto-review", retryFromTaskId: "task_2" })` 重新执行真实的第二个节点。调用前读取详情并核对旧操作是否已生效；不能用模式更换绕过项目检查点、重放保护或不确定的外部副作用。
+例如，用户明确选择自动审核后，先用 `workflow_preview_recovery({ id, revision, retryFromTaskId: "task_2" })` 检查，再用 `workflow_resume({ id, revision, approvalMode: "auto-review", retryFromTaskId: "task_2", recoveryFingerprint: preview.fingerprint })` 重新执行真实的第二个节点。调用前读取详情并核对旧操作是否已生效；不能用模式更换绕过项目检查点、重放保护或不确定的外部副作用。
 
 ## 准备与节点过程
 
@@ -70,7 +73,7 @@ macOS 桌面项目接口通过宿主动态环境提供。启动器优先选宿�
 
 返回的 `preview.target` 是规范化目标，`runs`、`definition`、`objects`、`totalFiles`、`totalBytes` 说明实际清理范围；`blocked` 说明执行、准备、应用、引用或文件归属等阻碍。`canDelete: true` 后，用同一目标的 `kind`、`id`、`revision`、可选 `runIds` 及 `fingerprint` 调用 `workflow_delete`。范围或文件发生变化时重新预览，不手工绕过阻碍。
 
-完整清理覆盖该范围的定义、运行、日志、结果、隔离工作区、缓存、事务、控制文件及删除元数据，不留下永久墓碑或隐藏运行目录。已交付到原项目的文件与提交、用户全局设置和其他工作流不属于删除范围。原项目的快照临时文件只按自有事务记录、文件身份和摘要核验后删除；旧文件归属不明时阻止删除。
+完整清理覆盖该范围的定义、运行、日志、结果、节点检查点、退休任务历史、隔离工作区、缓存、事务、控制文件及删除元数据，不留下永久墓碑或隐藏运行目录。已交付到原项目的文件与提交、用户全局设置和其他工作流不属于删除范围。原项目的快照临时文件只按自有事务记录、文件身份和摘要核验后删除；旧文件归属不明时阻止删除。
 
 `deletion.deleted: true` 表示全部清理完成。`partial: true` 或非空 `remaining` 需要报告实际剩余对象；相关记录只保留用于重试的只读摘要和 `deletionTarget`，禁止启动、恢复、更新和应用。按摘要中的原目标重新预览，取得新指纹后继续清理；全部完成后摘要和删除元数据也删除。删除不承诺回滚原项目已接受的改动。
 
@@ -163,9 +166,20 @@ const maintenance = {
 
 ## 停止、恢复与应用
 
-`workflow_resume({ id, revision, retryFromTaskId: "task_2" })` 显式重新执行该实际节点并使后续结果失效，保留前面的有效结果、原执行范围、模型快照与尝试历史；不自动识别任意业务字段为任务失败。目标必须存在，且运行已停止或失败。后续已有非幂等命令开始时拒绝重复，不绕过未知结果保护。原项目或快照变更仍须通过恢复检查，重试参数不放宽范围或检查点校验。
+检查点在首次执行前、稳定节点结束后和整轮收尾时提交。`nodeCheckpoint` 是最近已提交清单的引用，包含身份、顺序、时间、摘要、保存原因和完成任务数；`checkpointState.status` 为 `saving | dirty | ready | failed`。清单与任务历史是运行自有文件，不内嵌为无限增长的主运行列表；参考列表按返回的真实 `nextOffset` 翻页。
 
-`failureContext.kind: "review"` 是任务完成后的审查失败；面板单独显示“改动审查”失败卡，已成功任务保留完成。全部任务为 `completed` 时，按已有授权重试使用 `workflow_resume({ id, revision })`，不追加 `retryFromTaskId`，以普通有效缓存回放重新生成审查。仍有失败或中断任务时，面板保留普通“继续”，恢复可能重新执行这些任务，不能承诺只重建审查。脚本业务结果失败和明确要求重新执行 worker 的情形仍使用节点重试，不混为同一动作。
+`workflow_preview_recovery({ id, revision, retryFromTaskId? })` 不执行或改变记录，返回 `preview`。其 `strategy: "preserve-files"`、`currentFilesPreserved: true`、`externalEffectsReverted: false` 明确表示保留当前文件；`reusedTaskIds`、`rerunTaskIds`、`invalidatedTaskIds` 是实际任务身份，`blockers`、`warnings` 说明不能恢复或须核对的事实。`canResume: false` 时不执行。确认同一目标后，`workflow_resume` 传 `recoveryFingerprint: preview.fingerprint`；后台获取执行锁并重算，指纹或版本变化时零派发拒绝。旧调用省略该字段仍保留原恢复校验，但新操作应使用预览与指纹。
+
+恢复从头重放确定性脚本，只复用通过输入、结果和文件状态校验的任务，不恢复模型会话或脚本内存，也不撤销旧文件。并行区间只在所有实际 worker 结束后的稳定边界保存。写入工作区漂移时要求新预览；只读项目变化时全部重新读取，不能复用旧结果。检查点或计划无法核验且返回 `failureContext.recovery: "new-preview"` 时按相同范围创建独立预览，旧运行和当前文件保留。
+
+节点过程 `taskId` 默认选择最后一个真实 attempt，附 `attemptId` 查看旧尝试；`attempts` 是真实尝试摘要，`selectedAttemptId` 是实际选择。活动、状态和错误来自所选尝试，阶段和整个运行仍可聚合。`checkpoint.covered` 仅表示经清单核对的精确 task/attempt 结果已保存，不能凭完成数量或任务 ID 推断。`validationError` 单列当前缓存校验失败，不改写历史完成状态；无 attempt 关联的旧日志带明确前缀，不能视为当前尝试的新日志。
+
+被新分支替换或退休的任务保留在 `workflow_get_task_history`；`historyId` 详情和开发输出是有界视图，归档任务不参与当前执行图或缓存授权。删除预览与执行包括运行自己的检查点、历史及临时文件，保留原项目内容。
+
+
+`workflow_resume({ id, revision, retryFromTaskId: "task_2", recoveryFingerprint: preview.fingerprint })` 显式重新执行该实际节点并使后续结果失效，保留前面的有效结果、原执行范围、模型快照与尝试历史；不自动识别任意业务字段为任务失败。目标必须存在，且运行已停止或失败。后续已有非幂等命令开始时拒绝重复，不绕过未知结果保护。原项目或快照变更仍须通过恢复检查，重试参数不放宽范围或检查点校验。
+
+`failureContext.kind: "review"` 是任务完成后的审查失败；面板单独显示“改动审查”失败卡，已成功任务保留完成。全部任务为 `completed` 时，按已有授权重试先预览，再使用 `workflow_resume({ id, revision, recoveryFingerprint: preview.fingerprint })`，不追加 `retryFromTaskId`，以普通有效缓存回放重新生成审查。仍有失败或中断任务时，面板保留普通“继续”，恢复可能重新执行这些任务，不能承诺只重建审查。脚本业务结果失败和明确要求重新执行 worker 的情形仍使用节点重试，不混为同一动作。
 
 `diff` 保留完整的 `files` 及应用校验 `fingerprint`。存储中的 `text` 最多保留 4 MiB 预览，工具读取默认再限制到 256 KiB；默认日志最多传输 128 KiB，维护审查不重复顶层差异文本。`previewTruncated: true` 明确表示文本不完整，`totalBytes` 是完整差异的字节数，`contentSha256` 是完整差异的 SHA-256。面板显示部分预览提示、完整字节数、摘要及完整文件清单。不能把预览摘要当作完整内容或声称已展示全部变更；有界传输不裁切保存的原始记录，应用仍核对完整差异，处理完整清单，而不是只处理预览文本。
 

@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readFile, readdir, readlink, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ProtocolSession } from "./adapter.ts";
-import { cloneInitializedSubmodules, flattenGitArtifacts, gitCommand, gitCommandPreview, inspectGitManifest, listGitlinks, type GitManifest } from "./submodules.ts";
+import { cloneInitializedSubmodules, flattenGitArtifacts, gitCommand, gitCommandPreview, inspectGitManifest, listGitlinks, readOnlyGitContextDigest, type GitManifest } from "./submodules.ts";
 import type { ActivationResult, Diff, MaintenanceArtifact, MaintenancePlan, MaintenanceReview, Workspace, WorkspaceMode } from "./types.ts";
 import { normalizeProtectedPaths } from "./protected-paths.ts";
 
@@ -207,12 +207,18 @@ async function ignoredArtifacts(workspace: Workspace) {
 }
 export async function maintenanceFingerprint(workspace: Workspace): Promise<string> {
   await ownGit(workspace);
-  if ((await listGitlinks(workspace.root)).length) return fingerprint(await inspectGitManifest(workspace.root, { includeIgnored: true, enforceOwnedMetadata: true }));
-  const source = await records(workspace, ["ls-files", "-co", "--exclude-standard", "-z"]);
-  const artifacts = await ignoredArtifacts(workspace);
-  // Hash local settings without publishing remote URLs or other configuration values.
-  const config = await git(workspace.root, ["config", "--local", "--null", "--list"]);
-  return fingerprint({ head: await head(workspace.root), status: await git(workspace.root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]), source, artifacts, config });
+  const before = await readOnlyGitContextDigest(workspace.root, { ignoreHostCheckpoints: true });
+  let state: Record<string, unknown>;
+  if ((await listGitlinks(workspace.root)).length) state = { manifest: await inspectGitManifest(workspace.root, { includeIgnored: true, enforceOwnedMetadata: true }) };
+  else {
+    const source = await records(workspace, ["ls-files", "-co", "--exclude-standard", "-z"]);
+    const artifacts = await ignoredArtifacts(workspace);
+    const status = await git(workspace.root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+    state = { status, source, artifacts };
+  }
+  const after = await readOnlyGitContextDigest(workspace.root, { ignoreHostCheckpoints: true });
+  if (before !== after) throw new Error("Maintenance Git state changed during checkpoint hashing");
+  return fingerprint({ git: after, ...state });
 }
 export async function reviewMaintenance(workspace: Workspace, plan: MaintenancePlan): Promise<MaintenanceReview> {
   await ownGit(workspace);

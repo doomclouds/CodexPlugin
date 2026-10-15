@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "workflows",
-  "version": "0.7.0",
-  "description": "Tool-driven dynamic workflows with native Codex execution, scoped MCP tools, replay recovery, and reviewed isolated changes.",
+  "version": "0.8.0",
+  "description": "Tool-driven dynamic workflows with native Codex execution, scoped MCP tools, durable node checkpoints, recovery previews, and reviewed changes.",
   "license": "MIT",
   "extensions": {
     "com.openai": {
@@ -12,7 +12,7 @@
         "logoDark": "./assets/workflows-icon.png",
         "composerIcon": "./assets/workflows-icon.png",
         "shortDescription": "动态编排、停止恢复与改动审查",
-        "longDescription": "Agent 创建和执行动态工作流，使用原生 Codex 工具与已授权 MCP，支持持久化恢复、独立 Git 工作区及改动审查。",
+        "longDescription": "Agent 创建和执行动态工作流，使用原生 Codex 工具与已授权 MCP，支持节点检查点、恢复预览、历史尝试、本地修改与隔离改动审查。",
         "category": "Productivity",
         "capabilities": [
           "Read",

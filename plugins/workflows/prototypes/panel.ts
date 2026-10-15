@@ -152,6 +152,13 @@ export interface TemplateDefinition extends TemplateSummary {
 export type PanelTab = "overview" | "tasks" | "diff" | "logs";
 export type UserAction = "start" | "resume" | "stop" | "apply" | "cancel";
 export interface WorkflowInput { sourceDefinition?: { id: string; revision?: number }; projectPath: string; script: string; args: unknown; allowWrite: boolean; networkAccess?: boolean; allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>; workspaceMode?: WorkspaceMode; approvalMode?: ApprovalMode; maintenance?: MaintenancePlan; nodeSettings?: NodeSettings; limits?: WorkflowRun["limits"] }
+export interface CheckpointRef { id: string; sequence: number; createdAt: string; reason: string; completedTasks: number }
+export interface RecoveryPreview {
+  id: string; revision: number; fingerprint: string; canResume: boolean; strategy: "preserve-files";
+  checkpoint?: CheckpointRef; reusedTaskIds: string[]; rerunTaskIds: string[]; invalidatedTaskIds: string[];
+  blockers: Array<{ code: string; message: string }>; warnings: string[];
+  currentFilesPreserved: true; externalEffectsReverted: false;
+}
 export interface PanelState {
   connection: "offline" | "connecting" | "connected" | "degraded" | "closed";
   reconnecting: boolean;
@@ -160,6 +167,9 @@ export interface PanelState {
   runTotal?: number;
   runNextOffset?: number | undefined;
   historyBusy?: boolean;
+  recoveryPreview?: RecoveryPreview | undefined;
+  recoveryBusy?: boolean;
+  recoveryError?: string;
   templates: TemplateSummary[];
   templatesLoaded: boolean;
   selectedTemplate: string | undefined;
@@ -294,8 +304,9 @@ export function canApply(run: WorkflowRun, tab: PanelTab): boolean {
 }
 
 export function requiresNewLocalPreview(run?: WorkflowRun): boolean {
-  if (!run || run.workspaceMode !== "local" || !["stopped", "failed"].includes(run.execution)) return false;
+  if (!run || !["stopped", "failed"].includes(run.execution)) return false;
   if (run.failureContext?.recovery === "new-preview") return true;
+  if (run.workspaceMode !== "local") return false;
   // Older records did not persist a structured recovery hint.
   return run.error === "Local project or build artifacts changed since the last checkpoint. Create a new preview; cached results cannot safely replay."
     || run.error === "Local project has previously started workers without a reliable checkpoint. Inspect existing edits and create a new preview before continuing.";
@@ -365,6 +376,8 @@ export class WorkflowPanelController {
   private acceptedProjection = new Map<string, string>();
   private unresolvedDetails = new Set<string>();
   private latestSummaries = new Map<string, WorkflowRunSummary>();
+  private recoveryRequest = 0;
+  private recoveryContext: { id: string; revision: number; projectPath: string; taskId?: string; approvalMode?: ApprovalMode } | undefined;
 
   constructor(callTool: ToolCaller, changed: () => void = () => {}, every = (callback: () => void, milliseconds: number): (() => void) => {
     const timer = setInterval(callback, milliseconds);
@@ -385,6 +398,15 @@ export class WorkflowPanelController {
   get canSelectWorkflow(): boolean {
     const run = this.stopTarget;
     return this.projectBound && this.state.connection === "connected" && !this.state.reconnecting && !this.initializing && !this.state.busy && !this.state.detailsBusy && !this.closing && !["preparing", "running", "stopping"].includes(run?.execution ?? "") && run?.application !== "applying";
+  }
+  get recoveryValid(): boolean {
+    const context = this.recoveryContext, run = this.selected, preview = this.state.recoveryPreview;
+    return !!context && !!preview && this.canAct && !this.state.recoveryBusy && run?.id === context.id && run.revision === context.revision && this.state.projectPath === context.projectPath && ["stopped", "failed"].includes(run.execution) && !run.deletionPending && run.application !== "applying";
+  }
+  cancelRecovery(): void {
+    this.recoveryRequest++; this.recoveryContext = undefined;
+    this.state.recoveryPreview = undefined; this.state.recoveryBusy = false; this.state.recoveryError = "";
+    this.changed();
   }
 
   setProjectPath(projectPath: string): void {
@@ -408,11 +430,12 @@ export class WorkflowPanelController {
       this.state.projectContextSource = project ? "thread" : "global-or-unassigned";
       this.state.projectBindingSource = project ? data.bindingSource : undefined;
       this.state.selectedProjectId = project?.projectId;
+      if (this.state.projectPath !== (project?.path ?? "")) this.cancelRecovery();
       this.state.projectPath = project?.path ?? "";
       if (!project) { this.state.runs = []; this.state.selectedRun = undefined; this.state.projectsError = data.reason ? `无法确认所属项目：${data.reason}` : data.available ? "工作流仅在项目聊天中使用，请从项目内打开。" : "暂时无法确认所属项目：宿主项目接口不可用。请从项目聊天打开并刷新。"; return; }
       this.state.runs = this.state.runs.filter(run => run.projectPath === project.path);
       if (!this.state.runs.some(run => run.id === this.state.selectedRun)) this.state.selectedRun = undefined;
-    } catch (error) { if (!this.closing && request === this.projectsRequest) { this.state.currentProjectId = undefined; this.state.selectedProjectId = undefined; this.state.projectContextSource = "global-or-unassigned"; this.state.projectBindingSource = undefined; this.state.projectPath = ""; this.state.projectsError = `暂时无法确认所属项目：${errorMessage(error)}。请从项目聊天打开并刷新。`; } }
+    } catch (error) { if (!this.closing && request === this.projectsRequest) { this.cancelRecovery(); this.state.currentProjectId = undefined; this.state.selectedProjectId = undefined; this.state.projectContextSource = "global-or-unassigned"; this.state.projectBindingSource = undefined; this.state.projectPath = ""; this.state.projectsError = `暂时无法确认所属项目：${errorMessage(error)}。请从项目聊天打开并刷新。`; } }
     finally { if (request === this.projectsRequest) this.state.projectsBusy = false; this.changed(); }
   }
 
@@ -426,9 +449,10 @@ export class WorkflowPanelController {
     if (!this.currentProject || run.projectPath !== this.currentProject.path) throw new Error("此工作流属于其他项目，请从所属项目的聊天打开。");
   }
 
-  connecting(): void { this.state.connection = "connecting"; this.changed(); }
+  connecting(): void { this.cancelRecovery(); this.state.connection = "connecting"; this.changed(); }
   disconnected(error: unknown): void {
     if (this.closing) return;
+    this.cancelRecovery();
     this.state.connection = "degraded";
     this.startPolling();
     this.reconnectFailures++;
@@ -440,6 +464,7 @@ export class WorkflowPanelController {
 
   async connected(): Promise<void> {
     if (this.closing) return;
+    this.cancelRecovery();
     this.initializing = true;
     this.state.connection = "connecting";
     this.changed();
@@ -461,6 +486,7 @@ export class WorkflowPanelController {
 
   async reconnect(): Promise<void> {
     if (this.closing) return;
+    this.cancelRecovery();
     this.reconnectFailures = 0;
     this.reconnectAfter = 0;
     await this.heartbeat(true);
@@ -560,6 +586,7 @@ export class WorkflowPanelController {
   private synchronizeConnection(): Promise<void> {
     if (this.closing) return Promise.resolve();
     if (this.synchronizationAttempt) return this.synchronizationAttempt;
+    this.cancelRecovery();
     this.state.reconnecting = true;
     this.changed();
     const synchronize = async () => {
@@ -726,6 +753,7 @@ export class WorkflowPanelController {
 
   selectTemplate(id: string | undefined): void {
     if (this.selected && ["preparing", "running", "stopping"].includes(this.selected.execution)) return;
+    this.cancelRecovery();
     this.definitionSelected = true;
     this.templateRequest++;
     this.state.selectedTemplate = id;
@@ -764,6 +792,7 @@ export class WorkflowPanelController {
 
   async select(id: string): Promise<void> {
     if (!this.projectBound || !this.state.runs.some(run => run.id === id && run.projectPath === this.state.projectPath)) return;
+    this.cancelRecovery();
     this.definitionSelected = false;
     this.templateRequest++;
     this.state.selectedTemplate = undefined;
@@ -841,19 +870,23 @@ export class WorkflowPanelController {
     finally { this.state.busy = false; this.changed(); }
   }
 
-  async startWithInput(input: WorkflowInput): Promise<void> {
+  async startWithInput(input: WorkflowInput, beforeRecoveryPreview?: () => void): Promise<void> {
     if (!this.canAct) return;
     const current = this.selected;
     if (current?.deletionPending) { this.state.error = "清理未完成，请先重试删除。"; this.changed(); return; }
     if (current && current.projectPath !== input.projectPath) { this.state.error = "已有运行所属项目固定；请从工作流库在目标项目中新建运行。"; this.changed(); return; }
     if (current && ["preparing", "running", "stopping"].includes(current.execution)) return;
-    if (requiresNewLocalPreview(current)) { this.state.error = "本地检查点无法继续复用。请点击“重新检查”创建新预览，再手动启动。"; this.changed(); return; }
+    if (requiresNewLocalPreview(current)) { this.state.error = "当前检查点无法继续复用。请点击“重新检查”创建新预览，再手动启动。"; this.changed(); return; }
     const scope = (value: WorkflowInput | WorkflowRun) => ({ projectPath: value.projectPath, script: value.script, args: value.args, sourceDefinition: value.sourceDefinition, allowWrite: value.allowWrite, networkAccess: value.networkAccess ?? false, allowedMcpServers: value.allowedMcpServers ?? [], allowedMcpTools: value.allowedMcpTools ?? {}, workspaceMode: value.workspaceMode ?? "snapshot", maintenance: value.maintenance, nodeSettings: value.nodeSettings ?? {} });
     const sameLimits = !current || !input.limits || Object.entries(input.limits).every(([key, value]) => current.limits[key as keyof WorkflowRun["limits"]] === value);
     if (current && sameLimits && JSON.stringify(scope(current)) === JSON.stringify(scope(input))) {
       if (current.execution === "draft" && (input.approvalMode === undefined || input.approvalMode === (current.approvalMode ?? "never"))) { await this.perform("start", true); return; }
       if (resultCheckFailure(current)) { this.state.error = "结果检查未通过。请查看失败原因，明确选择需要重新执行的节点。"; this.changed(); return; }
-      if (["stopped", "failed"].includes(current.execution)) { await this.perform("resume", true, undefined, input.approvalMode); return; }
+      if (["stopped", "failed"].includes(current.execution)) {
+        if (beforeRecoveryPreview) { beforeRecoveryPreview(); await this.prepareRecovery(undefined, input.approvalMode); }
+        else await this.perform("resume", true, undefined, input.approvalMode);
+        return;
+      }
     }
     const sameNodes = !current || JSON.stringify(current.nodeSettings ?? {}) === JSON.stringify(input.nodeSettings ?? {});
     const saved = await this.save(input, current?.execution === "draft" && current.projectPath === input.projectPath && sameLimits && (sameNodes || !current.workspacePath) ? { id: current.id, revision: current.revision } : undefined);
@@ -865,7 +898,7 @@ export class WorkflowPanelController {
     if (!this.canAct || !current || !requiresNewLocalPreview(current) || current.deletionPending || current.application === "applying") return undefined;
     const input = structuredClone({
       projectPath: current.projectPath, script: current.script, args: current.args, allowWrite: current.allowWrite,
-      workspaceMode: "local" as const, approvalMode: approvalMode ?? current.approvalMode ?? "never", networkAccess: current.networkAccess ?? false,
+      workspaceMode: current.workspaceMode ?? "snapshot", approvalMode: approvalMode ?? current.approvalMode ?? "never", networkAccess: current.networkAccess ?? false,
       allowedMcpServers: current.allowedMcpServers ?? [], allowedMcpTools: current.allowedMcpTools ?? {},
       nodeSettings: current.nodeSettings ?? {}, limits: current.limits,
       ...(current.maintenance ? { maintenance: current.maintenance } : {}),
@@ -879,13 +912,43 @@ export class WorkflowPanelController {
     return saved;
   }
 
+  async prepareRecovery(taskId?: string, approvalMode?: ApprovalMode): Promise<RecoveryPreview | undefined> {
+    const run = this.selected;
+    if (!this.canAct || !run || !["stopped", "failed"].includes(run.execution) || run.deletionPending || run.application === "applying" || taskId && !run.tasks.some(task => task.id === taskId)) return undefined;
+    if (approvalMode !== undefined && !["auto-review", "never"].includes(approvalMode)) { this.state.recoveryError = "不支持的审批模式。"; this.changed(); return undefined; }
+    const request = ++this.recoveryRequest;
+    const context = { id: run.id, revision: run.revision, projectPath: run.projectPath, ...(taskId ? { taskId } : {}), ...(approvalMode !== undefined ? { approvalMode } : {}) };
+    this.recoveryContext = undefined; this.state.recoveryPreview = undefined; this.state.recoveryBusy = true; this.state.recoveryError = ""; this.changed();
+    try {
+      const preview = recoveryPreviewPayload(await this.request("workflow_preview_recovery", { id: run.id, revision: run.revision, ...(taskId ? { retryFromTaskId: taskId } : {}) }));
+      if (request !== this.recoveryRequest || this.closing || this.selected?.id !== context.id || this.selected.revision !== context.revision || this.state.projectPath !== context.projectPath || this.state.connection !== "connected" || this.state.reconnecting) return undefined;
+      if (preview.id !== context.id || preview.revision !== context.revision) throw new Error("恢复预览与当前运行版本不一致，请刷新后重新预览。");
+      this.recoveryContext = context; this.state.recoveryPreview = preview;
+      return preview;
+    } catch (error) { if (request === this.recoveryRequest) this.state.recoveryError = actionError("读取恢复预览失败", error); return undefined; }
+    finally { if (request === this.recoveryRequest) this.state.recoveryBusy = false; this.changed(); }
+  }
+
+  async confirmRecovery(): Promise<void> {
+    const preview = this.state.recoveryPreview, context = this.recoveryContext;
+    if (!this.recoveryValid || !preview?.canResume || !context) { this.state.recoveryError = "恢复预览已失效或仍有阻碍，请重新检查后再确认。"; this.changed(); return; }
+    if (!this.leaseId) { this.state.recoveryError = "面板租约尚未建立，请重新打开面板。"; this.changed(); return; }
+    const args = { id: context.id, revision: context.revision, leaseId: this.leaseId, recoveryFingerprint: preview.fingerprint, ...(context.taskId ? { retryFromTaskId: context.taskId } : {}), ...(context.approvalMode !== undefined ? { approvalMode: context.approvalMode } : {}) };
+    this.cancelRecovery(); this.ownedRuns.add(context.id); this.state.busy = true; this.state.error = ""; this.changed();
+    try {
+      const updated = await this.mutationRun(await this.request("workflow_resume", args));
+      if (updated) this.replace(updated);
+    } catch (error) { this.state.error = actionError("恢复失败", error, "resume"); }
+    finally { this.state.busy = false; this.changed(); }
+  }
+
   async perform(action: UserAction, _userGesture = false, taskId?: string, approvalMode?: ApprovalMode): Promise<void> {
     const detail = this.selected, run = action === "stop" ? this.stopTarget : detail;
     const allowed = action === "stop" ? this.projectBound && this.state.connection === "connected" && !this.state.reconnecting && !this.state.busy && !this.closing : this.canAct;
     if (!run || !allowed || run.deletionPending) return;
     if (action === "start" && run.execution !== "draft") return;
     if (action === "resume" && !["stopped", "failed"].includes(run.execution)) return;
-    if (action === "resume" && requiresNewLocalPreview(detail)) { this.state.error = "本地检查点无法继续复用。请点击“重新检查”创建新预览，再手动启动。"; this.changed(); return; }
+    if (action === "resume" && requiresNewLocalPreview(detail)) { this.state.error = "当前检查点无法继续复用。请点击“重新检查”创建新预览，再手动启动。"; this.changed(); return; }
     if (action === "stop" && !["preparing", "running"].includes(run.execution)) return;
     if (action === "apply" && (!detail || !canApply(detail, this.state.tab))) return;
     if (action === "cancel" && (!detail || run.execution !== "running" || !taskId || !detail.tasks.some(task => task.id === taskId && ["queued", "running"].includes(task.status)))) return;
@@ -1038,10 +1101,13 @@ export function renderWorkflowDiff(run: WorkflowRun, artifactPage?: unknown): st
 
 export interface NodeProcess {
   id: string; taskId?: string; phase?: string; scope?: "workflow" | "unphased"; label: string; status: string;
-  currentActivity?: WorkflowActivity; activities: WorkflowActivity[]; summary: string; error?: string;
+  currentActivity?: WorkflowActivity; activities: WorkflowActivity[]; summary: string; error?: string; validationError?: string;
   logs?: Array<{ at: string; level: string; message: string; taskId?: string }>;
+  attempts?: Array<{ id: string; status: string; startedAt?: string; endedAt?: string; recoveryAttempts?: number }>;
+  selectedAttemptId?: string;
+  checkpoint?: { state: string; latest?: CheckpointRef; covered: boolean };
 }
-export interface NodeProcessTarget { id: string; taskId?: string; phase?: string; scope?: "workflow" | "unphased" }
+export interface NodeProcessTarget { id: string; taskId?: string; attemptId?: string; phase?: string; scope?: "workflow" | "unphased" }
 export type NodeProcessDetail = "brief" | "developer";
 
 // Keep one transport request alive while newer progress merely queues a refresh.
@@ -1121,7 +1187,20 @@ export function renderDeletionPreview(preview: DeletionPreview): string {
 export function renderNodeProcess(process: NodeProcess, now = Date.now()): string {
   const state = taskLabels[process.status] ?? executionLabels[process.status] ?? "等待中";
   const entries = process.activities.map(activity => `<li data-status="${escapeHtml(activity.status)}"><span class="wf-icon${activity.status === "running" ? " is-spinning" : ""}" data-icon="${activity.status === "running" ? "loader-2" : activity.status === "completed" ? "circle-check" : activity.status === "failed" ? "alert-circle" : "circle"}" aria-hidden="true"></span><span>${escapeHtml(activity.label)}</span><time>${elapsedLabel(activity.startedAt, activity.endedAt, now)}</time></li>`).join("");
-  return `<div class="wf-facts"><span>${escapeHtml(state)}</span>${process.currentActivity ? `<span>${process.status === "running" ? "当前" : "最后活动"}：${escapeHtml(process.currentActivity.label)}</span>` : ""}</div>${process.error ? `<div class="wf-alert" role="alert">${escapeHtml(process.error)}</div>` : ""}${entries ? `<ol class="wf-timeline">${entries}</ol>` : '<p class="wf-muted">此节点尚未报告过程活动。</p>'}${process.summary ? `<div class="wf-process-result">${escapeHtml(process.summary)}</div>` : ""}`;
+  const checkpoint = process.checkpoint ? `<p class="wf-muted">${process.checkpoint.covered ? "本次结果已包含在已保存进度中。" : process.checkpoint.state === "saving" ? "正在保存执行进度…" : "本次结果尚未包含在已保存进度中。"}${process.checkpoint.latest ? ` 最近保存：${escapeHtml(new Date(process.checkpoint.latest.createdAt).toLocaleString("zh-CN", { hour12: false }))}` : ""}</p>` : "";
+  return `<div class="wf-facts"><span>${escapeHtml(state)}</span>${process.currentActivity ? `<span>${process.status === "running" ? "当前" : "最后活动"}：${escapeHtml(process.currentActivity.label)}</span>` : ""}</div>${checkpoint}${process.error ? `<div class="wf-alert" role="alert">${escapeHtml(process.error)}</div>` : ""}${process.validationError ? `<div class="wf-alert" role="alert">结果校验失败：${escapeHtml(process.validationError)}</div>` : ""}${entries ? `<ol class="wf-timeline">${entries}</ol>` : '<p class="wf-muted">此节点尚未报告过程活动。</p>'}${process.summary ? `<div class="wf-process-result">${escapeHtml(process.summary)}</div>` : ""}`;
+}
+
+export function recoveryPreviewPayload(value: Record<string, unknown>): RecoveryPreview {
+  const preview = value.preview as RecoveryPreview | undefined;
+  if (!preview || typeof preview.id !== "string" || !Number.isSafeInteger(preview.revision) || !/^[a-f0-9]{64}$/.test(preview.fingerprint) || typeof preview.canResume !== "boolean" || preview.strategy !== "preserve-files" || preview.currentFilesPreserved !== true || preview.externalEffectsReverted !== false || !Array.isArray(preview.blockers) || preview.blockers.some(item => !item || typeof item.code !== "string" || typeof item.message !== "string") || !Array.isArray(preview.warnings) || preview.warnings.some(item => typeof item !== "string") || [preview.reusedTaskIds, preview.rerunTaskIds, preview.invalidatedTaskIds].some(ids => !Array.isArray(ids) || ids.length > 1000 || ids.some(id => typeof id !== "string"))) throw new Error("宿主未返回有效的恢复预览。");
+  return preview;
+}
+
+export function renderRecoveryPreview(preview: RecoveryPreview, run?: WorkflowRun): string {
+  const label = (id: string) => run?.tasks.find(task => task.id === id)?.label ?? id;
+  const group = (title: string, ids: string[]) => `<details class="wf-recovery-group"><summary>${title}：${ids.length} 个节点</summary>${ids.length ? `<ul>${ids.map(id => `<li>${escapeHtml(label(id))} <span class="wf-muted">${escapeHtml(id)}</span></li>`).join("")}</ul>` : '<p class="wf-muted">无</p>'}</details>`;
+  return `<p>恢复将保留当前项目文件，从保存的有效结果继续执行。</p><p class="wf-muted">不会恢复旧文件，也不会撤销已经发生的命令、提交或外部操作。</p>${preview.checkpoint ? `<p class="wf-notice">已保存进度：${escapeHtml(new Date(preview.checkpoint.createdAt).toLocaleString("zh-CN", { hour12: false }))} · ${preview.checkpoint.completedTasks} 个完成节点</p>` : '<p class="wf-muted">此运行尚无可用的新格式节点检查点，将按现有恢复校验核对。</p>'}${group("复用有效结果", preview.reusedTaskIds)}${group("重新执行", preview.rerunTaskIds)}${group("失效的旧结果", preview.invalidatedTaskIds)}${preview.warnings.length ? `<div class="wf-notice">${preview.warnings.map(value => escapeHtml(value)).join("<br>")}</div>` : ""}${preview.blockers.length ? `<div class="wf-alert" role="alert">当前不能恢复：${preview.blockers.map(item => escapeHtml(item.message)).join("；")}</div>` : ""}`;
 }
 export function primaryWorkflowAction(run?: WorkflowRun): { action: "start" | "inspect-failure" | "retry-review" | "recheck"; label: string } {
   if (requiresNewLocalPreview(run)) return { action: "recheck", label: "重新检查" };
@@ -1146,6 +1225,8 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   const settingsDialog = element<HTMLDialogElement>("#wf-settings-dialog");
   const nodeDialog = element<HTMLDialogElement>("#wf-node-settings-dialog");
   const processDialog = element<HTMLDialogElement>("#wf-process-dialog");
+  const recoveryDialog = element<HTMLDialogElement>("#wf-recovery-dialog");
+  const attemptSelect = element<HTMLSelectElement>("#wf-attempt-select");
   const historyDialog = element<HTMLDialogElement>("#wf-history-dialog");
   const reviewDialog = element<HTMLDialogElement>("#wf-review-dialog");
   const deleteDialog = element<HTMLDialogElement>("#wf-delete-dialog");
@@ -1163,6 +1244,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   const sourceApprovalMode = (value?: WorkflowRun | TemplateDefinition): ApprovalMode => value?.approvalMode ?? (value && ("execution" in value || value.source === "saved") ? "never" : "auto-review");
   let processTarget: NodeProcessTarget | undefined;
   let processSignature = "", developerRequested = false;
+  let recoveryTaskId: string | undefined;
   let reviewSignature = "";
   let artifactPage: unknown, artifactOwner = "", artifactRequest = 0, artifactLoading = false;
   let deletionPreview: DeletionPreview | undefined, deletionLoading = false, deletionRequest = 0;
@@ -1225,6 +1307,10 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       element("#wf-process-title").textContent = run && failureContext(run)?.kind === "review" && target.scope === "workflow" ? "改动审查失败" : process.label;
       const relatedFailure = run?.execution === "failed" && (target.scope === "workflow" || failure && (failure.afterTaskId && target.taskId === failure.afterTaskId || failure.phase && target.phase === failure.phase));
       element("#wf-process-body").innerHTML = renderNodeProcess(process) + (relatedFailure && run?.error ? fullFailureDetails(run.error) : "");
+      const attempts = process.attempts ?? [];
+      element("#wf-attempt-picker").hidden = !target.taskId || attempts.length < 2;
+      attemptSelect.innerHTML = attempts.map((attempt, index) => `<option value="${escapeHtml(attempt.id)}"${attempt.id === process.selectedAttemptId ? " selected" : ""}>第 ${index + 1} 次 · ${escapeHtml(taskLabels[attempt.status] ?? attempt.status)}${attempt.startedAt ? " · " + escapeHtml(displayTime(attempt.startedAt)) : ""}</option>`).join("");
+      attemptSelect.disabled = !attempts.length;
       if (detail === "developer") element("#wf-process-developer").textContent = process.logs?.map(log => `${displayTime(log.at)} ${log.level} ${log.message}`).join("\n") || "此节点暂无开发日志。";
     }, (target, detail, error) => {
       if (!processDialog.open || JSON.stringify(target) !== JSON.stringify(processTarget)) return;
@@ -1234,6 +1320,11 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (!processTarget || !processDialog.open) return;
     if (retry) element(developer ? "#wf-process-developer" : "#wf-process-body").textContent = developer ? "正在读取开发日志…" : "正在读取简要过程…";
     processReader.request(developer ? "developer" : "brief", processSignature, retry);
+  };
+  const openRecovery = (taskId?: string, trigger?: HTMLElement): void => {
+    recoveryTaskId = taskId;
+    openDialog(recoveryDialog, trigger);
+    void controller.prepareRecovery(taskId, approvalModeValue);
   };
   const loadArtifactPage = async (offset: number): Promise<void> => {
     const run = controller.selected;
@@ -1488,6 +1579,14 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (selectedProcessTask) processSettings.dataset.nodeSettings = `task:${selectedProcessTask.index}`;
     const nextProcess = JSON.stringify([run?.revision, run?.progressSequence, processTarget]);
     if (processDialog.open && nextProcess !== processSignature) { processSignature = nextProcess; fetchProcess(); if (developerRequested && developerLogs.open) fetchProcess(true); }
+    if (recoveryDialog.open) {
+      const preview = state.recoveryPreview;
+      element("#wf-recovery-body").innerHTML = state.recoveryBusy ? '<p class="wf-muted">正在核对当前文件与保存的执行进度…</p>' : preview ? renderRecoveryPreview(preview, run) : '<p class="wf-muted">请重新检查恢复范围，确认后才会执行。</p>';
+      const recoveryError = state.recoveryError || (preview && !controller.recoveryValid ? "运行、项目或连接状态已变化，旧预览已失效，请重新检查。" : "");
+      element("#wf-recovery-error").textContent = recoveryError; element("#wf-recovery-error").hidden = !recoveryError;
+      element<HTMLButtonElement>("#wf-confirm-recovery").disabled = !controller.recoveryValid || !preview?.canResume;
+      element<HTMLButtonElement>("#wf-refresh-recovery").disabled = !controller.canAct || !!state.recoveryBusy;
+    }
     if (state.connection === "closed") for (const dialog of Array.from(root.querySelectorAll<HTMLDialogElement>("dialog[open]"))) dialog.close();
   };
   for (const dialog of Array.from(root.querySelectorAll<HTMLDialogElement>("dialog"))) {
@@ -1497,6 +1596,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
       if (dialog === nodeDialog) { nodeDirty = false; nodeSignature = ""; }
       if (dialog === settingsDialog) { settingsSignature = ""; render(); }
       if (dialog === processDialog) { processTarget = undefined; processReader.close(); developerLogs.open = false; developerRequested = false; element("#wf-process-developer").textContent = ""; }
+      if (dialog === recoveryDialog) { recoveryTaskId = undefined; controller.cancelRecovery(); }
       if (dialog === deleteDialog) { deletionRequest++; deletionPreview = undefined; deletionLoading = false; }
       restoreFocus(dialog);
     });
@@ -1594,7 +1694,19 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
   });
   element("#wf-cancel-task").addEventListener("click", () => { if (processTarget?.taskId) void controller.perform("cancel", true, processTarget.taskId); });
   element("#wf-error-details").addEventListener("click", event => openFailureProcess(event.currentTarget as HTMLElement));
-  element("#wf-retry-task").addEventListener("click", () => { if (processTarget?.taskId) { const taskId = processTarget.taskId; processDialog.close(); void controller.perform("resume", true, taskId, approvalModeValue); } });
+  element("#wf-retry-task").addEventListener("click", () => { if (processTarget?.taskId) { const taskId = processTarget.taskId; processDialog.close(); openRecovery(taskId, element("#wf-actions")); } });
+  element("#wf-refresh-recovery").addEventListener("click", () => { void controller.prepareRecovery(recoveryTaskId, approvalModeValue); });
+  element("#wf-confirm-recovery").addEventListener("click", () => {
+    if (!controller.recoveryValid || !controller.state.recoveryPreview?.canResume) return;
+    // Start the one accepted mutation before closing; closing discards stale previews only.
+    const pending = controller.confirmRecovery(); recoveryDialog.close(); void pending;
+  });
+  attemptSelect.addEventListener("change", () => {
+    if (!processTarget?.taskId || !attemptSelect.value) return;
+    processTarget = { ...processTarget, attemptId: attemptSelect.value };
+    processReader.open(processTarget); processSignature = ""; developerRequested = false; developerLogs.open = false;
+    element("#wf-process-body").textContent = "正在读取此执行尝试…"; render();
+  });
   developerLogs.addEventListener("toggle", () => { if (developerLogs.open) { if (!developerRequested) element("#wf-process-developer").textContent = "正在读取开发日志…"; developerRequested = true; fetchProcess(true); } else processReader.cancel("developer"); });
   nodeModel.addEventListener("change", () => { nodeDirty = true; nodeEffort.innerHTML = effortSelectOptions(controller.state.settings?.models ?? [], nodeModel.value || inheritedChoice().model, nodeEffort.value, "继承上级配置"); nodeNotice = ""; });
   nodeEffort.addEventListener("change", () => { nodeDirty = true; nodeNotice = ""; });
@@ -1654,10 +1766,10 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     if (!action || action.disabled) return;
     if (action.dataset.action === "stop") { void controller.perform("stop", true); return; }
     if (action.dataset.action === "inspect-failure") { openFailureProcess(action); return; }
-    if (action.dataset.action === "retry-review") { void controller.perform("resume", true, undefined, approvalModeValue); return; }
+    if (action.dataset.action === "retry-review") { openRecovery(undefined, action); return; }
     if (action.dataset.action === "recheck") { void controller.recheckFromCurrent(approvalModeValue); return; }
     if (action.dataset.action === "start") {
-      try { const input = readInput(); argsValue = input.args; parameterError.hidden = true; void controller.startWithInput(input); }
+      try { const input = readInput(); argsValue = input.args; parameterError.hidden = true; void controller.startWithInput(input, () => { recoveryTaskId = undefined; openDialog(recoveryDialog, action); }); }
       catch (error) { parameterSnapshot = structuredClone(argsValue); workspaceModeSnapshot = workspaceModeValue; approvalModeSnapshot = approvalModeValue; approvalSnapshotSource = approvalSourceMode; parametersSaved = false; parameterError.textContent = errorMessage(error); parameterError.hidden = false; openDialog(parameterDialog, element("#wf-parameters-toggle")); }
     }
   });

@@ -2,6 +2,7 @@ import type { WorkflowMeta } from "./script.ts";
 import type { EffectiveExecutionSettings, NodeSettings } from "./execution-settings.ts";
 import type { WorkflowFailureContext } from "./failure-context.ts";
 import type { WorkflowStopReason } from "./stop-context.ts";
+import type { CheckpointRef } from "./checkpoint-store.ts";
 
 export type TaskStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stopping";
 export type WorkspaceMode = "snapshot" | "git-worktree" | "local";
@@ -74,7 +75,7 @@ export interface WorkflowRun {
   execution: "draft" | "preparing" | "running" | "stopping" | "stopped" | "completed" | "failed";
   review: "unavailable" | "pending" | "ready";
   application: "none" | "applying" | "applied" | "partial" | "conflict" | "failed";
-  tasks: Task[]; logs: Array<{ at: string; level: "info" | "error"; message: string; taskId?: string }>;
+  tasks: Task[]; logs: Array<{ at: string; level: "info" | "error"; message: string; taskId?: string; attemptId?: string }>;
   workspace?: Workspace; workspacePath?: string; diff?: Diff; result?: unknown; error?: string;
   leaseId?: string; scriptDigest: string; contextDigest?: string;
   networkAccess?: boolean; workspaceMode?: WorkspaceMode;
@@ -84,6 +85,8 @@ export interface WorkflowRun {
   maintenance?: MaintenancePlan; maintenanceReview?: MaintenanceReview;
   activation?: ActivationResult; controlId?: string; workspaceCheckpoint?: string;
   localCheckpointState?: { filesDigest: string; gitDigest: string | null };
+  nodeCheckpoint?: CheckpointRef;
+  checkpointState?: { status: "ready" | "dirty" | "saving" | "failed"; error?: string };
   allowedMcpServers?: string[]; allowedMcpTools?: Record<string, string[]>;
   nodeSettings?: NodeSettings;
   executionSettings?: Partial<EffectiveExecutionSettings>;

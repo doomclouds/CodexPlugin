@@ -175,9 +175,9 @@ function floatSafeRemainder(val, step) {
     return 0;
   return ratio - roundedRatio;
 }
-function defineLazy(object9, key, getter) {
+function defineLazy(object10, key, getter) {
   let value = void 0;
-  Object.defineProperty(object9, key, {
+  Object.defineProperty(object10, key, {
     get() {
       if (value === EVALUATING) {
         return void 0;
@@ -189,7 +189,7 @@ function defineLazy(object9, key, getter) {
       return value;
     },
     set(v2) {
-      Object.defineProperty(object9, key, {
+      Object.defineProperty(object10, key, {
         value: v2
         // configurable: true,
       });
@@ -269,10 +269,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path16) {
-  if (!path16)
+function getElementAtPath(obj, path17) {
+  if (!path17)
     return obj;
-  return path16.reduce((acc, key) => acc?.[key], obj);
+  return path17.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -531,11 +531,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path16, issues) {
+function prefixIssues(path17, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path16);
+    iss.path.unshift(path17);
     return iss;
   });
 }
@@ -674,8 +674,8 @@ function base64urlToUint8Array(base64url3) {
 function uint8ArrayToBase64url(bytes2) {
   return uint8ArrayToBase64(bytes2).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
-function hexToUint8Array(hex3) {
-  const cleanHex = hex3.replace(/^0x/, "");
+function hexToUint8Array(hex4) {
+  const cleanHex = hex4.replace(/^0x/, "");
   if (cleanHex.length % 2 !== 0) {
     throw new Error("Invalid hex string length");
   }
@@ -1068,16 +1068,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path16 = []) => {
+  const processError = (error63, path17 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path16, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path17, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
       } else {
-        const fullpath = [...path16, ...issue2.path];
+        const fullpath = [...path17, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1116,17 +1116,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result2 = { errors: [] };
-  const processError = (error63, path16 = []) => {
+  const processError = (error63, path17 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path16, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path17, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
       } else {
-        const fullpath = [...path16, ...issue2.path];
+        const fullpath = [...path17, ...issue2.path];
         if (fullpath.length === 0) {
           result2.errors.push(mapper(issue2));
           continue;
@@ -1165,8 +1165,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path16 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path16) {
+  const path17 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path17) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -9032,8 +9032,8 @@ var capitalizeFirstCharacter, error33;
 var init_lt = __esm({
   "../../node_modules/zod/v4/locales/lt.js"() {
     init_util();
-    capitalizeFirstCharacter = (text2) => {
-      return text2.charAt(0).toUpperCase() + text2.slice(1);
+    capitalizeFirstCharacter = (text3) => {
+      return text3.charAt(0).toUpperCase() + text3.slice(1);
     };
     error33 = () => {
       const Sizable = {
@@ -15851,8 +15851,8 @@ function foldObjects(members2) {
   }
   const properties = {};
   const required2 = /* @__PURE__ */ new Set();
-  for (const object9 of objects) {
-    for (const key in object9.properties) {
+  for (const object10 of objects) {
+    for (const key in object10.properties) {
       if (Object.prototype.hasOwnProperty.call(properties, key))
         continue;
       const parts = [];
@@ -15866,18 +15866,18 @@ function foldObjects(members2) {
       const merged = parts.length === 1 ? parts[0] : foldObjects(parts) ?? { allOf: parts };
       assignProp(properties, key, merged);
     }
-    for (const key of object9.required ?? [])
+    for (const key of object10.required ?? [])
       required2.add(key);
   }
   const folded = { type: "object", properties };
   if (required2.size)
     folded.required = [...required2];
-  if (objects.every((object9) => object9.additionalProperties === false)) {
+  if (objects.every((object10) => object10.additionalProperties === false)) {
     folded.additionalProperties = false;
   } else {
     const constraints = [];
-    for (const object9 of objects) {
-      const constraint = undeclaredConstraint(object9);
+    for (const object10 of objects) {
+      const constraint = undeclaredConstraint(object10);
       if (constraint && !constraints.some((seen) => JSON.stringify(seen) === JSON.stringify(constraint)))
         constraints.push(constraint);
     }
@@ -19198,13 +19198,13 @@ function resolveRef(ref2, ctx) {
   if (!ref2.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path16 = ref2.slice(1).split("/").filter(Boolean);
-  if (path16.length === 0) {
+  const path17 = ref2.slice(1).split("/").filter(Boolean);
+  if (path17.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path16[0] === defsKey) {
-    const key = path16[1] === void 0 ? void 0 : decodeJSONPointerSegment(path16[1]);
+  if (path17[0] === defsKey) {
+    const key = path17[1] === void 0 ? void 0 : decodeJSONPointerSegment(path17[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref2}`);
     }
@@ -20839,11 +20839,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names2, constants6) {
+      optimizeNames(names2, constants7) {
         if (!names2[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names2, constants6);
+          this.rhs = optimizeExpr(this.rhs, names2, constants7);
         return this;
       }
       get names() {
@@ -20860,10 +20860,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names2, constants6) {
+      optimizeNames(names2, constants7) {
         if (this.lhs instanceof code_1.Name && !names2[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names2, constants6);
+        this.rhs = optimizeExpr(this.rhs, names2, constants7);
         return this;
       }
       get names() {
@@ -20924,8 +20924,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names2, constants6) {
-        this.code = optimizeExpr(this.code, names2, constants6);
+      optimizeNames(names2, constants7) {
+        this.code = optimizeExpr(this.code, names2, constants7);
         return this;
       }
       get names() {
@@ -20933,38 +20933,38 @@ var require_codegen = __commonJS({
       }
     };
     var ParentNode = class extends Node3 {
-      constructor(nodes = []) {
+      constructor(nodes2 = []) {
         super();
-        this.nodes = nodes;
+        this.nodes = nodes2;
       }
       render(opts) {
         return this.nodes.reduce((code, n) => code + n.render(opts), "");
       }
       optimizeNodes() {
-        const { nodes } = this;
-        let i2 = nodes.length;
+        const { nodes: nodes2 } = this;
+        let i2 = nodes2.length;
         while (i2--) {
-          const n = nodes[i2].optimizeNodes();
+          const n = nodes2[i2].optimizeNodes();
           if (Array.isArray(n))
-            nodes.splice(i2, 1, ...n);
+            nodes2.splice(i2, 1, ...n);
           else if (n)
-            nodes[i2] = n;
+            nodes2[i2] = n;
           else
-            nodes.splice(i2, 1);
+            nodes2.splice(i2, 1);
         }
-        return nodes.length > 0 ? this : void 0;
+        return nodes2.length > 0 ? this : void 0;
       }
-      optimizeNames(names2, constants6) {
-        const { nodes } = this;
-        let i2 = nodes.length;
+      optimizeNames(names2, constants7) {
+        const { nodes: nodes2 } = this;
+        let i2 = nodes2.length;
         while (i2--) {
-          const n = nodes[i2];
-          if (n.optimizeNames(names2, constants6))
+          const n = nodes2[i2];
+          if (n.optimizeNames(names2, constants7))
             continue;
           subtractNames(names2, n.names);
-          nodes.splice(i2, 1);
+          nodes2.splice(i2, 1);
         }
-        return nodes.length > 0 ? this : void 0;
+        return nodes2.length > 0 ? this : void 0;
       }
       get names() {
         return this.nodes.reduce((names2, n) => addNames(names2, n.names), {});
@@ -20981,8 +20981,8 @@ var require_codegen = __commonJS({
     };
     Else.kind = "else";
     var If = class _If extends BlockNode {
-      constructor(condition, nodes) {
-        super(nodes);
+      constructor(condition, nodes2) {
+        super(nodes2);
         this.condition = condition;
       }
       render(opts) {
@@ -21012,12 +21012,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names2, constants6) {
+      optimizeNames(names2, constants7) {
         var _a3;
-        this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names2, constants6);
-        if (!(super.optimizeNames(names2, constants6) || this.else))
+        this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names2, constants7);
+        if (!(super.optimizeNames(names2, constants7) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names2, constants6);
+        this.condition = optimizeExpr(this.condition, names2, constants7);
         return this;
       }
       get names() {
@@ -21040,10 +21040,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names2, constants6) {
-        if (!super.optimizeNames(names2, constants6))
+      optimizeNames(names2, constants7) {
+        if (!super.optimizeNames(names2, constants7))
           return;
-        this.iteration = optimizeExpr(this.iteration, names2, constants6);
+        this.iteration = optimizeExpr(this.iteration, names2, constants7);
         return this;
       }
       get names() {
@@ -21079,10 +21079,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names2, constants6) {
-        if (!super.optimizeNames(names2, constants6))
+      optimizeNames(names2, constants7) {
+        if (!super.optimizeNames(names2, constants7))
           return;
-        this.iterable = optimizeExpr(this.iterable, names2, constants6);
+        this.iterable = optimizeExpr(this.iterable, names2, constants7);
         return this;
       }
       get names() {
@@ -21124,11 +21124,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names2, constants6) {
+      optimizeNames(names2, constants7) {
         var _a3, _b;
-        super.optimizeNames(names2, constants6);
-        (_a3 = this.catch) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names2, constants6);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names2, constants6);
+        super.optimizeNames(names2, constants7);
+        (_a3 = this.catch) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names2, constants7);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names2, constants7);
         return this;
       }
       get names() {
@@ -21429,7 +21429,7 @@ var require_codegen = __commonJS({
     function addExprNames(names2, from) {
       return from instanceof code_1._CodeOrName ? addNames(names2, from.names) : names2;
     }
-    function optimizeExpr(expr, names2, constants6) {
+    function optimizeExpr(expr, names2, constants7) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -21444,14 +21444,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n) {
-        const c = constants6[n.str];
+        const c = constants7[n.str];
         if (c === void 0 || names2[n.str] !== 1)
           return n;
         delete names2[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names2[c.str] === 1 && constants6[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names2[c.str] === 1 && constants7[c.str] !== void 0);
       }
     }
     function subtractNames(names2, from) {
@@ -21490,10 +21490,10 @@ var require_util = __commonJS({
     var codegen_1 = require_codegen();
     var code_1 = require_code();
     function toHash(arr) {
-      const hash6 = {};
+      const hash7 = {};
       for (const item of arr)
-        hash6[item] = true;
-      return hash6;
+        hash7[item] = true;
+      return hash7;
     }
     exports.toHash = toHash;
     function alwaysValidSchema(it, schema) {
@@ -22473,7 +22473,7 @@ var require_subschema = __commonJS({
 var require_fast_deep_equal = __commonJS({
   "../../node_modules/fast-deep-equal/index.js"(exports, module) {
     "use strict";
-    module.exports = function equal3(a, b) {
+    module.exports = function equal4(a, b) {
       if (a === b) return true;
       if (a && b && typeof a == "object" && typeof b == "object") {
         if (a.constructor !== b.constructor) return false;
@@ -22482,7 +22482,7 @@ var require_fast_deep_equal = __commonJS({
           length = a.length;
           if (length != b.length) return false;
           for (i2 = length; i2-- !== 0; )
-            if (!equal3(a[i2], b[i2])) return false;
+            if (!equal4(a[i2], b[i2])) return false;
           return true;
         }
         if (a.constructor === RegExp) return a.source === b.source && a.flags === b.flags;
@@ -22495,7 +22495,7 @@ var require_fast_deep_equal = __commonJS({
           if (!Object.prototype.hasOwnProperty.call(b, keys[i2])) return false;
         for (i2 = length; i2-- !== 0; ) {
           var key = keys[i2];
-          if (!equal3(a[key], b[key])) return false;
+          if (!equal4(a[key], b[key])) return false;
         }
         return true;
       }
@@ -22599,7 +22599,7 @@ var require_resolve = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getSchemaRefs = exports.resolveUrl = exports.normalizeId = exports._getFullPath = exports.getFullPath = exports.inlineRef = void 0;
     var util_1 = require_util();
-    var equal3 = require_fast_deep_equal();
+    var equal4 = require_fast_deep_equal();
     var traverse = require_json_schema_traverse();
     var SIMPLE_INLINED = /* @__PURE__ */ new Set([
       "type",
@@ -22737,7 +22737,7 @@ var require_resolve = __commonJS({
       });
       return localRefs;
       function checkAmbiguosRef(sch1, sch2, ref2) {
-        if (sch2 !== void 0 && !equal3(sch1, sch2))
+        if (sch2 !== void 0 && !equal4(sch1, sch2))
           throw ambiguos(ref2);
       }
       function ambiguos(ref2) {
@@ -23691,8 +23691,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path16) {
-      let input2 = path16;
+    function removeDotSegments(path17) {
+      let input2 = path17;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -23781,9 +23781,9 @@ var require_utils = __commonJS({
       let output2 = "";
       for (let i2 = 0; i2 < input2.length; i2++) {
         if (input2[i2] === "%" && i2 + 2 < input2.length) {
-          const hex3 = input2.slice(i2 + 1, i2 + 3);
-          if (isHexPair(hex3)) {
-            const normalizedHex = hex3.toUpperCase();
+          const hex4 = input2.slice(i2 + 1, i2 + 3);
+          if (isHexPair(hex4)) {
+            const normalizedHex = hex4.toUpperCase();
             const decoded = String.fromCharCode(parseInt(normalizedHex, 16));
             if (decodeUnreserved && isUnreserved(decoded)) {
               output2 += decoded;
@@ -23803,9 +23803,9 @@ var require_utils = __commonJS({
       for (let i2 = 0; i2 < input2.length; i2++) {
         const ch = input2[i2];
         if (ch === "%" && i2 + 2 < input2.length) {
-          const hex3 = input2.slice(i2 + 1, i2 + 3);
-          if (isHexPair(hex3)) {
-            const normalizedHex = hex3.toUpperCase();
+          const hex4 = input2.slice(i2 + 1, i2 + 3);
+          if (isHexPair(hex4)) {
+            const normalizedHex = hex4.toUpperCase();
             const decoded = String.fromCharCode(parseInt(normalizedHex, 16));
             if (decoded !== "." && isUnreserved(decoded)) {
               output2 += decoded;
@@ -23845,9 +23845,9 @@ var require_utils = __commonJS({
       for (let i2 = 0; i2 < input2.length; i2++) {
         const ch = input2[i2];
         if (ch === "%" && i2 + 2 < input2.length) {
-          const hex3 = input2.slice(i2 + 1, i2 + 3);
-          if (isHexPair(hex3)) {
-            output2 += "%" + hex3.toUpperCase();
+          const hex4 = input2.slice(i2 + 1, i2 + 3);
+          if (isHexPair(hex4)) {
+            output2 += "%" + hex4.toUpperCase();
             i2 += 2;
             continue;
           }
@@ -23883,9 +23883,9 @@ var require_utils = __commonJS({
       for (let i2 = 0; i2 < input2.length; i2++) {
         const ch = input2[i2];
         if (ch === "%" && i2 + 2 < input2.length) {
-          const hex3 = input2.slice(i2 + 1, i2 + 3);
-          if (isHexPair(hex3)) {
-            output2 += "%" + hex3.toUpperCase();
+          const hex4 = input2.slice(i2 + 1, i2 + 3);
+          if (isHexPair(hex4)) {
+            output2 += "%" + hex4.toUpperCase();
             i2 += 2;
             continue;
           }
@@ -23930,9 +23930,9 @@ var require_utils = __commonJS({
       for (let i2 = 0; i2 < input2.length; i2++) {
         const ch = input2[i2];
         if (ch === "%" && i2 + 2 < input2.length) {
-          const hex3 = input2.slice(i2 + 1, i2 + 3);
-          if (isHexPair(hex3)) {
-            const normalizedHex = hex3.toUpperCase();
+          const hex4 = input2.slice(i2 + 1, i2 + 3);
+          if (isHexPair(hex4)) {
+            const normalizedHex = hex4.toUpperCase();
             const decoded = String.fromCharCode(parseInt(normalizedHex, 16));
             if (isUnreserved(decoded)) {
               output2 += decoded;
@@ -23970,9 +23970,9 @@ var require_utils = __commonJS({
       let output2 = "";
       for (let i2 = 0; i2 < input2.length; i2++) {
         if (input2[i2] === "%" && i2 + 2 < input2.length) {
-          const hex3 = input2.slice(i2 + 1, i2 + 3);
-          if (isHexPair(hex3)) {
-            output2 += "%" + hex3.toUpperCase();
+          const hex4 = input2.slice(i2 + 1, i2 + 3);
+          if (isHexPair(hex4)) {
+            output2 += "%" + hex4.toUpperCase();
             i2 += 2;
             continue;
           }
@@ -24101,8 +24101,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path16 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path16 && path16 !== "/" ? path16 : void 0;
+        const path17 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path17 && path17 !== "/" ? path17 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -24356,7 +24356,7 @@ var require_fast_uri = __commonJS({
       target.fragment = relative2.fragment;
       return target;
     }
-    function equal3(uriA, uriB, options) {
+    function equal4(uriA, uriB, options) {
       const normalizedA = normalizeComparableURI(uriA, options);
       const normalizedB = normalizeComparableURI(uriB, options);
       return normalizedA !== void 0 && normalizedB !== void 0 && normalizedA === normalizedB;
@@ -24641,7 +24641,7 @@ var require_fast_uri = __commonJS({
       normalize,
       resolve,
       resolveComponent,
-      equal: equal3,
+      equal: equal4,
       serialize,
       parse: parse6
     };
@@ -25054,7 +25054,7 @@ var require_core = __commonJS({
       errorsText(errors = this.errors, { separator = ", ", dataVar = "data" } = {}) {
         if (!errors || errors.length === 0)
           return "No errors";
-        return errors.map((e) => `${dataVar}${e.instancePath} ${e.message}`).reduce((text2, msg) => text2 + separator + msg);
+        return errors.map((e) => `${dataVar}${e.instancePath} ${e.message}`).reduce((text3, msg) => text3 + separator + msg);
       }
       $dataMetaSchema(metaSchema, keywordsJsonPointers) {
         const rules = this.RULES.all;
@@ -25731,9 +25731,9 @@ var require_equal = __commonJS({
   "../../node_modules/ajv/dist/runtime/equal.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    var equal3 = require_fast_deep_equal();
-    equal3.code = 'require("ajv/dist/runtime/equal").default';
-    exports.default = equal3;
+    var equal4 = require_fast_deep_equal();
+    equal4.code = 'require("ajv/dist/runtime/equal").default';
+    exports.default = equal4;
   }
 });
 
@@ -27631,7 +27631,7 @@ var require_dist = __commonJS({
 // ../../node_modules/graceful-fs/polyfills.js
 var require_polyfills = __commonJS({
   "../../node_modules/graceful-fs/polyfills.js"(exports, module) {
-    var constants6 = __require("constants");
+    var constants7 = __require("constants");
     var origCwd = process.cwd;
     var cwd = null;
     var platform = process.env.GRACEFUL_FS_PLATFORM || process.platform;
@@ -27655,7 +27655,7 @@ var require_polyfills = __commonJS({
     var chdir;
     module.exports = patch;
     function patch(fs) {
-      if (constants6.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
+      if (constants7.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
         patchLchmod(fs);
       }
       if (!fs.lutimes) {
@@ -27680,14 +27680,14 @@ var require_polyfills = __commonJS({
       fs.fstatSync = statFixSync(fs.fstatSync);
       fs.lstatSync = statFixSync(fs.lstatSync);
       if (fs.chmod && !fs.lchmod) {
-        fs.lchmod = function(path16, mode, cb) {
+        fs.lchmod = function(path17, mode, cb) {
           if (cb) process.nextTick(cb);
         };
         fs.lchmodSync = function() {
         };
       }
       if (fs.chown && !fs.lchown) {
-        fs.lchown = function(path16, uid, gid, cb) {
+        fs.lchown = function(path17, uid, gid, cb) {
           if (cb) process.nextTick(cb);
         };
         fs.lchownSync = function() {
@@ -27695,7 +27695,7 @@ var require_polyfills = __commonJS({
       }
       if (platform === "win32") {
         fs.rename = typeof fs.rename !== "function" ? fs.rename : (function(fs$rename) {
-          function rename7(from, to, cb) {
+          function rename8(from, to, cb) {
             var start = Date.now();
             var backoff = 0;
             fs$rename(from, to, function CB(er) {
@@ -27715,8 +27715,8 @@ var require_polyfills = __commonJS({
               if (cb) cb(er);
             });
           }
-          if (Object.setPrototypeOf) Object.setPrototypeOf(rename7, fs$rename);
-          return rename7;
+          if (Object.setPrototypeOf) Object.setPrototypeOf(rename8, fs$rename);
+          return rename8;
         })(fs.rename);
       }
       fs.read = typeof fs.read !== "function" ? fs.read : (function(fs$read) {
@@ -27754,10 +27754,10 @@ var require_polyfills = __commonJS({
         };
       })(fs.readSync);
       function patchLchmod(fs2) {
-        fs2.lchmod = function(path16, mode, callback) {
+        fs2.lchmod = function(path17, mode, callback) {
           fs2.open(
-            path16,
-            constants6.O_WRONLY | constants6.O_SYMLINK,
+            path17,
+            constants7.O_WRONLY | constants7.O_SYMLINK,
             mode,
             function(err, fd) {
               if (err) {
@@ -27772,8 +27772,8 @@ var require_polyfills = __commonJS({
             }
           );
         };
-        fs2.lchmodSync = function(path16, mode) {
-          var fd = fs2.openSync(path16, constants6.O_WRONLY | constants6.O_SYMLINK, mode);
+        fs2.lchmodSync = function(path17, mode) {
+          var fd = fs2.openSync(path17, constants7.O_WRONLY | constants7.O_SYMLINK, mode);
           var threw = true;
           var ret;
           try {
@@ -27793,9 +27793,9 @@ var require_polyfills = __commonJS({
         };
       }
       function patchLutimes(fs2) {
-        if (constants6.hasOwnProperty("O_SYMLINK") && fs2.futimes) {
-          fs2.lutimes = function(path16, at2, mt, cb) {
-            fs2.open(path16, constants6.O_SYMLINK, function(er, fd) {
+        if (constants7.hasOwnProperty("O_SYMLINK") && fs2.futimes) {
+          fs2.lutimes = function(path17, at2, mt, cb) {
+            fs2.open(path17, constants7.O_SYMLINK, function(er, fd) {
               if (er) {
                 if (cb) cb(er);
                 return;
@@ -27807,8 +27807,8 @@ var require_polyfills = __commonJS({
               });
             });
           };
-          fs2.lutimesSync = function(path16, at2, mt) {
-            var fd = fs2.openSync(path16, constants6.O_SYMLINK);
+          fs2.lutimesSync = function(path17, at2, mt) {
+            var fd = fs2.openSync(path17, constants7.O_SYMLINK);
             var ret;
             var threw = true;
             try {
@@ -27926,11 +27926,11 @@ var require_legacy_streams = __commonJS({
         ReadStream,
         WriteStream
       };
-      function ReadStream(path16, options) {
-        if (!(this instanceof ReadStream)) return new ReadStream(path16, options);
+      function ReadStream(path17, options) {
+        if (!(this instanceof ReadStream)) return new ReadStream(path17, options);
         Stream.call(this);
         var self = this;
-        this.path = path16;
+        this.path = path17;
         this.fd = null;
         this.readable = true;
         this.paused = false;
@@ -27975,10 +27975,10 @@ var require_legacy_streams = __commonJS({
           self._read();
         });
       }
-      function WriteStream(path16, options) {
-        if (!(this instanceof WriteStream)) return new WriteStream(path16, options);
+      function WriteStream(path17, options) {
+        if (!(this instanceof WriteStream)) return new WriteStream(path17, options);
         Stream.call(this);
-        this.path = path16;
+        this.path = path17;
         this.fd = null;
         this.writable = true;
         this.flags = "w";
@@ -28121,14 +28121,14 @@ var require_graceful_fs = __commonJS({
       fs2.createWriteStream = createWriteStream;
       var fs$readFile = fs2.readFile;
       fs2.readFile = readFile9;
-      function readFile9(path16, options, cb) {
+      function readFile9(path17, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$readFile(path16, options, cb);
-        function go$readFile(path17, options2, cb2, startTime) {
-          return fs$readFile(path17, options2, function(err) {
+        return go$readFile(path17, options, cb);
+        function go$readFile(path18, options2, cb2, startTime) {
+          return fs$readFile(path18, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$readFile, [path17, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$readFile, [path18, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28138,14 +28138,14 @@ var require_graceful_fs = __commonJS({
       }
       var fs$writeFile = fs2.writeFile;
       fs2.writeFile = writeFile7;
-      function writeFile7(path16, data2, options, cb) {
+      function writeFile7(path17, data2, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$writeFile(path16, data2, options, cb);
-        function go$writeFile(path17, data3, options2, cb2, startTime) {
-          return fs$writeFile(path17, data3, options2, function(err) {
+        return go$writeFile(path17, data2, options, cb);
+        function go$writeFile(path18, data3, options2, cb2, startTime) {
+          return fs$writeFile(path18, data3, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$writeFile, [path17, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$writeFile, [path18, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28156,14 +28156,14 @@ var require_graceful_fs = __commonJS({
       var fs$appendFile = fs2.appendFile;
       if (fs$appendFile)
         fs2.appendFile = appendFile;
-      function appendFile(path16, data2, options, cb) {
+      function appendFile(path17, data2, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$appendFile(path16, data2, options, cb);
-        function go$appendFile(path17, data3, options2, cb2, startTime) {
-          return fs$appendFile(path17, data3, options2, function(err) {
+        return go$appendFile(path17, data2, options, cb);
+        function go$appendFile(path18, data3, options2, cb2, startTime) {
+          return fs$appendFile(path18, data3, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$appendFile, [path17, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$appendFile, [path18, data3, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28192,33 +28192,33 @@ var require_graceful_fs = __commonJS({
         }
       }
       var fs$readdir = fs2.readdir;
-      fs2.readdir = readdir9;
+      fs2.readdir = readdir10;
       var noReaddirOptionVersions = /^v[0-5]\./;
-      function readdir9(path16, options, cb) {
+      function readdir10(path17, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path17, options2, cb2, startTime) {
-          return fs$readdir(path17, fs$readdirCallback(
-            path17,
+        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path18, options2, cb2, startTime) {
+          return fs$readdir(path18, fs$readdirCallback(
+            path18,
             options2,
             cb2,
             startTime
           ));
-        } : function go$readdir2(path17, options2, cb2, startTime) {
-          return fs$readdir(path17, options2, fs$readdirCallback(
-            path17,
+        } : function go$readdir2(path18, options2, cb2, startTime) {
+          return fs$readdir(path18, options2, fs$readdirCallback(
+            path18,
             options2,
             cb2,
             startTime
           ));
         };
-        return go$readdir(path16, options, cb);
-        function fs$readdirCallback(path17, options2, cb2, startTime) {
+        return go$readdir(path17, options, cb);
+        function fs$readdirCallback(path18, options2, cb2, startTime) {
           return function(err, files2) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
               enqueue([
                 go$readdir,
-                [path17, options2, cb2],
+                [path18, options2, cb2],
                 err,
                 startTime || Date.now(),
                 Date.now()
@@ -28289,7 +28289,7 @@ var require_graceful_fs = __commonJS({
         enumerable: true,
         configurable: true
       });
-      function ReadStream(path16, options) {
+      function ReadStream(path17, options) {
         if (this instanceof ReadStream)
           return fs$ReadStream.apply(this, arguments), this;
         else
@@ -28297,7 +28297,7 @@ var require_graceful_fs = __commonJS({
       }
       function ReadStream$open() {
         var that = this;
-        open6(that.path, that.flags, that.mode, function(err, fd) {
+        open8(that.path, that.flags, that.mode, function(err, fd) {
           if (err) {
             if (that.autoClose)
               that.destroy();
@@ -28309,7 +28309,7 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function WriteStream(path16, options) {
+      function WriteStream(path17, options) {
         if (this instanceof WriteStream)
           return fs$WriteStream.apply(this, arguments), this;
         else
@@ -28317,7 +28317,7 @@ var require_graceful_fs = __commonJS({
       }
       function WriteStream$open() {
         var that = this;
-        open6(that.path, that.flags, that.mode, function(err, fd) {
+        open8(that.path, that.flags, that.mode, function(err, fd) {
           if (err) {
             that.destroy();
             that.emit("error", err);
@@ -28327,22 +28327,22 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function createReadStream(path16, options) {
-        return new fs2.ReadStream(path16, options);
+      function createReadStream(path17, options) {
+        return new fs2.ReadStream(path17, options);
       }
-      function createWriteStream(path16, options) {
-        return new fs2.WriteStream(path16, options);
+      function createWriteStream(path17, options) {
+        return new fs2.WriteStream(path17, options);
       }
       var fs$open = fs2.open;
-      fs2.open = open6;
-      function open6(path16, flags, mode, cb) {
+      fs2.open = open8;
+      function open8(path17, flags, mode, cb) {
         if (typeof mode === "function")
           cb = mode, mode = null;
-        return go$open(path16, flags, mode, cb);
-        function go$open(path17, flags2, mode2, cb2, startTime) {
-          return fs$open(path17, flags2, mode2, function(err, fd) {
+        return go$open(path17, flags, mode, cb);
+        function go$open(path18, flags2, mode2, cb2, startTime) {
+          return fs$open(path18, flags2, mode2, function(err, fd) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$open, [path17, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$open, [path18, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -28871,7 +28871,7 @@ var require_mtime_precision = __commonJS({
 var require_lockfile = __commonJS({
   "../../node_modules/proper-lockfile/lib/lockfile.js"(exports, module) {
     "use strict";
-    var path16 = __require("path");
+    var path17 = __require("path");
     var fs = require_graceful_fs();
     var retry = require_retry2();
     var onExit = require_signal_exit();
@@ -28882,7 +28882,7 @@ var require_lockfile = __commonJS({
     }
     function resolveCanonicalPath(file2, options, callback) {
       if (!options.realpath) {
-        return callback(null, path16.resolve(file2));
+        return callback(null, path17.resolve(file2));
       }
       options.fs.realpath(file2, callback);
     }
@@ -30876,10 +30876,10 @@ var util;
       return obj[e];
     });
   };
-  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object9) => {
+  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object10) => {
     const keys = [];
-    for (const key in object9) {
-      if (Object.prototype.hasOwnProperty.call(object9, key)) {
+    for (const key in object10) {
+      if (Object.prototype.hasOwnProperty.call(object10, key)) {
         keys.push(key);
       }
     }
@@ -31218,8 +31218,8 @@ function getErrorMap2() {
 
 // ../../node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data: data2, path: path16, errorMaps, issueData } = params;
-  const fullPath = [...path16, ...issueData.path || []];
+  const { data: data2, path: path17, errorMaps, issueData } = params;
+  const fullPath = [...path17, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -31334,11 +31334,11 @@ var errorUtil;
 
 // ../../node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path16, key) {
+  constructor(parent, value, path17, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path16;
+    this._path = path17;
     this._key = key;
   }
   get path() {
@@ -34901,11 +34901,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path16) {
-  if (path16.length === 0) {
+function getDotPath(path17) {
+  if (path17.length === 0) {
     return "object root";
   }
-  return path16.reduce((acc, seg, index) => {
+  return path17.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -35712,11 +35712,11 @@ function parseMapDef(def, refs) {
 
 // ../../node_modules/zod-to-json-schema/dist/esm/parsers/nativeEnum.js
 function parseNativeEnumDef(def) {
-  const object9 = def.values;
+  const object10 = def.values;
   const actualKeys = Object.keys(def.values).filter((key) => {
-    return typeof object9[object9[key]] !== "number";
+    return typeof object10[object10[key]] !== "number";
   });
-  const actualValues = actualKeys.map((key) => object9[key]);
+  const actualValues = actualKeys.map((key) => object10[key]);
   const parsedTypes = Array.from(new Set(actualValues.map((values) => typeof values)));
   return {
     type: parsedTypes.length === 1 ? parsedTypes[0] === "string" ? "string" : "number" : ["string", "number"],
@@ -36898,7 +36898,7 @@ var Protocol = class {
           }
         };
       }
-      const cancel = (reason) => {
+      const cancel = (reason2) => {
         this._responseHandlers.delete(messageId);
         this._progressHandlers.delete(messageId);
         this._cleanupTimeout(messageId);
@@ -36907,10 +36907,10 @@ var Protocol = class {
           method: "notifications/cancelled",
           params: {
             requestId: messageId,
-            reason: String(reason)
+            reason: String(reason2)
           }
         }, { relatedRequestId, resumptionToken, onresumptiontoken }).catch((error63) => this._onerror(new Error(`Failed to send cancellation: ${error63}`)));
-        const error62 = reason instanceof McpError ? reason : new McpError(ErrorCode.RequestTimeout, String(reason));
+        const error62 = reason2 instanceof McpError ? reason2 : new McpError(ErrorCode.RequestTimeout, String(reason2));
         reject(error62);
       };
       this._responseHandlers.set(messageId, (response) => {
@@ -39402,10 +39402,10 @@ function getOptions(opts) {
   return options;
 }
 function pushComment(options, array2) {
-  return function(block, text2, start, end, startLoc, endLoc) {
+  return function(block, text3, start, end, startLoc, endLoc) {
     var comment = {
       type: block ? "Block" : "Line",
-      value: text2,
+      value: text3,
       start,
       end
     };
@@ -40760,7 +40760,7 @@ pp$8.parseExportSpecifier = function(exports$1) {
   return this.finishNode(node2, "ExportSpecifier");
 };
 pp$8.parseExportSpecifiers = function(exports$1) {
-  var nodes = [], first = true;
+  var nodes2 = [], first = true;
   this.expect(types$1.braceL);
   while (!this.eat(types$1.braceR)) {
     if (!first) {
@@ -40771,9 +40771,9 @@ pp$8.parseExportSpecifiers = function(exports$1) {
     } else {
       first = false;
     }
-    nodes.push(this.parseExportSpecifier(exports$1));
+    nodes2.push(this.parseExportSpecifier(exports$1));
   }
-  return nodes;
+  return nodes2;
 };
 pp$8.parseImport = function(node2) {
   this.next();
@@ -40818,16 +40818,16 @@ pp$8.parseImportNamespaceSpecifier = function() {
   return this.finishNode(node2, "ImportNamespaceSpecifier");
 };
 pp$8.parseImportSpecifiers = function() {
-  var nodes = [], first = true;
+  var nodes2 = [], first = true;
   if (this.type === types$1.name) {
-    nodes.push(this.parseImportDefaultSpecifier());
+    nodes2.push(this.parseImportDefaultSpecifier());
     if (!this.eat(types$1.comma)) {
-      return nodes;
+      return nodes2;
     }
   }
   if (this.type === types$1.star) {
-    nodes.push(this.parseImportNamespaceSpecifier());
-    return nodes;
+    nodes2.push(this.parseImportNamespaceSpecifier());
+    return nodes2;
   }
   this.expect(types$1.braceL);
   while (!this.eat(types$1.braceR)) {
@@ -40839,14 +40839,14 @@ pp$8.parseImportSpecifiers = function() {
     } else {
       first = false;
     }
-    nodes.push(this.parseImportSpecifier());
+    nodes2.push(this.parseImportSpecifier());
   }
-  return nodes;
+  return nodes2;
 };
 pp$8.parseWithClause = function() {
-  var nodes = [];
+  var nodes2 = [];
   if (!this.eat(types$1._with)) {
-    return nodes;
+    return nodes2;
   }
   this.expect(types$1.braceL);
   var attributeKeys = {};
@@ -40866,9 +40866,9 @@ pp$8.parseWithClause = function() {
       this.raiseRecoverable(attr.key.start, "Duplicate attribute key '" + keyName + "'");
     }
     attributeKeys[keyName] = true;
-    nodes.push(attr);
+    nodes2.push(attr);
   }
-  return nodes;
+  return nodes2;
 };
 pp$8.parseImportAttribute = function() {
   var node2 = this.startNode();
@@ -44909,9 +44909,9 @@ function encode3(value) {
   if (Buffer.byteLength(json2) > 8 * 1024 * 1024) throw new Error("Workflow value exceeds 8 MiB");
   return json2;
 }
-function abortError(reason) {
-  if (reason instanceof Error) return reason;
-  const error62 = new Error(typeof reason === "string" ? reason : "Workflow script was cancelled");
+function abortError(reason2) {
+  if (reason2 instanceof Error) return reason2;
+  const error62 = new Error(typeof reason2 === "string" ? reason2 : "Workflow script was cancelled");
   error62.name = "AbortError";
   return error62;
 }
@@ -45015,13 +45015,14 @@ async function getTemplate(id) {
 }
 function getCapabilities() {
   return {
-    version: "0.7.0",
+    version: "0.8.0",
     stage: "runtime-v2",
+    checkpoints: { available: true, tools: ["workflow_preview_recovery", "workflow_get_checkpoints", "workflow_get_task_history"], nodeAttemptDiagnostics: true, historyPagination: true, includedInRunDeletion: true },
     available: ["host-thread-directory-binding", "bounded-run-transport", "artifact-pagination", "paged-run-summaries", "bounded-diff-preview", "declared-protected-command-paths", "explicit-task-retry", "snapshot-checkpoint", "git-context-cache", "preparation-progress", "node-activity", "node-process", "bounded-mcp-error-diagnostics", "native-auto-review", "native-tool-error-diagnostics", "task-output-validation", "same-thread-result-recovery", "typed-task-failure-origin", "writable-workspace-operations", "complete-run-deletion", "complete-definition-deletion", "immutable-project-binding", "host-runtime-launcher", "list-templates", "read-template", "save-template", "cross-project-reuse", "codex-local-projects", "caller-thread-project-context", "preview", "execution-settings", "node-model-settings", "model-catalogue", "dynamic-execution", "stop", "task-cancellation", "persistence", "replay-resume", "isolated-writing", "local-project-writing", "local-project-git-writing", "project-writer-serialization", "review", "conflict-checked-apply", "task-panel", "agent-driven-execution", "explicit-network-scope", "configured-mcp-allowlist", "configured-mcp-tool-grants", "git-worktree", "declared-maintenance", "activation-review", "git-submodules", "absolute-toolchain-arguments", "isolated-command-cache"],
     execution: { available: true, adapter: "codex-app-server", requirements: ["Node.js >=22", "Codex CLI with app-server and an existing login"], maxConcurrentWriters: 1, startRequiresPanelAction: false, userAuthorizationRequired: true, defaultNetworkAccess: false, defaultAllowedMcpServers: [], defaultAllowedMcpTools: {}, mcpReadOnlyRequiresHint: true, mcpToolApprovalsPreserved: true, interactiveToolApprovalsAvailable: false, nativeAutomaticApprovalReviewAvailable: true, defaultApprovalMode: "auto-review", legacyMissingApprovalMode: "never", approvalModes: ["auto-review", "never"], approvalReview: { appliesTo: "agent-workers", reviewer: "auto_review", policy: "on-request", requiresNativeConfirmation: true, preservesSandboxScope: true, preservesMcpToolApprovals: true, persistentPreapproval: false, onDenied: "stop-worker", onTimeout: "stop-worker", humanFallback: false }, parentChatAppsInherited: false, nativeTools: ["file-reading", "command-execution", "patch-writing"], nativeToolScope: "official-app-server-and-declared-sandbox", networkShellRequiresGrant: true, readOnlyNetworkSupported: true, networkAccessIndependentFromWrite: true, maintenanceRequiresWriteWorktree: false, proprietaryDesktopToolsInherited: false, defaultWorkspaceMode: "snapshot", workspaceModes: ["snapshot", "git-worktree", "local"], localMode: { requiresAllowWrite: true, writesOriginalProject: true, requiresApply: false, automaticRollback: false, deletionOwnsProject: false, maintenanceSupported: true, projectGitMetadataWrite: true, gitMetadataScope: "canonical-project-contained-only", legacyRunsKeepRecordedWriteScope: true, protectedInstructionDirectoriesAutoGranted: false, maxConcurrentProjectWriters: 1, coordinationScope: "shared-workflows-data-directory", externalEditorsSerialized: false }, submodules: { initialized: "independent-local-copy", uninitialized: "preserve-explicit-state", automaticNetworkInitialization: false } },
     workerRecovery: { toolErrors: "native-agent-loop", defaultMaxResultRecoveryAttempts: 0, maxResultRecoveryAttempts: 2, scope: "same-ephemeral-thread", totalTimeoutShared: true, permissionsUnchanged: true, requiresExplicitAcceptForBusinessSuccess: true, forbidden: ["approval-denial-bypass", "unknown-side-effect-replay", "automatic-whole-workflow-restart"] },
     ui: { available: true, stage: "live", hostIntegration: "requires-version-specific-verification", exampleDataOnly: false, entrypoints: ["thread"], projectChatRequired: true, projectSelection: "fixed-current-chat-project", unassignedContext: "project-guidance-with-actions-disabled", programmaticProjectPath: "explicit-user-authorized-target" },
-    recovery: { automatic: false, mode: "launch-order-replay", stoppedAgentsRestart: true },
+    recovery: { automatic: false, mode: "launch-order-replay", stoppedAgentsRestart: true, previewAvailable: true, confirmationFingerprintSupported: true, checkpoint: { format: "hash-linked-node-manifest-v1", boundary: "no-active-workers", persistence: "durable-manifest-and-run-pointer", authority: "committed-pointer", preservesCurrentFiles: true, automaticFileRollback: false, externalEffectsReverted: false, vmStateRestored: false, exactlyOnce: false, oldAttemptsRetained: true, uncommittedWriteResults: "block-for-effect-review", readonlyProjectDrift: "revalidate-all" } },
     pendingDesign: ["multiple-concurrent-writing-workers"]
   };
 }
@@ -45033,7 +45034,7 @@ import { randomBytes as randomBytes5 } from "node:crypto";
 
 // src/store.ts
 var import_proper_lockfile = __toESM(require_proper_lockfile(), 1);
-import { mkdir, readFile, readdir, rename, writeFile, rm, lstat } from "node:fs/promises";
+import { mkdir, open as open2, readFile, readdir, rename, writeFile, rm, lstat } from "node:fs/promises";
 import path from "node:path";
 import { homedir } from "node:os";
 import { randomBytes as randomBytes2 } from "node:crypto";
@@ -45116,10 +45117,10 @@ var RunStore = class {
   async create(run) {
     return this.writeRun(run, true);
   }
-  async save(run) {
-    return this.writeRun(run, false);
+  async save(run, durable = false) {
+    return this.writeRun(run, false, durable);
   }
-  async writeRun(run, create) {
+  async writeRun(run, create, durable = false) {
     const directory2 = this.directory(run.id);
     const content = JSON.stringify(run);
     if (Buffer.byteLength(content) > 32 * 1024 * 1024) throw new Error("Workflow state exceeds 32 MiB");
@@ -45159,9 +45160,23 @@ var RunStore = class {
       }
       await this.ownedDirectory(run.id, create);
       const temporary = path.join(directory2, `run.json.${process.pid}.${randomBytes2(8).toString("hex")}.tmp`);
-      await writeFile(temporary, content, { mode: 384, flag: "wx" });
       try {
+        const file2 = await open2(temporary, "wx", 384);
+        try {
+          await file2.writeFile(content);
+          if (durable) await file2.sync();
+        } finally {
+          await file2.close();
+        }
         await rename(temporary, path.join(directory2, "run.json"));
+        if (durable && process.platform !== "win32") {
+          const parent = await open2(directory2, "r");
+          try {
+            await parent.sync();
+          } finally {
+            await parent.close();
+          }
+        }
       } finally {
         await rm(temporary, { force: true });
       }
@@ -45378,7 +45393,7 @@ function resolveApprovalMode(value, fallback = "never") {
 // src/maintenance.ts
 import { createHash as createHash3, randomBytes as randomBytes4 } from "node:crypto";
 import { constants as constants2 } from "node:fs";
-import { chmod, lstat as lstat5, mkdir as mkdir5, open as open3, readFile as readFile4, readdir as readdir3, readlink as readlink2, realpath as realpath4, rename as rename3, rm as rm3, writeFile as writeFile3 } from "node:fs/promises";
+import { chmod, lstat as lstat5, mkdir as mkdir5, open as open4, readFile as readFile4, readdir as readdir3, readlink as readlink2, realpath as realpath4, rename as rename3, rm as rm3, writeFile as writeFile3 } from "node:fs/promises";
 import path7 from "node:path";
 
 // src/adapter.ts
@@ -45548,7 +45563,7 @@ import path5 from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat as lstat2, mkdir as mkdir3, open as open2, readFile as readFile3, readdir as readdir2, readlink, realpath } from "node:fs/promises";
+import { lstat as lstat2, mkdir as mkdir3, open as open3, readFile as readFile3, readdir as readdir2, readlink, realpath } from "node:fs/promises";
 import path4 from "node:path";
 import { promisify } from "node:util";
 import { StringDecoder } from "node:string_decoder";
@@ -45655,13 +45670,13 @@ async function gitCommandPreview(cwd, args, options = {}) {
         }
         const decoder = new StringDecoder("utf8");
         let previewTruncated = totalBytes > retainedBytes;
-        let text2 = decoder.write(Buffer.concat(chunks, retainedBytes)) + (previewTruncated ? "" : decoder.end());
-        const encoded = Buffer.from(text2, "utf8");
+        let text3 = decoder.write(Buffer.concat(chunks, retainedBytes)) + (previewTruncated ? "" : decoder.end());
+        const encoded = Buffer.from(text3, "utf8");
         if (encoded.length > limit2) {
-          text2 = new StringDecoder("utf8").write(encoded.subarray(0, limit2));
+          text3 = new StringDecoder("utf8").write(encoded.subarray(0, limit2));
           previewTruncated = true;
         }
-        resolve({ text: text2, previewTruncated, totalBytes, contentSha256: digest3.digest("hex") });
+        resolve({ text: text3, previewTruncated, totalBytes, contentSha256: digest3.digest("hex") });
       });
     });
   } catch (error62) {
@@ -45761,29 +45776,29 @@ async function files(root, names2, bounds) {
     if (stat4.isSymbolicLink()) {
       const target = await readlink(file2), resolved = path4.resolve(path4.dirname(file2), target);
       if (path4.isAbsolute(target) || !resolved.startsWith(root + path4.sep)) throw new Error("External Git manifest symlink is unsupported");
-      const canonical3 = await realpath(resolved).catch((error62) => {
+      const canonical4 = await realpath(resolved).catch((error62) => {
         if (error62.code === "ENOENT") return resolved;
         throw error62;
       });
-      if (!canonical3.startsWith(root + path4.sep)) throw new Error("External Git manifest symlink chain is unsupported");
+      if (!canonical4.startsWith(root + path4.sep)) throw new Error("External Git manifest symlink chain is unsupported");
       await parents(root, name);
       result2.push({ path: name, kind: "link", mode: stat4.mode & 511, size: stat4.size, hash: createHash("sha256").update(target).digest("hex") });
     } else if (stat4.isFile()) {
       bounds.bytes += stat4.size;
       if (stat4.size > 512 * 1024 * 1024 || bounds.bytes > 2 * 1024 * 1024 * 1024) throw new Error("Git manifest exceeds the bounded 2 GiB limit");
-      const hash6 = createHash("sha256"), fd = await open2(file2, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      const hash7 = createHash("sha256"), fd = await open3(file2, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
       try {
         await parents(root, name);
         const opened = await fd.stat();
         if (opened.ino !== stat4.ino || opened.dev !== stat4.dev || !opened.isFile() || !(await realpath(file2)).startsWith(root + path4.sep)) throw new Error("Git manifest file changed while opening it");
-        for await (const chunk of fd.createReadStream({ autoClose: false })) hash6.update(chunk);
+        for await (const chunk of fd.createReadStream({ autoClose: false })) hash7.update(chunk);
         await parents(root, name);
         const after = await fd.stat(), now2 = await lstat2(file2);
         if (after.size !== stat4.size || after.mtimeMs !== stat4.mtimeMs || after.ctimeMs !== stat4.ctimeMs || now2.dev !== opened.dev || now2.ino !== opened.ino || now2.isSymbolicLink()) throw new Error("Git manifest file changed during hashing");
       } finally {
         await fd.close();
       }
-      result2.push({ path: name, kind: "file", mode: stat4.mode & 511, size: stat4.size, hash: hash6.digest("hex") });
+      result2.push({ path: name, kind: "file", mode: stat4.mode & 511, size: stat4.size, hash: hash7.digest("hex") });
     } else throw new Error(`Unsupported Git manifest entry: ${name}`);
   }
   return result2;
@@ -45819,9 +45834,9 @@ async function inspectGitManifest(project, options = {}) {
     const submodules = [];
     for (const entry of links) {
       const present = presence.get(entry.path);
-      const manifest = present ? await inspect(await realpath(relative(root, entry.path)), depth + 1) : void 0;
-      if (options.requireClean && manifest && manifest.head !== entry.commit) throw new Error(`Git submodule HEAD differs from its gitlink: ${entry.path}`);
-      submodules.push({ path: entry.path, commit: entry.commit, initialized: present, ...manifest ? { manifest } : {} });
+      const manifest2 = present ? await inspect(await realpath(relative(root, entry.path)), depth + 1) : void 0;
+      if (options.requireClean && manifest2 && manifest2.head !== entry.commit) throw new Error(`Git submodule HEAD differs from its gitlink: ${entry.path}`);
+      submodules.push({ path: entry.path, commit: entry.commit, initialized: present, ...manifest2 ? { manifest: manifest2 } : {} });
     }
     return {
       head: (await gitCommand(root, ["rev-parse", "--verify", "HEAD"])).trim(),
@@ -45881,17 +45896,17 @@ async function readOnlyGitContextDigest(project, options = {}) {
   const values = await readOnlyGitContextDigests(project);
   return options.ignoreHostCheckpoints ? values.withoutHostCheckpoints : values.full;
 }
-function flattenGitArtifacts(manifest) {
+function flattenGitArtifacts(manifest2) {
   const result2 = [];
   const walk = (item, prefix2) => {
     result2.push(...item.ignored.map((file2) => ({ ...file2, path: prefix2 + file2.path })));
     for (const child of item.submodules) if (child.manifest) walk(child.manifest, prefix2 + child.path + "/");
   };
-  walk(manifest, "");
+  walk(manifest2, "");
   return result2.sort((a, b) => a.path.localeCompare(b.path));
 }
 async function cloneInitializedSubmodules(source, destination, hooks) {
-  const manifest = await inspectGitManifest(source, { requireClean: true });
+  const manifest2 = await inspectGitManifest(source, { requireClean: true });
   async function clone2(parentSource, parentDestination, state) {
     for (const child of state.submodules) {
       if (!child.manifest) continue;
@@ -45923,16 +45938,16 @@ async function cloneInitializedSubmodules(source, destination, hooks) {
       await clone2(from, to, child.manifest);
     }
   }
-  await clone2(await realpath(source), await realpath(destination), manifest);
+  await clone2(await realpath(source), await realpath(destination), manifest2);
   await inspectGitManifest(destination, { requireClean: true, enforceOwnedMetadata: true });
 }
 
 // src/local-git-scope.ts
 var within = (root, target) => target === root || target.startsWith(root + path5.sep);
 async function identity(name) {
-  const canonical3 = await realpath2(name), stat4 = await lstat3(canonical3);
+  const canonical4 = await realpath2(name), stat4 = await lstat3(canonical4);
   if (!stat4.isDirectory() || stat4.isSymbolicLink()) throw new Error("Local Git write scope requires real directories");
-  return { path: canonical3, dev: stat4.dev, ino: stat4.ino };
+  return { path: canonical4, dev: stat4.dev, ino: stat4.ino };
 }
 async function captureLocalGitScope(cwd) {
   const requested = await lstat3(cwd);
@@ -46009,9 +46024,9 @@ function errorFields(value) {
   const record5 = object4(value);
   const fields = [];
   for (const name of ["code", "message", "detail", "reason"]) {
-    const text2 = record5[name];
-    if (typeof text2 === "string" && text2.trim()) fields.push(`${name}: ${bounded(text2, maximumTextBytes)}`);
-    else if (name === "code" && typeof text2 === "number" && Number.isSafeInteger(text2)) fields.push(`code: ${text2}`);
+    const text3 = record5[name];
+    if (typeof text3 === "string" && text3.trim()) fields.push(`${name}: ${bounded(text3, maximumTextBytes)}`);
+    else if (name === "code" && typeof text3 === "number" && Number.isSafeInteger(text3)) fields.push(`code: ${text3}`);
   }
   return fields;
 }
@@ -46087,8 +46102,8 @@ var TaskOutputValidationError = class extends Error {
   code;
   contract;
   location;
-  constructor(code, contract, location, reason) {
-    super(`Task output ${contract} validation failed at ${location}: ${reason}.`);
+  constructor(code, contract, location, reason2) {
+    super(`Task output ${contract} validation failed at ${location}: ${reason2}.`);
     this.name = "TaskOutputValidationError";
     this.code = code;
     this.contract = contract;
@@ -46099,8 +46114,8 @@ var contracts = /* @__PURE__ */ new Map();
 var keywords2 = /* @__PURE__ */ new Set(["type", "properties", "required", "additionalProperties", "items", "minItems", "maxItems", "uniqueItems", "minProperties", "maxProperties", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "minLength", "maxLength", "enum", "const", "anyOf", "oneOf", "allOf", "not", "if", "then", "else", "title", "description", "$comment", "default", "examples"]);
 var types2 = /* @__PURE__ */ new Set(["null", "boolean", "object", "array", "number", "integer", "string"]);
 var own2 = (value, key) => Object.hasOwn(value, key);
-function invalid2(contract, location, reason) {
-  throw new TaskOutputValidationError(`${contract}-contract-invalid`, contract, location, reason);
+function invalid2(contract, location, reason2) {
+  throw new TaskOutputValidationError(`${contract}-contract-invalid`, contract, location, reason2);
 }
 function jsonCopy(value, budget, fail, depth = 0, ancestors = /* @__PURE__ */ new Set()) {
   if (++budget.nodes > budget.maximumNodes || depth > budget.maximumDepth) fail("JSON complexity limit exceeded");
@@ -46200,7 +46215,7 @@ function inspectSchema(value, contract, location, state, nested = false) {
 function compile2(value, contract) {
   if (value === void 0) return;
   let schema;
-  const fail = (reason) => invalid2(contract, "$", reason);
+  const fail = (reason2) => invalid2(contract, "$", reason2);
   try {
     schema = jsonCopy(value, { nodes: 0, bytes: 0, maximumNodes: 8192, maximumBytes: 65536, maximumDepth: 24 }, fail);
   } catch (error62) {
@@ -46236,8 +46251,8 @@ function validateTaskOutput(value, schema, accept) {
   const shape = compile2(schema, "schema"), acceptance = compile2(accept, "accept");
   if (!shape && !acceptance) return;
   const budget = { nodes: 0, bytes: 0, maximumNodes: 65536, maximumBytes: 1024 * 1024, maximumDepth: 64 };
-  const fail = (reason) => {
-    throw new TaskOutputValidationError("output-syntax-invalid", "output", "$", reason);
+  const fail = (reason2) => {
+    throw new TaskOutputValidationError("output-syntax-invalid", "output", "$", reason2);
   };
   let input2;
   try {
@@ -46297,9 +46312,9 @@ function errorFields2(value) {
   if (typeof value === "string") return value.trim() ? [bound(value)] : [];
   const record5 = object5(value), fields = [];
   for (const name of ["code", "message", "detail", "reason"]) {
-    const text2 = record5[name];
-    if (typeof text2 === "string" && text2.trim()) fields.push(`${name}: ${bound(text2)}`);
-    else if (name === "code" && typeof text2 === "number" && Number.isSafeInteger(text2)) fields.push(`code: ${text2}`);
+    const text3 = record5[name];
+    if (typeof text3 === "string" && text3.trim()) fields.push(`${name}: ${bound(text3)}`);
+    else if (name === "code" && typeof text3 === "number" && Number.isSafeInteger(text3)) fields.push(`code: ${text3}`);
   }
   return fields;
 }
@@ -46449,8 +46464,8 @@ function redactUrl(value) {
     return "[invalid URL]" + suffix;
   }
 }
-function redact(text2) {
-  return text2.replace(/https?:\/\/[^\s"'<>]+/gi, redactUrl).replace(/Bearer\s+\S+/gi, "Bearer [redacted]").replace(/\b(?:sk-|sess-|gh[pousr]_|github_pat_)[A-Za-z0-9_-]{16,}\b/g, "[redacted]").replace(/((?:api[-_ ]?key|token|password|secret|authorization)\s*[:=]\s*)[^\s,;]+/gi, "$1[redacted]");
+function redact(text3) {
+  return text3.replace(/https?:\/\/[^\s"'<>]+/gi, redactUrl).replace(/Bearer\s+\S+/gi, "Bearer [redacted]").replace(/\b(?:sk-|sess-|gh[pousr]_|github_pat_)[A-Za-z0-9_-]{16,}\b/g, "[redacted]").replace(/((?:api[-_ ]?key|token|password|secret|authorization)\s*[:=]\s*)[^\s,;]+/gi, "$1[redacted]");
 }
 function redactData(value) {
   if (typeof value === "string") return redact(value);
@@ -46463,12 +46478,12 @@ function safeMessage(value) {
 }
 function reviewRationale(value) {
   if (typeof value !== "string") return "";
-  let text2 = value.slice(0, 4096).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
-  const sensitive = text2.search(/(?:\\*["'])?\b(?:api[-_ ]?key|(?:aws[-_ ]?)?(?:access|refresh|session|id)[-_ ]?token|session[-_ ]?(?:id|key)|token|password|passwd|secret|client[-_ ]?secret|private[-_ ]?key|(?:aws[-_ ]?)?(?:secret[-_ ]?)?access[-_ ]?key(?:[-_ ]?id)?|credentials?|authorization|authentication|auth|(?:set[-_ ]?|session[-_ ]?)?cookies?|arguments|args|argv|command|prompt|input|payload|params)\b(?:\\*["'])?\s*[:=]/i);
-  if (sensitive >= 0) text2 = text2.slice(0, sensitive) + "[Review details omitted.]";
-  text2 = redact(text2).replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
-  const bytes2 = Buffer.from(text2);
-  if (bytes2.length <= 768) return text2;
+  let text3 = value.slice(0, 4096).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+  const sensitive = text3.search(/(?:\\*["'])?\b(?:api[-_ ]?key|(?:aws[-_ ]?)?(?:access|refresh|session|id)[-_ ]?token|session[-_ ]?(?:id|key)|token|password|passwd|secret|client[-_ ]?secret|private[-_ ]?key|(?:aws[-_ ]?)?(?:secret[-_ ]?)?access[-_ ]?key(?:[-_ ]?id)?|credentials?|authorization|authentication|auth|(?:set[-_ ]?|session[-_ ]?)?cookies?|arguments|args|argv|command|prompt|input|payload|params)\b(?:\\*["'])?\s*[:=]/i);
+  if (sensitive >= 0) text3 = text3.slice(0, sensitive) + "[Review details omitted.]";
+  text3 = redact(text3).replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
+  const bytes2 = Buffer.from(text3);
+  if (bytes2.length <= 768) return text3;
   let end = 700;
   while (end > 0 && (bytes2[end] & 192) === 128) end--;
   return bytes2.subarray(0, end).toString("utf8") + " [Review rationale truncated.]";
@@ -46725,12 +46740,12 @@ var CodexAdapter = class {
     const cursors = /* @__PURE__ */ new Set();
     let bytes2 = 0;
     do {
-      const page = object6(await session.request("model/list", { limit: 100, includeHidden: true, ...cursor ? { cursor } : {} }));
-      if (!Array.isArray(page.data)) throw new Error("Codex returned an invalid model catalogue.");
-      bytes2 += Buffer.byteLength(JSON.stringify(page));
+      const page2 = object6(await session.request("model/list", { limit: 100, includeHidden: true, ...cursor ? { cursor } : {} }));
+      if (!Array.isArray(page2.data)) throw new Error("Codex returned an invalid model catalogue.");
+      bytes2 += Buffer.byteLength(JSON.stringify(page2));
       if (bytes2 > maxOutputBytes) throw new Error("Codex model catalogue exceeds the worker output limit.");
-      for (const model of page.data) models.push(model);
-      cursor = typeof page.nextCursor === "string" ? page.nextCursor : void 0;
+      for (const model of page2.data) models.push(model);
+      cursor = typeof page2.nextCursor === "string" ? page2.nextCursor : void 0;
       if (cursor && cursors.has(cursor)) throw new Error("Codex model catalogue pagination did not advance.");
       if (cursor) cursors.add(cursor);
     } while (cursor);
@@ -46747,7 +46762,7 @@ var CodexAdapter = class {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.7.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config2 = object6(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config2, cwd);
@@ -46862,14 +46877,14 @@ var CodexAdapter = class {
         session.fail(new Error("Command event handler failed."));
       }
     };
-    const append = (stream, text2, flush = false) => {
-      output2[stream] += text2;
+    const append = (stream, text3, flush = false) => {
+      output2[stream] += text3;
       if (Buffer.byteLength(output2.stdout) + Buffer.byteLength(output2.stderr) > maxOutputBytes) {
         const error62 = new Error("Command output exceeded the size limit.");
         session.fail(error62);
         throw error62;
       }
-      logBuffers[stream] += text2;
+      logBuffers[stream] += text3;
       let newline;
       while ((newline = logBuffers[stream].indexOf("\n")) >= 0) {
         emit(logBuffers[stream].slice(0, newline + 1));
@@ -46880,15 +46895,15 @@ var CodexAdapter = class {
         logBuffers[stream] = "";
       }
     };
-    const cancel = (reason) => {
+    const cancel = (reason2) => {
       if (canceled) return;
-      canceled = reason;
+      canceled = reason2;
       if (!sent) {
-        session.fail(reason);
+        session.fail(reason2);
         return;
       }
-      cancelTimer = setTimeout(() => session.fail(reason), this.options.interruptTimeoutMs);
-      void session.request("command/exec/terminate", { processId }, this.options.interruptTimeoutMs).catch(() => session.fail(reason));
+      cancelTimer = setTimeout(() => session.fail(reason2), this.options.interruptTimeoutMs);
+      void session.request("command/exec/terminate", { processId }, this.options.interruptTimeoutMs).catch(() => session.fail(reason2));
     };
     const abort = () => cancel(abortError2("Command execution was interrupted."));
     session = new ProtocolSession(this.options.command, [...this.options.args, ...workerIsolationArguments], request.cwd, this.options.startupTimeoutMs, this.options.shutdownTimeoutMs, (method, params) => {
@@ -46905,7 +46920,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.7.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -46988,15 +47003,15 @@ var CodexAdapter = class {
     let startupTimer;
     let session;
     const assertRecoveryBudget = (source) => {
-      let reason;
+      let reason2;
       try {
         const shared = recoveryBudgetBalance(request.recoveryBudget);
-        if (request.remainingTokenBudget !== void 0 && usage.totalTokens >= request.remainingTokenBudget || shared !== void 0 && shared <= 0) reason = "worker token budget exhausted before result recovery";
+        if (request.remainingTokenBudget !== void 0 && usage.totalTokens >= request.remainingTokenBudget || shared !== void 0 && shared <= 0) reason2 = "worker token budget exhausted before result recovery";
       } catch {
-        reason = "shared worker token budget is invalid before result recovery";
+        reason2 = "shared worker token budget is invalid before result recovery";
       }
-      if (!reason) return;
-      const exhausted = new TaskOutputValidationError("output-budget-exhausted", "output", "$", reason);
+      if (!reason2) return;
+      const exhausted = new TaskOutputValidationError("output-budget-exhausted", "output", "$", reason2);
       Object.defineProperty(exhausted, "outputData", { value: source.outputData, writable: false, enumerable: false });
       Object.defineProperty(exhausted, "workerResult", { value: source.workerResult, writable: false, enumerable: false });
       Object.defineProperty(exhausted, "cause", { value: source, writable: false, enumerable: false });
@@ -47119,14 +47134,14 @@ var CodexAdapter = class {
         if (canceled) session.fail(canceled);
       });
     };
-    const cancel = (reason) => {
+    const cancel = (reason2) => {
       if (canceled) return;
-      canceled = reason;
+      canceled = reason2;
       if (!turnSent) {
-        session.fail(reason);
+        session.fail(reason2);
         return;
       }
-      cancelTimer = setTimeout(() => session.fail(reason), this.options.interruptTimeoutMs);
+      cancelTimer = setTimeout(() => session.fail(reason2), this.options.interruptTimeoutMs);
       interrupt();
     };
     const abort = () => cancel(abortError2());
@@ -47210,8 +47225,8 @@ var CodexAdapter = class {
         const id = String(params.itemId ?? "message");
         if (!activities.has(id)) observedItem({ type: "agentMessage", id }, "running");
         const previous = messages.get(id);
-        const text2 = (previous?.text ?? "") + params.delta;
-        storeMessage(id, { text: text2, ...previous?.phase ? { phase: previous.phase } : {} });
+        const text3 = (previous?.text ?? "") + params.delta;
+        storeMessage(id, { text: text3, ...previous?.phase ? { phase: previous.phase } : {} });
         logChunk(`agent:${id}`, params.delta);
       } else if (method === "item/completed") capture(params.item);
       else if (method === "item/commandExecution/outputDelta" && typeof params.delta === "string") {
@@ -47237,7 +47252,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.7.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.8.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object6(object6(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== void 0 || request.reasoningEffort !== void 0) {
@@ -47614,8 +47629,8 @@ async function safeArtifactParents(root, name) {
     parent = path7.join(parent, segment);
     const entry = await lstat5(parent);
     if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error("Maintenance artifact has an unsafe parent directory");
-    const canonical3 = await realpath4(parent);
-    if (!canonical3.startsWith(root + path7.sep)) throw new Error("Maintenance artifact parent escapes checkout");
+    const canonical4 = await realpath4(parent);
+    if (!canonical4.startsWith(root + path7.sep)) throw new Error("Maintenance artifact parent escapes checkout");
   }
 }
 async function records(workspace, args) {
@@ -47637,24 +47652,24 @@ async function records(workspace, args) {
       const target = await readlink2(file2);
       const resolved = path7.resolve(path7.dirname(file2), target);
       if (path7.isAbsolute(target) || !resolved.startsWith(workspace.root + path7.sep)) throw new Error("External maintenance artifact symlink is unsupported");
-      const canonical3 = await realpath4(resolved).catch((error62) => {
+      const canonical4 = await realpath4(resolved).catch((error62) => {
         if (error62.code === "ENOENT") return resolved;
         throw error62;
       });
-      if (!canonical3.startsWith(workspace.root + path7.sep)) throw new Error("Maintenance artifact symlink chain escapes checkout");
+      if (!canonical4.startsWith(workspace.root + path7.sep)) throw new Error("Maintenance artifact symlink chain escapes checkout");
       await safeArtifactParents(workspace.root, name);
       result2.push({ path: name, kind: "link", mode: stat4.mode & 511, size: stat4.size, hash: hash2(target) });
     } else if (stat4.isFile()) {
       bytes2 += stat4.size;
       if (stat4.size > 512 * 1024 * 1024 || bytes2 > maxArtifactBytes) throw new Error("Maintenance artifacts exceed the bounded 2 GiB limit");
       const digest3 = createHash3("sha256");
-      const descriptor = await open3(file2, constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0));
+      const descriptor = await open4(file2, constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0));
       try {
         await safeArtifactParents(workspace.root, name);
         const opened = await descriptor.stat();
-        const canonical3 = await realpath4(file2);
-        const current2 = await lstat5(canonical3);
-        if (!canonical3.startsWith(workspace.root + path7.sep) || opened.dev !== stat4.dev || opened.ino !== stat4.ino || current2.dev !== opened.dev || current2.ino !== opened.ino || !opened.isFile()) throw new Error("Maintenance artifact changed while opening it");
+        const canonical4 = await realpath4(file2);
+        const current2 = await lstat5(canonical4);
+        if (!canonical4.startsWith(workspace.root + path7.sep) || opened.dev !== stat4.dev || opened.ino !== stat4.ino || current2.dev !== opened.dev || current2.ino !== opened.ino || !opened.isFile()) throw new Error("Maintenance artifact changed while opening it");
         for await (const chunk of descriptor.createReadStream({ autoClose: false })) digest3.update(chunk);
         await safeArtifactParents(workspace.root, name);
         const after = await descriptor.stat(), pathAfter = await lstat5(file2);
@@ -47673,11 +47688,18 @@ async function ignoredArtifacts(workspace) {
 }
 async function maintenanceFingerprint(workspace) {
   await ownGit(workspace);
-  if ((await listGitlinks(workspace.root)).length) return fingerprint(await inspectGitManifest(workspace.root, { includeIgnored: true, enforceOwnedMetadata: true }));
-  const source = await records(workspace, ["ls-files", "-co", "--exclude-standard", "-z"]);
-  const artifacts = await ignoredArtifacts(workspace);
-  const config2 = await git(workspace.root, ["config", "--local", "--null", "--list"]);
-  return fingerprint({ head: await head(workspace.root), status: await git(workspace.root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]), source, artifacts, config: config2 });
+  const before = await readOnlyGitContextDigest(workspace.root, { ignoreHostCheckpoints: true });
+  let state;
+  if ((await listGitlinks(workspace.root)).length) state = { manifest: await inspectGitManifest(workspace.root, { includeIgnored: true, enforceOwnedMetadata: true }) };
+  else {
+    const source = await records(workspace, ["ls-files", "-co", "--exclude-standard", "-z"]);
+    const artifacts = await ignoredArtifacts(workspace);
+    const status = await git(workspace.root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+    state = { status, source, artifacts };
+  }
+  const after = await readOnlyGitContextDigest(workspace.root, { ignoreHostCheckpoints: true });
+  if (before !== after) throw new Error("Maintenance Git state changed during checkpoint hashing");
+  return fingerprint({ git: after, ...state });
 }
 async function reviewMaintenance(workspace, plan) {
   await ownGit(workspace);
@@ -47697,8 +47719,8 @@ async function reviewMaintenance(workspace, plan) {
   const submodules = submoduleStates(await inspectGitManifest(workspace.root, { enforceOwnedMetadata: true }));
   return { base: workspace.git.base, target, branch: workspace.git.branch, ...workspace.git.upstream ? { upstream: workspace.git.upstream } : {}, diff, artifacts, artifactFingerprint, preparedClean, fingerprint: fingerprint({ state, plan }), ...submodules.length ? { submodules } : {} };
 }
-function submoduleStates(manifest, prefix2 = "") {
-  return manifest.submodules.flatMap((child) => [{ path: prefix2 + child.path, commit: child.commit, initialized: child.initialized, ...child.manifest ? { head: child.manifest.head } : {} }, ...child.manifest ? submoduleStates(child.manifest, prefix2 + child.path + "/") : []]);
+function submoduleStates(manifest2, prefix2 = "") {
+  return manifest2.submodules.flatMap((child) => [{ path: prefix2 + child.path, commit: child.commit, initialized: child.initialized, ...child.manifest ? { head: child.manifest.head } : {} }, ...child.manifest ? submoduleStates(child.manifest, prefix2 + child.path + "/") : []]);
 }
 async function savePrivateJson(filename2, value) {
   const temporary = `${filename2}.${randomBytes4(6).toString("hex")}.tmp`;
@@ -47720,9 +47742,9 @@ async function validateSourceSubmodules(workspace) {
   const actual = submoduleStates(await inspectGitManifest(workspace.original, { requireClean: true }));
   if (fingerprint(expected) !== fingerprint(actual)) throw new Error("Original Git submodule state changed; create a new preview");
 }
-function manifestRepositories(manifest, prefix2 = "") {
+function manifestRepositories(manifest2, prefix2 = "") {
   const result2 = /* @__PURE__ */ new Map();
-  for (const child of manifest.submodules) if (child.manifest) {
+  for (const child of manifest2.submodules) if (child.manifest) {
     const name = prefix2 + child.path;
     result2.set(name, child.manifest);
     for (const [key, value] of manifestRepositories(child.manifest, name + "/")) result2.set(key, value);
@@ -47738,10 +47760,10 @@ async function childRepository(root, name) {
   return child;
 }
 async function ownSourceSignature(directory2, state) {
-  const manifest = state ?? await inspectGitManifest(directory2);
+  const manifest2 = state ?? await inspectGitManifest(directory2);
   const status = await git(directory2, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=all"]);
   if (status) throw new Error("Initialized submodule has local changes");
-  return fingerprint({ head: manifest.head, index: manifest.index, files: manifest.files, config: manifest.configFingerprint, branch: await optionalGit(directory2, ["symbolic-ref", "--quiet", "HEAD"]) ?? null });
+  return fingerprint({ head: manifest2.head, index: manifest2.index, files: manifest2.files, config: manifest2.configFingerprint, branch: await optionalGit(directory2, ["symbolic-ref", "--quiet", "HEAD"]) ?? null });
 }
 async function prepareSubmoduleApply(workspace, review, originalHead) {
   const filename2 = path7.join(path7.dirname(workspace.root), "submodule-apply-journal.json");
@@ -48116,8 +48138,8 @@ function sameIdentity(values, label) {
 }
 function metadataId(meta3, names2, nested) {
   const values = names2.map((name) => sourceId(meta3[name], name));
-  const object9 = record3(meta3[nested]);
-  if (object9.id !== void 0) values.push(sourceId(object9.id, `${nested}.id`));
+  const object10 = record3(meta3[nested]);
+  if (object10.id !== void 0) values.push(sourceId(object10.id, `${nested}.id`));
   return sameIdentity(values, nested);
 }
 function callerContext(metaValue) {
@@ -48164,8 +48186,8 @@ function mapProjects(projectsValue, threadsValue, threadId) {
   const projects = inventory2.projects.filter((project) => project.projectKind === "local" && project.hostId === "local" && typeof project.path === "string" && path9.isAbsolute(project.path)).map((project) => ({ projectId: project.projectId, label: project.label, path: project.path, hostId: "local" }));
   if (new Set(projects.map((project) => project.projectId)).size !== projects.length) throw new Error("Codex returned duplicate local project identities.");
   const current2 = caller?.hostId === "local" ? projects.find((project) => project.projectId === caller.projectId) : void 0;
-  const reason = !caller ? "The host did not return this caller chat in its current roster; refresh or reopen its project chat." : caller.hostId !== "local" ? "The host caller chat does not belong to the local execution host." : caller.projectId !== null && caller.projectId !== void 0 ? "The caller's explicit project is not an available local project; its directory cannot override that assignment." : "The caller chat has no explicit project assignment; checking its host-reported execution directory.";
-  return { available: true, projects, ...current2 ? { currentProjectId: current2.projectId, bindingSource: "project-id" } : { reason }, contextSource: current2 ? "thread" : "global-or-unassigned" };
+  const reason2 = !caller ? "The host did not return this caller chat in its current roster; refresh or reopen its project chat." : caller.hostId !== "local" ? "The host caller chat does not belong to the local execution host." : caller.projectId !== null && caller.projectId !== void 0 ? "The caller's explicit project is not an available local project; its directory cannot override that assignment." : "The caller chat has no explicit project assignment; checking its host-reported execution directory.";
+  return { available: true, projects, ...current2 ? { currentProjectId: current2.projectId, bindingSource: "project-id" } : { reason: reason2 }, contextSource: current2 ? "thread" : "global-or-unassigned" };
 }
 async function canonicalProjects(mapped, signal, threadsValue, threadId) {
   signal.throwIfAborted();
@@ -48178,8 +48200,8 @@ async function canonicalProjects(mapped, signal, threadsValue, threadId) {
     } catch (error62) {
       signal.throwIfAborted();
       if (project.projectId === mapped.currentProjectId) {
-        const reason = error62.code ?? "not a directory";
-        throw new Error(`Codex current project directory is unavailable (${reason}); reopen the project chat after restoring its directory.`);
+        const reason2 = error62.code ?? "not a directory";
+        throw new Error(`Codex current project directory is unavailable (${reason2}); reopen the project chat after restoring its directory.`);
       }
       return void 0;
     }
@@ -48478,7 +48500,7 @@ async function inspectProjectTemporaryFiles(workspace, remove = false) {
 import { constants as constants3 } from "node:fs";
 import { createHash as createHash5 } from "node:crypto";
 import { spawn as spawn3 } from "node:child_process";
-import { lstat as lstat8, mkdir as mkdir7, open as open4, readdir as readdir6, readlink as readlink4, realpath as realpath7, rm as rm6, symlink } from "node:fs/promises";
+import { lstat as lstat8, mkdir as mkdir7, open as open5, readdir as readdir6, readlink as readlink4, realpath as realpath7, rm as rm6, symlink } from "node:fs/promises";
 import path11 from "node:path";
 import { StringDecoder as StringDecoder3 } from "node:string_decoder";
 var sourceLimit = 256 * 1024 * 1024;
@@ -48614,20 +48636,20 @@ async function scan(root, includeIgnored, limit2, signal, destination, retainedN
     if (info.isSymbolicLink()) {
       const value = await readlink4(target), resolved = path11.resolve(path11.dirname(target), value);
       if (path11.isAbsolute(value) || !within2(root, resolved)) throw new Error("External local workspace symbolic link is unsupported");
-      const canonical3 = await realpath7(target).catch((error62) => {
+      const canonical4 = await realpath7(target).catch((error62) => {
         if (absent2(error62)) return resolved;
         throw error62;
       });
-      if (!within2(root, canonical3)) throw new Error("Local workspace symbolic link chain escapes its project");
+      if (!within2(root, canonical4)) throw new Error("Local workspace symbolic link chain escapes its project");
       records2[name] = { hash: createHash5("sha256").update(value).digest("hex"), kind: "link", mode };
       if (copy) await symlink(value, copy);
     } else if (info.isFile()) {
-      const input2 = await open4(target, constants3.O_RDONLY | (constants3.O_NOFOLLOW ?? 0));
+      const input2 = await open5(target, constants3.O_RDONLY | (constants3.O_NOFOLLOW ?? 0));
       let output2;
       try {
         const opened = await input2.stat();
         if (!opened.isFile() || opened.dev !== info.dev || opened.ino !== info.ino || await realpath7(target) !== target) throw new Error("Local workspace file changed while opening it");
-        if (copy) output2 = await open4(copy, constants3.O_WRONLY | constants3.O_CREAT | constants3.O_EXCL | (constants3.O_NOFOLLOW ?? 0), mode);
+        if (copy) output2 = await open5(copy, constants3.O_WRONLY | constants3.O_CREAT | constants3.O_EXCL | (constants3.O_NOFOLLOW ?? 0), mode);
         const digest3 = createHash5("sha256");
         for await (const chunk of input2.createReadStream({ autoClose: false })) {
           signal?.throwIfAborted();
@@ -48731,6 +48753,16 @@ async function createLocalWorkspace(projectPath, runDirectory, signal) {
   await baseline(workspace);
   return workspace;
 }
+async function readOnlyProjectCheckpoint(project, signal) {
+  const root = await directory(await realpath7(project)), identity2 = await lstat8(root);
+  const isGit = await gitRoot(root);
+  const before = isGit ? await readOnlyGitContextDigest(root, { ignoreHostCheckpoints: true }) : null;
+  const captured = await scan(root, true, checkpointLimit, signal);
+  const after = isGit ? await readOnlyGitContextDigest(root, { ignoreHostCheckpoints: true }) : null;
+  const current2 = await lstat8(root);
+  if (before !== after || !current2.isDirectory() || current2.isSymbolicLink() || identity2.dev !== current2.dev || identity2.ino !== current2.ino || await realpath7(project) !== root) throw new Error("Read-only project changed while capturing its node checkpoint");
+  return `readonly-v1:${hash3({ rootIdentity: { dev: identity2.dev, ino: identity2.ino }, files: captured.records, git: after })}`;
+}
 async function captureLocalWorkspaceCheckpoints(workspace, signal) {
   signal?.throwIfAborted();
   await validate2(workspace);
@@ -48791,7 +48823,7 @@ async function localWorkspaceDiff(workspace) {
   const current2 = await scan(workspace.root, false, sourceLimit, void 0, void 0, retained);
   const files2 = [], details = [];
   const full = createHash5("sha256");
-  let text2 = "", totalBytes = 0, previewTruncated = false;
+  let text3 = "", totalBytes = 0, previewTruncated = false;
   for (const name of [.../* @__PURE__ */ new Set([...Object.keys(workspace.baseline), ...Object.keys(current2.records)])].sort()) {
     const before = workspace.baseline[name], after = current2.records[name];
     if (equal(before, after)) continue;
@@ -48808,13 +48840,13 @@ Symbolic link or file type changed
     totalBytes += part.bytes;
     previewTruncated ||= part.truncated;
     const normalized = part.text.replaceAll(workspace.baselineRoot + path11.sep, "").replaceAll(workspace.root + path11.sep, "");
-    const remaining = previewLimit - Buffer.byteLength(text2);
+    const remaining = previewLimit - Buffer.byteLength(text3);
     if (Buffer.byteLength(normalized) > remaining) previewTruncated = true;
-    if (remaining > 0) text2 += new StringDecoder3("utf8").write(Buffer.from(normalized).subarray(0, remaining));
+    if (remaining > 0) text3 += new StringDecoder3("utf8").write(Buffer.from(normalized).subarray(0, remaining));
   }
   if (!equal(current2.records, (await scan(workspace.root, false, sourceLimit, void 0, void 0, retained)).records)) throw new Error("Local project changed while generating its review diff");
   await validate2(workspace);
-  return { text: text2, files: files2, fingerprint: hash3(details), previewTruncated, totalBytes, contentSha256: full.digest("hex") };
+  return { text: text3, files: files2, fingerprint: hash3(details), previewTruncated, totalBytes, contentSha256: full.digest("hex") };
 }
 
 // src/deletion.ts
@@ -48857,7 +48889,7 @@ function references(value, directory2, field = "") {
 async function serverReferences(server2, directory2, cwd, cache) {
   const fields = references(server2, directory2);
   const base = cwd ? isObject2(server2) && typeof server2.cwd === "string" ? path12.resolve(cwd, server2.cwd) : cwd : void 0;
-  const canonical3 = (filename2) => {
+  const canonical4 = (filename2) => {
     let value = cache.get(filename2);
     if (!value) {
       value = realpath8(filename2).catch((error62) => {
@@ -48881,7 +48913,7 @@ async function serverReferences(server2, directory2, cwd, cache) {
           for (const search of (configuredPath ?? "").split(path12.delimiter).filter(Boolean)) filenames.push(path12.resolve(base ?? process.cwd(), search, candidate));
         }
         for (const filename2 of filenames) {
-          const resolved = await canonical3(filename2);
+          const resolved = await canonical4(filename2);
           if ((pathReference(filename2, directory2) || resolved && pathReference(resolved, directory2)) && !fields.includes(field)) fields.push(field);
         }
       }
@@ -49083,7 +49115,7 @@ var DeletionService = class {
           try {
             const temporary = await inspectProjectTemporaryFiles(run.workspace);
             for (const item of temporary.owned) {
-              if (!objects.some((object9) => object9.path === item.path)) objects.push({ path: item.path, kind: "project-temp", files: 1, bytes: item.bytes });
+              if (!objects.some((object10) => object10.path === item.path)) objects.push({ path: item.path, kind: "project-temp", files: 1, bytes: item.bytes });
               signatures.push([item.path, (await inventory(item.path)).signature]);
             }
             for (const item of temporary.blocked) blocked.push({ code: "project_temp", runId: run.id, path: item.path, message: item.message });
@@ -49141,8 +49173,8 @@ var DeletionService = class {
     const directories = [...selectedIds].map((id) => ({ id, directory: this.store.directory(id) }));
     const canonicalRoot = await realpath8(await this.store.ownedDirectory());
     const directoryVariants = directories.flatMap((entry) => {
-      const canonical3 = canonicalDirectories.get(entry.id) ?? path12.join(canonicalRoot, entry.id);
-      return [{ ...entry }, ...canonical3 !== entry.directory ? [{ id: entry.id, directory: canonical3 }] : []];
+      const canonical4 = canonicalDirectories.get(entry.id) ?? path12.join(canonicalRoot, entry.id);
+      return [{ ...entry }, ...canonical4 !== entry.directory ? [{ id: entry.id, directory: canonical4 }] : []];
     });
     let activationEvidence = selected.some((run) => Boolean(run.activation || run.maintenance?.activation));
     for (const run of all) {
@@ -49187,9 +49219,9 @@ var DeletionService = class {
       if (!unchanged) result2.blocked.push({ code: "preview_changed", message: "\u5220\u9664\u8303\u56F4\u3001\u8FD0\u884C\u72B6\u6001\u6216\u5F15\u7528\u5DF2\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u9884\u89C8\u5E76\u786E\u8BA4\u5220\u9664\u3002" });
       if (result2.blocked.length) return result2;
       result2.alreadyGone = true;
-      for (const object9 of preview.objects) {
+      for (const object10 of preview.objects) {
         try {
-          await lstat9(object9.path);
+          await lstat9(object10.path);
           result2.alreadyGone = false;
           break;
         } catch (error62) {
@@ -49372,7 +49404,7 @@ var maximumBytes = 3 * 1024 * KiB;
 var maximumDiffBytes = 256 * KiB;
 var maximumLogBytes = 128 * KiB;
 var maximumNewControlBytes = 2 * 1024 * KiB;
-var controlKeys = ["id", "revision", "meta", "script", "args", "projectPath", "allowWrite", "networkAccess", "allowedMcpServers", "allowedMcpTools", "workspaceMode", "approvalMode", "localGitWrite", "workspace", "workspacePath", "maintenance", "nodeSettings", "limits", "executionSettings", "sourceDefinition", "execution", "review", "application", "deletionPending", "deletionTarget", "scriptDigest", "contextDigest", "workspaceCheckpoint"];
+var controlKeys = ["id", "revision", "meta", "script", "args", "projectPath", "allowWrite", "networkAccess", "allowedMcpServers", "allowedMcpTools", "workspaceMode", "approvalMode", "localGitWrite", "workspace", "workspacePath", "maintenance", "nodeSettings", "limits", "executionSettings", "sourceDefinition", "execution", "review", "application", "deletionPending", "deletionTarget", "scriptDigest", "contextDigest", "workspaceCheckpoint", "nodeCheckpoint", "checkpointState"];
 var TransportProjectionError = class extends Error {
   code;
   constructor(code, message2) {
@@ -49407,7 +49439,10 @@ function pageNumber(value, fallback, maximum, name) {
   return result2;
 }
 function controlPlane(source) {
-  return Object.fromEntries(controlKeys.filter((key) => Object.hasOwn(source, key)).map((key) => [key, source[key]]));
+  return Object.fromEntries(controlKeys.filter((key) => Object.hasOwn(source, key)).map((key) => {
+    const state = key === "checkpointState" ? object8(source[key]) : void 0;
+    return [key, state ? { status: state.status } : source[key]];
+  }));
 }
 function assertControlPlaneTransportable(value) {
   let size;
@@ -49429,7 +49464,7 @@ function projectRunForTransport(run, options = {}) {
   const mark = (field) => {
     fields.add(field);
   };
-  const text2 = (record5, key, limit2, field) => {
+  const text3 = (record5, key, limit2, field) => {
     if (typeof record5[key] === "string" && Buffer.byteLength(record5[key], "utf8") > limit2) {
       record5[key] = prefix(record5[key], limit2);
       mark(field);
@@ -49493,7 +49528,7 @@ function projectRunForTransport(run, options = {}) {
     const logs = view.logs;
     for (const entry of logs) {
       const log = object8(entry);
-      if (log) text2(log, "message", 16 * KiB, "logs");
+      if (log) text3(log, "message", 16 * KiB, "logs");
     }
     const selected = recent(logs, limit2);
     if (selected.length !== logs.length) {
@@ -49502,18 +49537,20 @@ function projectRunForTransport(run, options = {}) {
     }
   };
   limitLogs(maximumLogBytes);
-  text2(view, "error", 16 * KiB, "error");
+  text3(view, "error", 16 * KiB, "error");
+  const checkpointState = object8(view.checkpointState);
+  if (checkpointState) text3(checkpointState, "error", 4 * KiB, "checkpointState.error");
   if (Object.hasOwn(view, "result")) allOutputFields.push({ record: view, key: "result", field: "result" });
   tasks.forEach((task, index) => {
     const base = `tasks[${index}]`;
-    text2(task, "prompt", Math.min(8 * KiB, Math.max(64, Math.floor(256 * KiB / Math.max(1, tasks.length)))), `${base}.prompt`);
-    text2(task, "error", 4 * KiB, `${base}.error`);
+    text3(task, "prompt", Math.min(8 * KiB, Math.max(64, Math.floor(256 * KiB / Math.max(1, tasks.length)))), `${base}.prompt`);
+    text3(task, "error", 4 * KiB, `${base}.error`);
     if (Object.hasOwn(task, "output")) allOutputFields.push({ record: task, key: "output", field: `${base}.output` });
     if (Array.isArray(task.attempts)) task.attempts.forEach((value, attemptIndex) => {
       const attempt = object8(value);
       if (!attempt) return;
       const field = `${base}.attempts[${attemptIndex}]`;
-      text2(attempt, "error", 4 * KiB, `${field}.error`);
+      text3(attempt, "error", 4 * KiB, `${field}.error`);
       if (Object.hasOwn(attempt, "output")) allOutputFields.push({ record: attempt, key: "output", field: `${field}.output` });
       if (Array.isArray(attempt.activities)) activities.push({ record: attempt, field: `${field}.activities` });
     });
@@ -49541,7 +49578,7 @@ function projectRunForTransport(run, options = {}) {
   if (bytes(view) > maximumBytes) {
     limitDiff(64 * KiB);
     limitLogs(32 * KiB);
-    tasks.forEach((task, index) => text2(task, "prompt", Math.max(64, Math.floor(64 * KiB / Math.max(1, tasks.length))), `tasks[${index}].prompt`));
+    tasks.forEach((task, index) => text3(task, "prompt", Math.max(64, Math.floor(64 * KiB / Math.max(1, tasks.length))), `tasks[${index}].prompt`));
     for (const entry of allOutputFields) boundOutput(entry.record, entry.key, Math.max(128, Math.floor(128 * KiB / outputCount)), entry.field);
     for (const entry of activities) if (entry.record.activities.length) {
       entry.record.activities = [];
@@ -49578,21 +49615,21 @@ function listSummary(run) {
   };
 }
 function listPage(runs, offset2, limit2) {
-  const page = [];
+  const page2 = [];
   const budget = 3 * 1024 * 1024;
   let bytes2 = Buffer.byteLength(JSON.stringify({ runs: [], listSummary: true, totalRuns: runs.length, nextOffset: Number.MAX_SAFE_INTEGER }));
   for (const run of runs.slice(offset2, offset2 + limit2)) {
     const summary = listSummary(run);
-    const size = Buffer.byteLength(JSON.stringify(summary)) + (page.length ? 1 : 0);
+    const size = Buffer.byteLength(JSON.stringify(summary)) + (page2.length ? 1 : 0);
     if (bytes2 + size > budget) {
-      if (!page.length) throw new Error("Workflow list identity exceeds its transport budget; the original record was preserved.");
+      if (!page2.length) throw new Error("Workflow list identity exceeds its transport budget; the original record was preserved.");
       break;
     }
     bytes2 += size;
-    page.push(summary);
+    page2.push(summary);
   }
-  const nextOffset = offset2 + page.length;
-  return { runs: page, listSummary: true, totalRuns: runs.length, ...nextOffset < runs.length ? { nextOffset } : {} };
+  const nextOffset = offset2 + page2.length;
+  return { runs: page2, listSummary: true, totalRuns: runs.length, ...nextOffset < runs.length ? { nextOffset } : {} };
 }
 function acceptedRun(run) {
   try {
@@ -49636,7 +49673,7 @@ function registerPanelToolWithIcons(server2, register) {
   }
 }
 function createServer(engine2, options = {}) {
-  const serverInfo = { name: "workflows", version: "0.7.0", icons: panelIcons };
+  const serverInfo = { name: "workflows", version: "0.8.0", icons: panelIcons };
   const panelHtml = readFileSync3(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const server2 = new McpServer(serverInfo);
   const templates = new TemplateStore(engine2.store);
@@ -49781,10 +49818,29 @@ function createServer(engine2, options = {}) {
   server2.registerTool("workflow_get_node_process", {
     title: "\u67E5\u770B\u8282\u70B9\u8FC7\u7A0B",
     description: "Read concise node or phase activities and errors. Brief view excludes task prompts and raw diagnostics; developer detail explicitly adds bounded node logs. Does not execute a workflow.",
-    inputSchema: { id, taskId: external_exports.string().min(1).max(128).optional(), phase: external_exports.string().min(1).max(256).optional(), scope: external_exports.enum(["workflow", "unphased"]).optional(), detail: external_exports.enum(["brief", "developer"]).optional() },
+    inputSchema: { id, taskId: external_exports.string().min(1).max(128).optional(), attemptId: external_exports.string().min(1).max(128).optional(), phase: external_exports.string().min(1).max(256).optional(), scope: external_exports.enum(["workflow", "unphased"]).optional(), detail: external_exports.enum(["brief", "developer"]).optional() },
     annotations,
     _meta: { ui: { visibility: ["model", "app"] } }
-  }, async (input2) => safe(async () => ({ process: await engine2.getNodeProcess(input2.id, { ...input2.taskId ? { taskId: input2.taskId } : {}, ...input2.phase ? { phase: input2.phase } : {}, ...input2.scope ? { scope: input2.scope } : {}, ...input2.detail ? { detail: input2.detail } : {} }) })));
+  }, async (input2) => safe(async () => ({ process: await engine2.getNodeProcess(input2.id, { ...input2.taskId ? { taskId: input2.taskId } : {}, ...input2.attemptId ? { attemptId: input2.attemptId } : {}, ...input2.phase ? { phase: input2.phase } : {}, ...input2.scope ? { scope: input2.scope } : {}, ...input2.detail ? { detail: input2.detail } : {} }) })));
+  server2.registerTool("workflow_preview_recovery", {
+    title: "\u9884\u89C8\u8282\u70B9\u6062\u590D",
+    description: "Inspect a stopped workflow recovery without executing, invalidating results or changing files. Reports reusable completed results, tasks to rerun, blockers and a compare-and-swap fingerprint. Recovery preserves current project files; this is not file rewind or reversal of external effects.",
+    inputSchema: { id, revision, retryFromTaskId: external_exports.string().regex(/^task_[1-9][0-9]*$/).optional() },
+    annotations,
+    _meta: { ui: { visibility: ["model", "app"] } }
+  }, async (input2) => safe(async () => ({ preview: await engine2.previewRecovery({ id: input2.id, revision: input2.revision, ...input2.retryFromTaskId ? { retryFromTaskId: input2.retryFromTaskId } : {} }) })));
+  server2.registerTool("workflow_get_checkpoints", {
+    title: "\u8BFB\u53D6\u5DE5\u4F5C\u6D41\u68C0\u67E5\u70B9",
+    description: "Read paged, recorded workflow progress checkpoints without resuming execution or restoring old files. A historical checkpoint does not grant file rewind or permit replay of stale results.",
+    inputSchema: { id, offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(100).optional() },
+    annotations
+  }, async (input2) => safe(async () => ({ ...await engine2.listCheckpoints({ id: input2.id, ...input2.offset !== void 0 ? { offset: input2.offset } : {}, ...input2.limit !== void 0 ? { limit: input2.limit } : {} }) })));
+  server2.registerTool("workflow_get_task_history", {
+    title: "\u8BFB\u53D6\u8282\u70B9\u5386\u53F2",
+    description: "Read bounded, paged archived task attempts, including tasks replaced by later branches. Brief history excludes prompts and raw outputs; developer detail reads one explicit historyId. Historical attempts are evidence, not current task results or resume authorization.",
+    inputSchema: { id, offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(100).optional(), taskId: external_exports.string().regex(/^task_[1-9][0-9]*$/).optional(), historyId: external_exports.string().min(1).max(128).optional(), detail: external_exports.enum(["brief", "developer"]).optional() },
+    annotations
+  }, async (input2) => safe(async () => ({ ...await engine2.taskHistory({ id: input2.id, ...input2.offset !== void 0 ? { offset: input2.offset } : {}, ...input2.limit !== void 0 ? { limit: input2.limit } : {}, ...input2.taskId ? { taskId: input2.taskId } : {}, ...input2.historyId ? { historyId: input2.historyId } : {}, ...input2.detail ? { detail: input2.detail } : {} }) })));
   server2.registerTool("workflow_preview_deletion", {
     title: "\u9884\u89C8\u5DE5\u4F5C\u6D41\u5F7B\u5E95\u6E05\u7406",
     description: "Inspect complete owned-data deletion of one run, or a saved definition and its reliably associated runs. Explicit runIds may select legacy records; names never establish association. Returns exact scope, bytes and blockers, without deleting or stopping anything.",
@@ -49807,25 +49863,25 @@ function createServer(engine2, options = {}) {
   const appOnly = { ui: { visibility: ["app"] } };
   server2.registerTool("workflow_panel_lease", { description: "Maintain the task panel lifecycle lease; losing the lease stops its active workflows.", inputSchema: { leaseId: external_exports.string().optional(), release: external_exports.boolean().optional() }, _meta: appOnly, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async (input2) => safe(() => engine2.lease({ ...input2.leaseId ? { leaseId: input2.leaseId } : {}, ...input2.release !== void 0 ? { release: input2.release } : {} })));
   for (const action of ["start", "resume"]) server2.registerTool(`workflow_${action}`, {
-    description: `${action} the previewed workflow when the user has authorized execution. Requires the current revision and declared project/write/network scope. UI callers also pass their live panel lease; chat callers omit leaseId.${action === "resume" ? " Optional retryFromTaskId explicitly reruns that task and invalidates following results, preserving the earlier prefix. Already-started non-idempotent operations cannot be repeated. Optional approvalMode explicitly selects native automatic review or never for subsequent workers, preserving script and granted scope; omitted mode preserves legacy behavior." : ""}`,
-    inputSchema: { id, revision, leaseId: external_exports.string().min(1).optional(), ...action === "resume" ? { retryFromTaskId: external_exports.string().regex(/^task_[1-9][0-9]*$/).optional(), approvalMode } : {} },
+    description: `${action} the previewed workflow when the user has authorized execution. Requires the current revision and declared project/write/network scope. UI callers also pass their live panel lease; chat callers omit leaseId.${action === "resume" ? " Read workflow_preview_recovery first and pass its recoveryFingerprint to compare the confirmed recovery scope and current files again under the execution lock. Recovery preserves current files and does not rewind external effects. Optional retryFromTaskId explicitly reruns that task and invalidates following results, preserving the earlier prefix. Already-started non-idempotent operations cannot be repeated. Optional approvalMode explicitly selects native automatic review or never for subsequent workers, preserving script and granted scope; omitted mode preserves legacy behavior." : ""}`,
+    inputSchema: { id, revision, leaseId: external_exports.string().min(1).optional(), ...action === "resume" ? { retryFromTaskId: external_exports.string().regex(/^task_[1-9][0-9]*$/).optional(), recoveryFingerprint: external_exports.string().regex(/^[a-f0-9]{64}$/).optional(), approvalMode } : {} },
     _meta: { ui: { visibility: ["model", "app"] } },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }
-  }, async (input2) => safe(async () => acceptedRun(await engine2.start({ id: input2.id, revision: input2.revision, ...input2.leaseId ? { leaseId: input2.leaseId } : {}, ..."retryFromTaskId" in input2 && typeof input2.retryFromTaskId === "string" ? { retryFromTaskId: input2.retryFromTaskId } : {}, ..."approvalMode" in input2 && input2.approvalMode !== void 0 ? { approvalMode: input2.approvalMode } : {} }, action === "resume"))));
+  }, async (input2) => safe(async () => acceptedRun(await engine2.start({ id: input2.id, revision: input2.revision, ...input2.leaseId ? { leaseId: input2.leaseId } : {}, ..."retryFromTaskId" in input2 && typeof input2.retryFromTaskId === "string" ? { retryFromTaskId: input2.retryFromTaskId } : {}, ..."recoveryFingerprint" in input2 && typeof input2.recoveryFingerprint === "string" ? { recoveryFingerprint: input2.recoveryFingerprint } : {}, ..."approvalMode" in input2 && input2.approvalMode !== void 0 ? { approvalMode: input2.approvalMode } : {} }, action === "resume"))));
   server2.registerTool("workflow_cancel_task", { description: "Cancel one active task on the user request. The script can handle its failure; other tasks keep running.", inputSchema: { id, taskId: external_exports.string().min(1) }, _meta: { ui: { visibility: ["model", "app"] } }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } }, async (input2) => safe(async () => acceptedRun(await engine2.cancelTask(input2.id, input2.taskId))));
   server2.registerTool("workflow_apply", { description: "Apply the final reviewed changes when the user has authorized application. Only isolated snapshot/git-worktree runs can apply; local runs already changed the original project and reject this action. Requires the current revision and completed review; detects baseline conflicts and retains project edits. Maintenance activation uses only its predeclared command.", inputSchema: { id, revision }, _meta: { ui: { visibility: ["model", "app"] } }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } }, async (input2) => safe(async () => acceptedRun(await engine2.apply(input2.id, input2.revision))));
   return server2;
 }
 
 // src/engine.ts
-import { randomBytes as randomBytes8, createHash as createHash9 } from "node:crypto";
-import { lstat as lstat12, realpath as realpath11, stat as stat3 } from "node:fs/promises";
-import path15 from "node:path";
+import { randomBytes as randomBytes9, createHash as createHash10 } from "node:crypto";
+import { lstat as lstat13, realpath as realpath12, stat as stat3 } from "node:fs/promises";
+import path16 from "node:path";
 
 // src/snapshot-checkpoint.ts
 import { createHash as createHash7 } from "node:crypto";
 import { constants as constants4 } from "node:fs";
-import { lstat as lstat10, open as open5, readdir as readdir8, readlink as readlink5, realpath as realpath9 } from "node:fs/promises";
+import { lstat as lstat10, open as open6, readdir as readdir8, readlink as readlink5, realpath as realpath9 } from "node:fs/promises";
 import path13 from "node:path";
 var maxFiles2 = 1e5;
 var maxBytes = 2 * 1024 * 1024 * 1024;
@@ -49861,7 +49917,7 @@ async function assertOwnedGit(root) {
     throw error62;
   }
   if (!info.isFile() || info.isSymbolicLink() || info.size > 65536) throw new Error("Snapshot Git cannot share alternate object storage");
-  const descriptor = await open5(alternates, constants4.O_RDONLY | (constants4.O_NOFOLLOW ?? 0));
+  const descriptor = await open6(alternates, constants4.O_RDONLY | (constants4.O_NOFOLLOW ?? 0));
   try {
     const opened = await descriptor.stat();
     if (!opened.isFile() || opened.size > 65536 || info.dev !== opened.dev || info.ino !== opened.ino || await realpath9(alternates) !== alternates) throw new Error("Snapshot Git cannot share alternate object storage");
@@ -49915,7 +49971,7 @@ async function snapshotFingerprint(workspace, signal) {
     } else if (before.isFile()) {
       bytes2 += before.size;
       if (++files2 > maxFiles2 || before.size > maxFileBytes || bytes2 > maxBytes) throw new Error("Snapshot checkpoint exceeds its bounded 100000-file, 512 MiB per file or 2 GiB total limit");
-      const descriptor = await open5(filename2, constants4.O_RDONLY | (constants4.O_NOFOLLOW ?? 0));
+      const descriptor = await open6(filename2, constants4.O_RDONLY | (constants4.O_NOFOLLOW ?? 0));
       try {
         const opened = await descriptor.stat();
         if (!opened.isFile() || before.dev !== opened.dev || before.ino !== opened.ino || await realpath9(filename2) !== filename2) throw new Error("Snapshot file ownership changed while opening it");
@@ -49941,8 +49997,8 @@ async function snapshotFingerprint(workspace, signal) {
 }
 
 // src/stop-context.ts
-function stopSummary(reason) {
-  switch (reason) {
+function stopSummary(reason2) {
+  switch (reason2) {
     case "requested":
       return "\u5DF2\u6309\u505C\u6B62\u8BF7\u6C42\u4E2D\u65AD\uFF0C\u8FDB\u5EA6\u5DF2\u4FDD\u5B58\u3002";
     case "panel-closed":
@@ -49982,35 +50038,56 @@ function resultCheckFailure(run) {
 function diagnosticText(value, maximum = 4e3) {
   return value.replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]").replace(/((?:api[_ -]?key|access[_ -]?token|token|secret|password|authorization)\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/gi, "$1[redacted]").replace(/\x1b\[[0-9;]*m/g, "").slice(0, maximum);
 }
-function nodeProcess(run, input2) {
+function nodeProcess(run, input2, checkpointCoverage) {
   if ([input2.taskId, input2.phase, input2.scope].filter(Boolean).length !== 1) throw new Error("Select exactly one workflow task, phase or scope");
+  if (input2.attemptId !== void 0 && !input2.taskId) throw new Error("Selecting an attempt requires a taskId");
   const tasks = input2.scope === "workflow" ? run.tasks : input2.scope === "unphased" ? run.tasks.filter((task) => !task.phase) : input2.taskId ? run.tasks.filter((task) => task.id === input2.taskId) : run.tasks.filter((task) => task.phase === input2.phase);
   if (input2.taskId && !tasks.length) throw new Error("Unknown workflow task");
   if (input2.phase && !tasks.length && !run.meta.phases?.some((phase) => phase.title === input2.phase)) throw new Error("Unknown workflow phase");
+  const selectedTask = input2.taskId ? tasks[0] : void 0;
+  const selectedAttempt = selectedTask && (input2.attemptId !== void 0 ? selectedTask.attempts.find((attempt) => attempt.id === input2.attemptId) : selectedTask.attempts.at(-1));
+  if (input2.attemptId !== void 0 && !selectedAttempt) throw new Error("Unknown workflow task attempt");
+  const latestAttemptSelected = !selectedTask || selectedAttempt === selectedTask.attempts.at(-1);
   const last = tasks.at(-1);
-  const status = input2.scope === "workflow" && ["preparing", "failed", "stopping", "stopped"].includes(run.execution) ? run.execution : tasks.some((task) => task.status === "running") ? "running" : tasks.some((task) => task.status === "stopping") ? "stopping" : tasks.some((task) => task.status === "failed") ? "failed" : tasks.some((task) => task.status === "queued") ? "queued" : tasks.some((task) => task.status === "interrupted") ? "interrupted" : tasks.length ? "completed" : "planned";
+  const status = selectedTask ? selectedAttempt?.status ?? selectedTask.status : input2.scope === "workflow" && ["preparing", "failed", "stopping", "stopped"].includes(run.execution) ? run.execution : tasks.some((task) => task.status === "running") ? "running" : tasks.some((task) => task.status === "stopping") ? "stopping" : tasks.some((task) => task.status === "failed") ? "failed" : tasks.some((task) => task.status === "queued") ? "queued" : tasks.some((task) => task.status === "interrupted") ? "interrupted" : tasks.length ? "completed" : "planned";
   const prep = input2.scope === "workflow" ? (run.preparation?.stages ?? []).map((stage) => ({ ...stage, kind: "initializing" })) : [];
-  const activities = [...prep, ...tasks.flatMap((task) => task.attempts.flatMap((attempt) => attempt.activities ?? []))].slice(-100).map((activity) => ({ ...activity, label: diagnosticText(activity.label, 100), ...activity.detail ? { detail: diagnosticText(activity.detail, 240) } : {} }));
-  const current2 = tasks.find((task) => task.currentActivity?.status === "running")?.currentActivity ?? last?.currentActivity;
+  const attemptActivities = selectedTask ? selectedAttempt?.activities ?? [] : tasks.flatMap((task) => task.attempts.flatMap((attempt) => attempt.activities ?? []));
+  const activities = [...prep, ...attemptActivities].slice(-100).map((activity) => ({ ...activity, label: diagnosticText(activity.label, 100), ...activity.detail ? { detail: diagnosticText(activity.detail, 240) } : {} }));
+  const current2 = selectedTask ? [...attemptActivities].reverse().find((activity) => activity.status === "running") ?? attemptActivities.at(-1) : tasks.find((task) => task.currentActivity?.status === "running")?.currentActivity ?? last?.currentActivity;
   const failure2 = resultCheckFailure(run);
   const reviewFailed = input2.scope === "workflow" && failureContext(run)?.kind === "review";
   const newPreviewRequired = input2.scope === "workflow" && failureContext(run)?.recovery === "new-preview";
-  const failedAfterTasks = Boolean(failure2 && (input2.scope === "workflow" || input2.phase && input2.phase === failure2.phase || tasks.some((task) => task.id === failure2.afterTaskId)));
-  const error62 = reviewFailed ? run.error : tasks.find((task) => task.status === "failed")?.error ?? (input2.scope === "workflow" || failedAfterTasks ? run.error : void 0);
-  const summary = newPreviewRequired ? "\u65E7\u68C0\u67E5\u70B9\u65E0\u6CD5\u590D\u7528\u3002\u70B9\u51FB\u201C\u91CD\u65B0\u68C0\u67E5\u201D\u521B\u5EFA\u65B0\u9884\u89C8\uFF0C\u6838\u5BF9\u5F53\u524D\u9879\u76EE\u540E\u518D\u542F\u52A8\uFF1B\u73B0\u6709\u6587\u4EF6\u548C\u65E7\u8FD0\u884C\u4FDD\u7559\u3002" : reviewFailed ? run.tasks.every((task) => task.status === "completed") ? "\u4EFB\u52A1\u5DF2\u5B8C\u6210\uFF0C\u751F\u6210\u6539\u52A8\u5BA1\u67E5\u5931\u8D25\uFF0C\u53EF\u91CD\u8BD5\u5BA1\u67E5\u3002" : "\u90E8\u5206\u4EFB\u52A1\u672A\u6210\u529F\uFF0C\u7EE7\u7EED\u65F6\u4F1A\u91CD\u65B0\u6267\u884C\u5931\u6548\u4EFB\u52A1\u5E76\u91CD\u65B0\u751F\u6210\u5BA1\u67E5\u3002" : failedAfterTasks ? "\u4EFB\u52A1\u6267\u884C\u5DF2\u5B8C\u6210\uFF0C\u4F46\u5DE5\u4F5C\u6D41\u5728\u540E\u7EED\u68C0\u67E5\u6216\u7ED3\u679C\u5224\u65AD\u65F6\u5931\u8D25\u3002\u8BF7\u6838\u5BF9\u9519\u8BEF\uFF0C\u518D\u9009\u62E9\u662F\u5426\u4ECE\u6B64\u8282\u70B9\u91CD\u8BD5\u3002" : status === "failed" ? "\u672C\u8282\u70B9\u6267\u884C\u5931\u8D25\uFF0C\u67E5\u770B\u9519\u8BEF\u4E0E\u8FC7\u7A0B\u540E\u518D\u51B3\u5B9A\u662F\u5426\u7EE7\u7EED\u3002" : status === "completed" ? "\u672C\u8282\u70B9\u5DF2\u5B8C\u6210\u3002" : status === "preparing" ? prep.find((activity) => activity.status === "running")?.label ?? "\u6B63\u5728\u51C6\u5907\u5DE5\u4F5C\u6D41\u3002" : status === "running" ? current2?.label ?? "\u6B63\u5728\u6267\u884C\u4EFB\u52A1\uFF0C\u7B49\u5F85\u65B0\u7684\u6D3B\u52A8\u3002" : status === "stopping" ? "\u6B63\u5728\u7B49\u5F85\u4EFB\u52A1\u9000\u51FA\u3002" : status === "interrupted" || status === "stopped" ? stopSummary(run.stopReason) : "\u672C\u8282\u70B9\u5C1A\u672A\u6267\u884C\u3002";
+  const failedAfterTasks = Boolean(latestAttemptSelected && failure2 && (input2.scope === "workflow" || input2.phase && input2.phase === failure2.phase || tasks.some((task) => task.id === failure2.afterTaskId)));
+  const taskError = selectedTask ? selectedAttempt ? selectedAttempt.error : selectedTask.error : tasks.find((task) => task.status === "failed")?.error;
+  const validationError = selectedTask?.status === "failed" && latestAttemptSelected && selectedAttempt?.status === "completed" ? selectedTask.error : void 0;
+  const error62 = reviewFailed ? run.error : taskError ?? (input2.scope === "workflow" || failedAfterTasks ? run.error : void 0);
+  const summary = validationError ? "\u5F53\u524D\u7ED3\u679C\u6216\u68C0\u67E5\u70B9\u6821\u9A8C\u5931\u8D25\uFF0C\u5386\u53F2\u6267\u884C\u72B6\u6001\u4FDD\u7559\u3002\u8BF7\u6838\u5BF9\u6821\u9A8C\u539F\u56E0\u540E\u518D\u9009\u62E9\u6062\u590D\u65B9\u5F0F\u3002" : newPreviewRequired ? "\u65E7\u68C0\u67E5\u70B9\u65E0\u6CD5\u590D\u7528\u3002\u70B9\u51FB\u201C\u91CD\u65B0\u68C0\u67E5\u201D\u521B\u5EFA\u65B0\u9884\u89C8\uFF0C\u6838\u5BF9\u5F53\u524D\u9879\u76EE\u540E\u518D\u542F\u52A8\uFF1B\u73B0\u6709\u6587\u4EF6\u548C\u65E7\u8FD0\u884C\u4FDD\u7559\u3002" : reviewFailed ? run.tasks.every((task) => task.status === "completed") ? "\u4EFB\u52A1\u5DF2\u5B8C\u6210\uFF0C\u751F\u6210\u6539\u52A8\u5BA1\u67E5\u5931\u8D25\uFF0C\u53EF\u91CD\u8BD5\u5BA1\u67E5\u3002" : "\u90E8\u5206\u4EFB\u52A1\u672A\u6210\u529F\uFF0C\u7EE7\u7EED\u65F6\u4F1A\u91CD\u65B0\u6267\u884C\u5931\u6548\u4EFB\u52A1\u5E76\u91CD\u65B0\u751F\u6210\u5BA1\u67E5\u3002" : failedAfterTasks ? "\u4EFB\u52A1\u6267\u884C\u5DF2\u5B8C\u6210\uFF0C\u4F46\u5DE5\u4F5C\u6D41\u5728\u540E\u7EED\u68C0\u67E5\u6216\u7ED3\u679C\u5224\u65AD\u65F6\u5931\u8D25\u3002\u8BF7\u6838\u5BF9\u9519\u8BEF\uFF0C\u518D\u9009\u62E9\u662F\u5426\u4ECE\u6B64\u8282\u70B9\u91CD\u8BD5\u3002" : status === "failed" ? "\u672C\u8282\u70B9\u6267\u884C\u5931\u8D25\uFF0C\u67E5\u770B\u9519\u8BEF\u4E0E\u8FC7\u7A0B\u540E\u518D\u51B3\u5B9A\u662F\u5426\u7EE7\u7EED\u3002" : status === "completed" ? "\u672C\u8282\u70B9\u5DF2\u5B8C\u6210\u3002" : status === "preparing" ? prep.find((activity) => activity.status === "running")?.label ?? "\u6B63\u5728\u51C6\u5907\u5DE5\u4F5C\u6D41\u3002" : status === "running" ? current2?.label ?? "\u6B63\u5728\u6267\u884C\u4EFB\u52A1\uFF0C\u7B49\u5F85\u65B0\u7684\u6D3B\u52A8\u3002" : status === "stopping" ? "\u6B63\u5728\u7B49\u5F85\u4EFB\u52A1\u9000\u51FA\u3002" : status === "interrupted" || status === "stopped" ? stopSummary(run.stopReason) : "\u672C\u8282\u70B9\u5C1A\u672A\u6267\u884C\u3002";
   const ids = new Set(tasks.map((task) => task.id));
+  const scopedLogs = run.logs;
+  const logs = scopedLogs.filter((log) => (input2.scope === "workflow" || log.taskId && ids.has(log.taskId)) && (!selectedTask || !log.attemptId || log.attemptId === selectedAttempt?.id));
+  const legacyLogCount = logs.filter((log) => log.taskId && !log.attemptId).length;
+  const covered = Boolean(run.nodeCheckpoint && tasks.length && tasks.every((task) => {
+    const attempt = selectedTask ? selectedAttempt : task.attempts.at(-1);
+    return attempt && checkpointCoverage?.has(`${task.id}:${attempt.id}`);
+  }));
   return {
     id: run.id,
     ...input2.taskId ? { taskId: input2.taskId } : {},
     ...input2.phase ? { phase: input2.phase } : {},
     ...input2.scope ? { scope: input2.scope } : {},
+    ...selectedTask ? {
+      attempts: selectedTask.attempts.map((attempt) => ({ id: attempt.id, status: attempt.status, ...attempt.startedAt ? { startedAt: attempt.startedAt } : {}, ...attempt.endedAt ? { endedAt: attempt.endedAt } : {}, ...attempt.recoveryAttempts !== void 0 ? { recoveryAttempts: attempt.recoveryAttempts } : {} })),
+      ...selectedAttempt ? { selectedAttemptId: selectedAttempt.id } : {}
+    } : {},
+    checkpoint: { state: run.checkpointState?.status ?? (run.nodeCheckpoint ? "ready" : "unavailable"), ...run.nodeCheckpoint ? { latest: { ...run.nodeCheckpoint } } : {}, covered },
     label: diagnosticText(input2.scope === "workflow" ? run.meta.name : input2.scope === "unphased" ? "\u672A\u5206\u9636\u6BB5\u7684\u4EFB\u52A1" : input2.phase ?? last?.label ?? `\u4EFB\u52A1 ${(last?.index ?? 0) + 1}`, 120),
     status,
     ...current2 ? { currentActivity: { ...current2, label: diagnosticText(current2.label, 100), ...current2.detail ? { detail: diagnosticText(current2.detail, 240) } : {} } } : {},
     activities,
     summary: diagnosticText(summary, 240),
     ...error62 ? { error: diagnosticText(error62, 480) } : {},
-    ...input2.detail === "developer" ? { logs: run.logs.filter((log) => input2.scope === "workflow" || log.taskId && ids.has(log.taskId)).slice(-200).map((log) => ({ ...log, message: diagnosticText(log.message) })) } : {}
+    ...validationError ? { validationError: diagnosticText(validationError, 480) } : {},
+    ...input2.detail === "developer" ? { legacyLogCount, logs: logs.slice(-200).map((log) => ({ ...log, message: diagnosticText(`${log.taskId && !log.attemptId ? "[\u5386\u53F2\u4EFB\u52A1\u65E5\u5FD7\uFF0C\u672A\u5173\u8054\u5177\u4F53\u5C1D\u8BD5] " : ""}${log.message}`) })) } : {}
   };
 }
 
@@ -50115,10 +50192,10 @@ async function contextDigest(project) {
   return hash5(JSON.stringify(records2));
 }
 async function createWorkspace(project, directory2) {
-  const canonical3 = await realpath10(project);
-  const { stdout } = await exec2("git", ["rev-parse", "--show-toplevel"], { cwd: canonical3 });
-  if (await realpath10(stdout.trim()) !== canonical3) throw new Error("Writing workflows require the Git repository root as projectPath");
-  const gitlinks = await listGitlinks(canonical3);
+  const canonical4 = await realpath10(project);
+  const { stdout } = await exec2("git", ["rev-parse", "--show-toplevel"], { cwd: canonical4 });
+  if (await realpath10(stdout.trim()) !== canonical4) throw new Error("Writing workflows require the Git repository root as projectPath");
+  const gitlinks = await listGitlinks(canonical4);
   if (gitlinks.length) throw new Error("Snapshot writing does not copy Git submodules. Create a new preview with workspaceMode: git-worktree to retain their commit and initialization state.");
   const root = path14.join(directory2, "workspace");
   const base = path14.join(directory2, "baseline");
@@ -50128,18 +50205,18 @@ async function createWorkspace(project, directory2) {
   await mkdir8(base, { recursive: true, mode: 448 });
   const baseline2 = {};
   let size = 0;
-  for (const name of await projectFiles(canonical3)) {
-    const entry = await record4(canonical3, name);
+  for (const name of await projectFiles(canonical4)) {
+    const entry = await record4(canonical4, name);
     if (!entry) continue;
-    size += (await lstat11(resolveFile(canonical3, name))).size;
+    size += (await lstat11(resolveFile(canonical4, name))).size;
     if (size > 256 * 1024 * 1024) throw new Error("Workspace snapshot exceeds 256 MiB");
     baseline2[name] = entry;
-    await copyEntry(canonical3, base, name, entry);
-    await copyEntry(canonical3, root, name, entry);
+    await copyEntry(canonical4, base, name, entry);
+    await copyEntry(canonical4, root, name, entry);
   }
   await exec2("git", ["init", "--quiet"], { cwd: root });
   await exec2("git", ["add", "--all"], { cwd: root });
-  return { root, original: canonical3, baseline: baseline2 };
+  return { root, original: canonical4, baseline: baseline2 };
 }
 function equal2(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -50176,8 +50253,8 @@ Symbolic link or file type changed
   }
   const raw = parts.join("\n");
   if (raw.length > 4 * 1024 * 1024) throw new Error("Review diff exceeds 4 MiB");
-  const text2 = raw.replaceAll(path14.join(path14.dirname(workspace.root), "baseline") + path14.sep, "").replaceAll(workspace.root + path14.sep, "");
-  return { text: text2, files: files2, fingerprint: hash5(JSON.stringify(details)) };
+  const text3 = raw.replaceAll(path14.join(path14.dirname(workspace.root), "baseline") + path14.sep, "").replaceAll(workspace.root + path14.sep, "");
+  return { text: text3, files: files2, fingerprint: hash5(JSON.stringify(details)) };
 }
 async function applyWorkspace(workspace, reviewed) {
   const current2 = await workspaceDiff(workspace);
@@ -50260,19 +50337,357 @@ Task:
 ${input2.prompt}`;
 }
 
-// src/engine.ts
-var now = () => (/* @__PURE__ */ new Date()).toISOString();
+// src/checkpoint-store.ts
+import { createHash as createHash9, randomBytes as randomBytes8 } from "node:crypto";
+import { constants as constants6 } from "node:fs";
+import { lstat as lstat12, open as open7, readdir as readdir9, realpath as realpath11, rename as rename7, rm as rm9 } from "node:fs/promises";
+import path15 from "node:path";
+var manifestLimit = 1024 * 1024;
+var historyLimit = 32 * 1024 * 1024;
+var maxNodes = 1e3;
+var maxChain = 1e4;
+var sha2 = (value) => createHash9("sha256").update(value).digest("hex");
 function canonical2(value) {
   if (Array.isArray(value)) return value.map(canonical2);
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, entry]) => [key, canonical2(entry)]));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => [key, canonical2(item)]));
   return value;
 }
-var digest2 = (value) => createHash9("sha256").update(JSON.stringify(canonical2(value))).digest("hex");
+var encode4 = (value) => JSON.stringify(canonical2(value));
+var hash6 = (value) => sha2(encode4(value));
+var equal3 = (left, right) => encode4(left) === encode4(right);
+var object9 = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
+var hex3 = (value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+var text2 = (value, maximum) => typeof value === "string" && value.length > 0 && value.length <= maximum && !value.includes("\0");
+var instant = (value) => typeof value === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value) && Number.isFinite(Date.parse(value));
+var reason = (value) => typeof value === "string" && ["initial", "node", "final", "recovery"].includes(value);
+function reference(value) {
+  if (!object9(value) || typeof value.id !== "string" || !/^cp_[a-f0-9]{24}$/.test(value.id) || !Number.isSafeInteger(value.sequence) || Number(value.sequence) < 1 || !instant(value.createdAt) || !hex3(value.digest) || !reason(value.reason) || !Number.isSafeInteger(value.completedTasks) || Number(value.completedTasks) < 0 || Number(value.completedTasks) > maxNodes) throw new Error("Invalid node checkpoint reference");
+}
+function nodes(value) {
+  if (!Array.isArray(value) || value.length > maxNodes) throw new Error("Node checkpoint exceeds its 1000-node limit");
+  const indexes = /* @__PURE__ */ new Set();
+  for (const node2 of value) {
+    if (!object9(node2) || !Number.isSafeInteger(node2.index) || Number(node2.index) < 0 || node2.taskId !== `task_${Number(node2.index) + 1}` || indexes.has(Number(node2.index)) || !hex3(node2.fingerprint) || !text2(node2.status, 64) || node2.attemptId !== void 0 && !text2(node2.attemptId, 256) || node2.outputDigest !== void 0 && !hex3(node2.outputDigest) || node2.label !== void 0 && !text2(node2.label, 2048) || node2.phase !== void 0 && !text2(node2.phase, 2048)) throw new Error("Invalid node checkpoint task entry");
+    indexes.add(Number(node2.index));
+  }
+}
+function manifest(value, ref2) {
+  if (!object9(value) || value.schemaVersion !== 1 || !equal3({ id: value.id, sequence: value.sequence, createdAt: value.createdAt, reason: value.reason, completedTasks: value.completedTasks }, { id: ref2.id, sequence: ref2.sequence, createdAt: ref2.createdAt, reason: ref2.reason, completedTasks: ref2.completedTasks }) || !hex3(value.planDigest) || !text2(value.workspaceFingerprint, 4096)) throw new Error("Node checkpoint manifest identity is invalid");
+  nodes(value.nodes);
+  if (value.nodes.filter((node2) => node2.status === "completed").length !== ref2.completedTasks) throw new Error("Node checkpoint completed-task count is invalid");
+  if (value.previous !== void 0) {
+    reference(value.previous);
+    if (value.previous.id === ref2.id || value.previous.sequence !== ref2.sequence - 1) throw new Error("Node checkpoint previous link is invalid");
+  } else if (ref2.sequence !== 1) throw new Error("Node checkpoint chain is missing its previous link");
+}
+function page(input2) {
+  const offset2 = input2.offset ?? 0, limit2 = input2.limit ?? 20;
+  if (!Number.isSafeInteger(offset2) || offset2 < 0 || !Number.isSafeInteger(limit2) || limit2 < 1 || limit2 > 100) throw new Error("Invalid checkpoint history page; limit must be between 1 and 100");
+  return { offset: offset2, limit: limit2 };
+}
+function taskRecord(value) {
+  if (!object9(value) || !Number.isSafeInteger(value.index) || Number(value.index) < 0 || value.id !== `task_${Number(value.index) + 1}` || typeof value.prompt !== "string" || !object9(value.options) || !["read", "write"].includes(String(value.mode)) || !["queued", "running", "completed", "failed", "interrupted", "stopping"].includes(String(value.status)) || !Array.isArray(value.attempts) || typeof value.cached !== "boolean") throw new Error("Invalid archived workflow task");
+}
+var CheckpointStore = class {
+  store;
+  constructor(store) {
+    this.store = store;
+  }
+  async existing(id) {
+    await this.store.assertWritable(id);
+    return this.store.loadForDeletion(id);
+  }
+  async directory(id, kind, create = false) {
+    this.store.directory(id);
+    return this.store.ownedDirectory(path15.join(id, kind), create);
+  }
+  async bytes(id, kind, name, maximum) {
+    const directory2 = await this.directory(id, kind), filename2 = path15.join(directory2, `${name}.json`);
+    const ownedFilename = path15.join(await realpath11(directory2), `${name}.json`);
+    const before = await lstat12(filename2);
+    if (!before.isFile() || before.isSymbolicLink() || before.size > maximum || await realpath11(filename2) !== ownedFilename) throw new Error("Invalid private checkpoint artifact");
+    const file2 = await open7(filename2, constants6.O_RDONLY | (constants6.O_NOFOLLOW ?? 0));
+    try {
+      const opened = await file2.stat();
+      if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size > maximum) throw new Error("Checkpoint artifact ownership changed");
+      const chunks = [];
+      let size = 0;
+      while (size <= maximum) {
+        const buffer = Buffer.alloc(Math.min(65536, maximum + 1 - size));
+        const { bytesRead } = await file2.read(buffer);
+        if (!bytesRead) break;
+        size += bytesRead;
+        if (size > maximum) throw new Error("Checkpoint artifact exceeds its bounded read limit");
+        chunks.push(buffer.subarray(0, bytesRead));
+      }
+      const content = Buffer.concat(chunks, size).toString("utf8"), after = await file2.stat(), current2 = await lstat12(filename2);
+      if (Buffer.byteLength(content) > maximum || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || current2.isSymbolicLink() || current2.dev !== opened.dev || current2.ino !== opened.ino || await realpath11(filename2) !== ownedFilename) throw new Error("Checkpoint artifact changed while being read");
+      await this.directory(id, kind);
+      return content;
+    } finally {
+      await file2.close();
+    }
+  }
+  async immutable(id, kind, name, content) {
+    const directory2 = await this.directory(id, kind, true), target = path15.join(directory2, `${name}.json`);
+    try {
+      await lstat12(target);
+      throw new Error("Immutable checkpoint artifact already exists");
+    } catch (error62) {
+      if (error62.code !== "ENOENT") throw error62;
+    }
+    const temporary = path15.join(directory2, `.${name}.${randomBytes8(8).toString("hex")}.tmp`);
+    try {
+      const file2 = await open7(temporary, "wx", 384);
+      try {
+        await file2.writeFile(content);
+        await file2.sync();
+      } finally {
+        await file2.close();
+      }
+      await this.directory(id, kind);
+      await this.store.assertWritable(id);
+      await this.store.loadForDeletion(id);
+      await rename7(temporary, target);
+      if (process.platform !== "win32") {
+        const parent = await open7(directory2, "r");
+        try {
+          await parent.sync();
+        } finally {
+          await parent.close();
+        }
+        const runDirectory = await open7(path15.dirname(directory2), "r");
+        try {
+          await runDirectory.sync();
+        } finally {
+          await runDirectory.close();
+        }
+      }
+    } finally {
+      await rm9(temporary, { force: true });
+    }
+  }
+  async readOne(runId, ref2) {
+    reference(ref2);
+    const content = await this.bytes(runId, "checkpoints", ref2.id, manifestLimit);
+    if (sha2(content) !== ref2.digest) throw new Error("Node checkpoint digest does not match its committed reference");
+    const value = JSON.parse(content);
+    manifest(value, ref2);
+    return value;
+  }
+  async write(run, input2) {
+    if (!reason(input2.reason) || !hex3(input2.planDigest) || !text2(input2.workspaceFingerprint, 4096)) throw new Error("Invalid node checkpoint input");
+    nodes(input2.nodes);
+    const id = run.id, request = structuredClone(input2), previous = run.nodeCheckpoint === void 0 ? void 0 : structuredClone(run.nodeCheckpoint);
+    if (previous !== void 0) reference(previous);
+    return this.store.withMutation(async () => {
+      const saved = await this.existing(id);
+      if (!equal3(saved.nodeCheckpoint, previous)) throw new Error("Committed node checkpoint changed before its successor was written");
+      if (previous !== void 0) await this.readOne(id, previous);
+      const value = { schemaVersion: 1, id: `cp_${randomBytes8(12).toString("hex")}`, sequence: (previous?.sequence ?? 0) + 1, createdAt: (/* @__PURE__ */ new Date()).toISOString(), reason: request.reason, completedTasks: request.nodes.filter((node2) => node2.status === "completed").length, ...previous ? { previous } : {}, planDigest: request.planDigest, workspaceFingerprint: request.workspaceFingerprint, nodes: request.nodes };
+      if (!Number.isSafeInteger(value.sequence) || value.sequence > maxChain) throw new Error("Node checkpoint exceeds its 10000-checkpoint chain limit");
+      const content = encode4(value);
+      if (Buffer.byteLength(content) > manifestLimit) throw new Error("Node checkpoint manifest exceeds 1 MiB");
+      const ref2 = { id: value.id, sequence: value.sequence, createdAt: value.createdAt, reason: value.reason, completedTasks: value.completedTasks, digest: sha2(content) };
+      await this.immutable(id, "checkpoints", ref2.id, content);
+      return ref2;
+    });
+  }
+  async read(run, requested) {
+    const saved = await this.store.load(run.id);
+    await this.existing(run.id);
+    let ref2 = saved.nodeCheckpoint;
+    if (ref2 === void 0) throw new Error("Workflow has no committed node checkpoint");
+    reference(ref2);
+    if (requested !== void 0) reference(requested);
+    const visited = /* @__PURE__ */ new Set();
+    while (ref2) {
+      if (visited.has(ref2.id) || visited.size >= maxChain) throw new Error("Invalid or excessive node checkpoint chain");
+      visited.add(ref2.id);
+      const value = await this.readOne(run.id, ref2);
+      if (!requested || equal3(ref2, requested)) {
+        if (value.previous) await this.readOne(run.id, value.previous);
+        await this.existing(run.id);
+        return value;
+      }
+      ref2 = value.previous;
+    }
+    throw new Error("Requested checkpoint is not in the committed checkpoint chain");
+  }
+  async list(run, input2 = {}) {
+    const { offset: offset2, limit: limit2 } = page(input2), saved = await this.store.load(run.id);
+    await this.existing(run.id);
+    let ref2 = saved.nodeCheckpoint;
+    const checkpoints = [], visited = /* @__PURE__ */ new Set();
+    let total = 0;
+    if (ref2 !== void 0) reference(ref2);
+    while (ref2) {
+      if (visited.has(ref2.id) || visited.size >= maxChain) throw new Error("Invalid or excessive node checkpoint chain");
+      visited.add(ref2.id);
+      const value = await this.readOne(run.id, ref2);
+      if (total >= offset2 && checkpoints.length < limit2) checkpoints.push(structuredClone(ref2));
+      total++;
+      ref2 = value.previous;
+    }
+    await this.existing(run.id);
+    return { checkpoints, total, ...offset2 + checkpoints.length < total ? { nextOffset: offset2 + checkpoints.length } : {} };
+  }
+  async history(runId, id) {
+    if (!/^history_[a-f0-9]{64}$/.test(id)) throw new Error("Invalid task history ID");
+    const content = await this.bytes(runId, "history", id, historyLimit), value = JSON.parse(content);
+    if (!object9(value) || value.schemaVersion !== 1 || !object9(value.history) || !object9(value.task) || !hex3(value.integrityDigest)) throw new Error("Invalid task history artifact");
+    taskRecord(value.task);
+    const ref2 = value.history, digest3 = hash6(value.task);
+    if (ref2.id !== id || ref2.taskId !== value.task.id || ref2.index !== value.task.index || ref2.status !== value.task.status || ref2.attempts !== value.task.attempts.length || !instant(ref2.createdAt) || !text2(ref2.reason, 1024) || ref2.label !== void 0 && !text2(ref2.label, 2048) || ref2.phase !== void 0 && !text2(ref2.phase, 2048) || ref2.digest !== digest3 || id !== `history_${digest3}` || value.integrityDigest !== hash6({ schemaVersion: 1, history: ref2, task: value.task })) throw new Error("Task history digest or identity is invalid");
+    return value;
+  }
+  async archiveTask(runId, task, why) {
+    taskRecord(task);
+    if (!text2(why, 1024)) throw new Error("Task history reason must be a non-empty bounded string");
+    const snapshot = structuredClone(task), digest3 = hash6(snapshot), id = `history_${digest3}`;
+    return this.store.withMutation(async () => {
+      await this.existing(runId);
+      try {
+        return structuredClone((await this.history(runId, id)).history);
+      } catch (error62) {
+        if (error62.code !== "ENOENT") throw error62;
+      }
+      try {
+        if ((await readdir9(await this.directory(runId, "history"))).filter((name) => /^history_[a-f0-9]{64}\.json$/.test(name)).length >= maxChain) throw new Error("Task history exceeds its 10000-entry limit");
+      } catch (error62) {
+        if (error62.code !== "ENOENT") throw error62;
+      }
+      const ref2 = { id, taskId: snapshot.id, index: snapshot.index, status: snapshot.status, attempts: snapshot.attempts.length, createdAt: (/* @__PURE__ */ new Date()).toISOString(), digest: digest3, reason: why, ...snapshot.label ? { label: snapshot.label.slice(0, 2048) } : {}, ...snapshot.phase ? { phase: snapshot.phase.slice(0, 2048) } : {} };
+      const body = { schemaVersion: 1, history: ref2, task: snapshot }, value = { ...body, integrityDigest: hash6(body) }, content = encode4(value);
+      if (Buffer.byteLength(content) > historyLimit) throw new Error("Archived task exceeds 32 MiB");
+      await this.immutable(runId, "history", id, content);
+      return ref2;
+    });
+  }
+  async readTaskHistory(runId, historyId) {
+    await this.existing(runId);
+    const value = await this.history(runId, historyId);
+    await this.existing(runId);
+    return structuredClone(value.task);
+  }
+  async listTaskHistory(runId, input2 = {}) {
+    const { offset: offset2, limit: limit2 } = page(input2);
+    this.store.directory(runId);
+    if (input2.taskId !== void 0 && !/^task_[1-9]\d*$/.test(input2.taskId)) throw new Error("Invalid task history filter");
+    await this.existing(runId);
+    let names2;
+    try {
+      names2 = await readdir9(await this.directory(runId, "history"));
+    } catch (error62) {
+      if (error62.code === "ENOENT") return { history: [], total: 0 };
+      throw error62;
+    }
+    const history = [], entries = names2.filter((name) => /^history_[a-f0-9]{64}\.json$/.test(name));
+    if (entries.length > maxChain) throw new Error("Task history exceeds its 10000-entry limit");
+    for (const name of entries) {
+      const value = await this.history(runId, name.slice(0, -5));
+      if (!input2.taskId || value.history.taskId === input2.taskId) history.push(value.history);
+    }
+    history.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
+    await this.existing(runId);
+    return { history: history.slice(offset2, offset2 + limit2), total: history.length, ...offset2 + limit2 < history.length ? { nextOffset: offset2 + limit2 } : {} };
+  }
+};
+
+// src/checkpoint-gate.ts
+function interrupted(signal) {
+  return signal.reason ?? new DOMException("Workflow interrupted", "AbortError");
+}
+var StableCheckpointGate = class {
+  active = 0;
+  capturing;
+  failure;
+  onStable;
+  constructor(onStable) {
+    this.onStable = onStable;
+  }
+  async enter(signal) {
+    this.check(signal);
+    while (this.capturing) {
+      await this.wait(this.capturing, signal);
+      this.check(signal);
+    }
+    this.active++;
+    let released;
+    return () => {
+      if (released) return released;
+      let complete;
+      let fail;
+      released = new Promise((resolve, reject) => {
+        complete = resolve;
+        fail = reject;
+      });
+      this.leave().then(complete, fail);
+      return released;
+    };
+  }
+  check(signal) {
+    if (this.failure) throw this.failure.error;
+    if (signal.aborted) throw interrupted(signal);
+  }
+  wait(capture, signal) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (error62) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", abort);
+        if (error62) reject(error62.value);
+        else resolve();
+      };
+      const abort = () => finish({ value: interrupted(signal) });
+      signal.addEventListener("abort", abort, { once: true });
+      capture.then(() => finish(), (error62) => finish({ value: error62 }));
+      if (signal.aborted) abort();
+    });
+  }
+  leave() {
+    this.active--;
+    if (this.active !== 0) return Promise.resolve();
+    let complete;
+    let fail;
+    const capture = new Promise((resolve, reject) => {
+      complete = resolve;
+      fail = reject;
+    });
+    this.capturing = capture;
+    const failed = (error62) => {
+      this.failure = { error: error62 };
+      this.capturing = void 0;
+      fail(error62);
+    };
+    try {
+      Promise.resolve(this.onStable()).then(() => {
+        this.capturing = void 0;
+        complete();
+      }, failed);
+    } catch (error62) {
+      failed(error62);
+    }
+    return capture;
+  }
+};
+
+// src/engine.ts
+var now = () => (/* @__PURE__ */ new Date()).toISOString();
+function canonical3(value) {
+  if (Array.isArray(value)) return value.map(canonical3);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, entry]) => [key, canonical3(entry)]));
+  return value;
+}
+var digest2 = (value) => createHash10("sha256").update(JSON.stringify(canonical3(value))).digest("hex");
 var message = (error62) => error62 instanceof Error ? error62.message : String(error62);
 var defaults = { maxReadWorkers: 4, maxCalls: 1e3, timeoutMs: 60 * 60 * 1e3, maxTokens: 0 };
 var taskFingerprint = (prompt, options, settings) => digest2({ prompt, options, ...settings?.model || settings?.reasoningEffort ? { executionSettings: { model: settings.model, reasoningEffort: settings.reasoningEffort } } : {} });
 var LocalReplayError = class extends Error {
   recovery = "new-preview";
+};
+var CheckpointCommitError = class extends Error {
 };
 var Pool = class {
   running = 0;
@@ -50309,6 +50724,8 @@ var Pool = class {
 };
 var WorkflowEngine = class {
   store;
+  checkpoints;
+  checkpointCoverage = /* @__PURE__ */ new Map();
   adapter;
   runs = /* @__PURE__ */ new Map();
   active = /* @__PURE__ */ new Map();
@@ -50324,6 +50741,7 @@ var WorkflowEngine = class {
   closing = false;
   constructor(options = {}) {
     this.store = options.store ?? new RunStore();
+    this.checkpoints = new CheckpointStore(this.store);
     this.adapter = options.adapter ?? new CodexAdapter();
     this.settings = new ExecutionSettingsStore(this.store);
     this.initialization = this.initialize();
@@ -50431,17 +50849,17 @@ var WorkflowEngine = class {
     if (timer) clearTimeout(timer);
     this.progressTimers.delete(id);
   }
-  async persist(run) {
+  async persist(run, durable = false) {
     this.clearProgress(run.id);
     run.updatedAt = now();
     run.revision++;
-    await this.store.save(run);
+    await this.store.save(run, durable || Boolean(run.nodeCheckpoint));
   }
   async persistProgress(run) {
     this.clearProgress(run.id);
     run.updatedAt = now();
     run.progressSequence = (run.progressSequence ?? 0) + 1;
-    await this.store.save(run);
+    await this.store.save(run, Boolean(run.nodeCheckpoint));
   }
   scheduleProgress(run) {
     if (!this.active.has(run.id) || this.progressTimers.has(run.id)) return;
@@ -50455,9 +50873,9 @@ var WorkflowEngine = class {
     timer.unref();
     this.progressTimers.set(run.id, timer);
   }
-  log(run, text2, taskId, level = "info") {
+  log(run, text3, taskId, level = "info", attemptId) {
     if (run.logs.length >= 5e3) run.logs.shift();
-    run.logs.push({ at: now(), level, message: text2.slice(0, 16e3), ...taskId ? { taskId } : {} });
+    run.logs.push({ at: now(), level, message: text3.slice(0, 16e3), ...taskId ? { taskId } : {}, ...attemptId ? { attemptId } : {} });
     this.scheduleProgress(run);
   }
   async load(id) {
@@ -50480,13 +50898,168 @@ var WorkflowEngine = class {
     return structuredClone(run);
   }
   async getNodeProcess(id, input2) {
-    return nodeProcess(await this.load(id), input2);
+    const run = await this.load(id);
+    let coverage;
+    if (run.nodeCheckpoint) {
+      const cached2 = this.checkpointCoverage.get(id);
+      if (this.active.has(id) && cached2?.id === run.nodeCheckpoint.id) coverage = cached2.keys;
+      else if (!this.active.has(id)) try {
+        coverage = new Set((await this.checkpoints.read(run)).nodes.filter((node2) => node2.status === "completed" && node2.attemptId).map((node2) => `${node2.taskId}:${node2.attemptId}`));
+        this.checkpointCoverage.set(id, { id: run.nodeCheckpoint.id, keys: coverage });
+      } catch {
+      }
+    }
+    return nodeProcess(run, input2, coverage);
   }
   async list(projectPath) {
     await this.initialization;
-    const project = projectPath ? await realpath11(projectPath) : void 0;
+    const project = projectPath ? await realpath12(projectPath) : void 0;
     const runs = await this.store.list();
     return runs.filter((run) => !project || run.projectPath === project);
+  }
+  checkpointScope(run) {
+    return digest2({ projectPath: run.projectPath, script: run.script, args: run.args, allowWrite: run.allowWrite, networkAccess: run.networkAccess ?? false, allowedMcpServers: run.allowedMcpServers ?? [], allowedMcpTools: run.allowedMcpTools ?? {}, workspaceMode: run.workspaceMode ?? "snapshot", localGitWrite: run.localGitWrite ?? false, maintenance: run.maintenance, nodeSettings: run.nodeSettings ?? {}, executionSettings: run.executionSettings ?? {}, limits: run.limits });
+  }
+  checkpointNodes(run) {
+    return run.tasks.filter((task) => !["queued", "running", "stopping"].includes(task.status)).map((task) => ({
+      taskId: task.id,
+      index: task.index,
+      fingerprint: taskFingerprint(task.prompt, task.options, task.executionSettings),
+      status: task.cacheInvalidated ? "invalidated" : task.status,
+      ...task.attempts.at(-1)?.id ? { attemptId: task.attempts.at(-1).id } : {},
+      ...Object.hasOwn(task, "output") ? { outputDigest: digest2(task.output) } : {},
+      ...task.label ? { label: task.label } : {},
+      ...task.phase ? { phase: task.phase } : {}
+    }));
+  }
+  async captureCheckpointState(run) {
+    if (run.workspace?.kind === "local") {
+      await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id));
+      const state = await captureLocalWorkspaceCheckpoints(run.workspace);
+      return { workspaceFingerprint: state.current, localState: { filesDigest: state.filesDigest, gitDigest: state.gitDigest } };
+    }
+    if (run.workspace?.kind === "git-worktree") return { workspaceFingerprint: await maintenanceFingerprint(run.workspace) };
+    if (run.workspace) return { workspaceFingerprint: await snapshotFingerprint(run.workspace) };
+    if (!run.tasks.length && !run.maintenance && !validateScript(run.script).mayUseAgent) return { workspaceFingerprint: `script-only-v1:${digest2({ script: run.script, args: run.args })}` };
+    return { workspaceFingerprint: await readOnlyProjectCheckpoint(run.projectPath) };
+  }
+  async commitNodeCheckpoint(run, reason2, captured, expectedFingerprint) {
+    const previous = run.nodeCheckpoint;
+    run.checkpointState = { status: "saving" };
+    this.log(run, "Saving a stable node checkpoint; current files are preserved.");
+    try {
+      await this.persistProgress(run);
+      const state = captured ?? await this.captureCheckpointState(run);
+      if (expectedFingerprint !== void 0 && state.workspaceFingerprint !== expectedFingerprint) throw new LocalReplayError("Project changed after recovery validation. Existing files and the previous checkpoint are preserved; create a new preview.");
+      const nodes2 = this.checkpointNodes(run);
+      const checkpoint = await this.checkpoints.write(run, { reason: reason2, planDigest: this.checkpointScope(run), workspaceFingerprint: state.workspaceFingerprint, nodes: nodes2 });
+      run.nodeCheckpoint = checkpoint;
+      if (run.workspace) run.workspaceCheckpoint = state.workspaceFingerprint;
+      else run.contextDigest = state.workspaceFingerprint;
+      if (state.localState) run.localCheckpointState = state.localState;
+      run.checkpointState = { status: "ready" };
+      this.log(run, `Node checkpoint ${checkpoint.sequence} saved (${checkpoint.completedTasks} completed tasks).`);
+      await this.persist(run, true);
+      this.checkpointCoverage.set(run.id, { id: checkpoint.id, keys: new Set(nodes2.filter((node2) => node2.status === "completed" && node2.attemptId).map((node2) => `${node2.taskId}:${node2.attemptId}`)) });
+    } catch (error62) {
+      if (previous) run.nodeCheckpoint = previous;
+      else delete run.nodeCheckpoint;
+      run.checkpointState = { status: "failed", error: `Could not save node checkpoint: ${message(error62).slice(0, 2e3)}` };
+      this.log(run, `Could not save node checkpoint: ${message(error62)}`, void 0, "error");
+      await this.persist(run).catch(() => {
+      });
+      throw new CheckpointCommitError(`Could not save node checkpoint: ${message(error62)}`, { cause: error62 });
+    }
+  }
+  async listCheckpoints(input2) {
+    await this.initialization;
+    const run = this.active.has(input2.id) ? this.runs.get(input2.id) : await this.store.load(input2.id);
+    return { ...await this.checkpoints.list(run, input2), state: run.checkpointState ?? { status: "unavailable" }, ...run.nodeCheckpoint ? { latest: run.nodeCheckpoint } : {} };
+  }
+  async taskHistory(input2) {
+    await this.initialization;
+    const run = this.active.has(input2.id) ? this.runs.get(input2.id) : await this.store.load(input2.id);
+    this.assertActionAvailable(run);
+    const page2 = await this.checkpoints.listTaskHistory(input2.id, input2);
+    if (!input2.historyId) return page2;
+    const task = await this.checkpoints.readTaskHistory(input2.id, input2.historyId);
+    const history = page2.history.find((item) => item.id === input2.historyId);
+    if (input2.detail !== "developer") return { ...history ? { history } : {}, task: { id: task.id, index: task.index, status: task.status, label: task.label, phase: task.phase, attempts: task.attempts.map((attempt) => ({ id: attempt.id, status: attempt.status, startedAt: attempt.startedAt, endedAt: attempt.endedAt, recoveryAttempts: attempt.recoveryAttempts })) } };
+    const historyView = { ...run, tasks: [task], logs: [] };
+    delete historyView.workspace;
+    delete historyView.diff;
+    delete historyView.maintenanceReview;
+    delete historyView.result;
+    const view = projectRunForTransport(historyView);
+    return { ...history ? { history } : {}, task: view.tasks[0], ...view.transportPreview ? { transportPreview: view.transportPreview } : {} };
+  }
+  verifyCheckpointJournal(run, checkpoint) {
+    for (const entry of checkpoint.nodes.filter((node2) => node2.status === "completed")) {
+      const task = run.tasks.find((item) => item.id === entry.taskId);
+      if (task?.status === "completed" && task.attempts.at(-1)?.id === entry.attemptId && !task.cacheInvalidated && (entry.fingerprint !== taskFingerprint(task.prompt, task.options, task.executionSettings) || !Object.hasOwn(task, "output") || entry.outputDigest !== digest2(task.output))) throw new LocalReplayError("Saved task result no longer matches its committed node checkpoint. Create a new preview.");
+    }
+  }
+  committedTask(task, checkpoint) {
+    return checkpoint.nodes.some((entry) => entry.taskId === task.id && entry.attemptId === task.attempts.at(-1)?.id && ["completed", "invalidated"].includes(entry.status) && entry.fingerprint === taskFingerprint(task.prompt, task.options, task.executionSettings) && Object.hasOwn(task, "output") && entry.outputDigest === digest2(task.output));
+  }
+  async previewRecovery(input2) {
+    await this.initialization;
+    const run = this.active.has(input2.id) ? this.runs.get(input2.id) : await this.store.load(input2.id);
+    this.assertRevision(run, input2.revision);
+    return this.recoveryPreview(run, input2.retryFromTaskId);
+  }
+  async recoveryPreview(run, retryFromTaskId, ownsLock = false) {
+    const blockers = [], warnings = [];
+    if (run.deletionPending || run.application !== "none") blockers.push({ code: "state_unavailable", message: "\u8FD0\u884C\u6B63\u5728\u6E05\u7406\u6216\u5DF2\u6709\u5E94\u7528\u64CD\u4F5C\uFF0C\u4E0D\u80FD\u6062\u590D\u3002" });
+    if (!["stopped", "failed"].includes(run.execution) || this.active.has(run.id) || !ownsLock && await this.store.isLocked(run.id)) blockers.push({ code: "owner_active", message: "\u8FD0\u884C\u5C1A\u672A\u505C\u6B62\u6216\u65E7\u6267\u884C\u5668\u5C1A\u672A\u9000\u51FA\u3002" });
+    let boundary;
+    try {
+      boundary = this.retryBoundary(run, retryFromTaskId, true);
+    } catch (error62) {
+      blockers.push({ code: "retry_boundary", message: message(error62) });
+    }
+    let manifest2, state;
+    try {
+      state = await this.captureCheckpointState(run);
+      if (run.nodeCheckpoint) {
+        manifest2 = await this.checkpoints.read(run);
+        this.verifyCheckpointJournal(run, manifest2);
+        if (manifest2.planDigest !== this.checkpointScope(run)) blockers.push({ code: "plan_changed", message: "\u6267\u884C\u8BA1\u5212\u3001\u6A21\u578B\u6216\u6388\u6743\u8303\u56F4\u5DF2\u6539\u53D8\uFF0C\u8BF7\u521B\u5EFA\u65B0\u9884\u89C8\u3002" });
+        if (manifest2.workspaceFingerprint !== state.workspaceFingerprint) {
+          if (run.allowWrite) blockers.push({ code: "workspace_changed", message: "\u5F53\u524D\u9879\u76EE\u3001Git \u72B6\u6001\u6216\u4EA7\u7269\u4E0E\u5DF2\u4FDD\u5B58\u68C0\u67E5\u70B9\u4E0D\u4E00\u81F4\uFF1B\u73B0\u6709\u6587\u4EF6\u4FDD\u7559\uFF0C\u8BF7\u91CD\u65B0\u68C0\u67E5\u3002" });
+          else warnings.push("\u53EA\u8BFB\u9879\u76EE\u72B6\u6001\u5DF2\u53D8\u5316\uFF0C\u672C\u6B21\u5C06\u91CD\u65B0\u6267\u884C\u5168\u90E8\u8BFB\u53D6\uFF0C\u4E0D\u590D\u7528\u65E7\u7ED3\u679C\u3002");
+        }
+      } else if (run.workspace) {
+        if (!run.workspaceCheckpoint || run.workspaceCheckpoint !== state.workspaceFingerprint) blockers.push({ code: "legacy_checkpoint_unverified", message: "\u65E7\u8FD0\u884C\u7F3A\u5C11\u53EF\u6838\u9A8C\u68C0\u67E5\u70B9\uFF0C\u4E0D\u80FD\u628A\u65E7\u7ED3\u679C\u5F53\u4F5C\u65B0\u7684\u9A8C\u8BC1\uFF1B\u8BF7\u91CD\u65B0\u68C0\u67E5\u3002" });
+        else warnings.push("\u65E7\u8FD0\u884C\u53EA\u6709\u6574\u8F6E\u68C0\u67E5\u70B9\uFF1B\u901A\u8FC7\u5F53\u524D\u72B6\u6001\u6821\u9A8C\u540E\u624D\u5EFA\u7ACB\u65B0\u7684\u8282\u70B9\u68C0\u67E5\u70B9\u3002");
+      } else warnings.push("\u65E7\u53EA\u8BFB\u8FD0\u884C\u6CA1\u6709\u8282\u70B9\u68C0\u67E5\u70B9\uFF0C\u672C\u6B21\u5C06\u91CD\u65B0\u6267\u884C\u5168\u90E8\u8BFB\u53D6\u540E\u5EFA\u7ACB\u68C0\u67E5\u70B9\u3002");
+    } catch (error62) {
+      blockers.push({ code: "checkpoint_unavailable", message: `\u68C0\u67E5\u70B9\u65E0\u6CD5\u6838\u5BF9\uFF1A${message(error62)}` });
+    }
+    if (run.checkpointState?.status === "failed") blockers.push({ code: "checkpoint_commit_failed", message: "\u4E0A\u6B21\u68C0\u67E5\u70B9\u4FDD\u5B58\u5931\u8D25\uFF0C\u4E0D\u80FD\u8DF3\u8FC7\u6838\u9A8C\uFF1B\u8BF7\u91CD\u65B0\u68C0\u67E5\u5E76\u521B\u5EFA\u65B0\u9884\u89C8\u3002" });
+    const reusedTaskIds = [], rerunTaskIds = [], invalidatedTaskIds = [];
+    let cutoff = boundary ?? Number.POSITIVE_INFINITY;
+    if (!run.allowWrite && !manifest2 && run.tasks.length) cutoff = 0;
+    if (!run.allowWrite && manifest2 && state && manifest2.workspaceFingerprint !== state.workspaceFingerprint) cutoff = 0;
+    for (const task of run.tasks) if (task.cacheInvalidated || task.status !== "completed" && !(task.status === "interrupted" && task.mode === "read") || task.status === "completed" && !Object.hasOwn(task, "output")) cutoff = Math.min(cutoff, task.index);
+    for (const task of run.tasks) if (manifest2 && task.status === "completed" && !this.committedTask(task, manifest2)) {
+      cutoff = Math.min(cutoff, task.index);
+      if (task.mode === "write") blockers.push({ code: "uncommitted_write_result", message: `\u5199\u5165\u8282\u70B9 ${task.label ?? task.id} \u7684\u7ED3\u679C\u672A\u5B8C\u6210\u68C0\u67E5\u70B9\u63D0\u4EA4\uFF0C\u987B\u5148\u6838\u5BF9\u526F\u4F5C\u7528\u5E76\u521B\u5EFA\u65B0\u9884\u89C8\u3002` });
+      else warnings.push(`\u8BFB\u53D6\u8282\u70B9 ${task.label ?? task.id} \u672A\u5B8C\u6210\u68C0\u67E5\u70B9\u63D0\u4EA4\uFF0C\u5C06\u91CD\u65B0\u6267\u884C\u800C\u4E0D\u590D\u7528\u5B64\u7ACB\u7ED3\u679C\u3002`);
+    }
+    for (const task of run.tasks) {
+      const reusable = task.index < cutoff && task.status === "completed" && !task.cacheInvalidated && Object.hasOwn(task, "output");
+      if (reusable) reusedTaskIds.push(task.id);
+      else {
+        rerunTaskIds.push(task.id);
+        if (task.status === "completed") invalidatedTaskIds.push(task.id);
+      }
+      const operation = task.options.operation;
+      if (!reusable && operation && task.attempts.some((attempt) => attempt.startedAt) && run.maintenance?.steps.find((step) => step.id === operation.id)?.idempotent !== true) blockers.push({ code: "unknown_operation_effect", message: `\u547D\u4EE4 ${operation.id} \u5DF2\u5F00\u59CB\u4E14\u672A\u58F0\u660E\u5E42\u7B49\uFF0C\u5FC5\u987B\u5148\u6838\u5BF9\u5B9E\u9645\u6548\u679C\uFF0C\u4E0D\u80FD\u81EA\u52A8\u91CD\u590D\u3002` });
+      else if (!reusable && task.mode === "write" && task.attempts.some((attempt) => attempt.startedAt)) warnings.push(`\u8282\u70B9 ${task.label ?? task.id} \u53EF\u80FD\u5DF2\u6709\u90E8\u5206\u6548\u679C\uFF0C\u6062\u590D\u65F6\u987B\u5148\u6838\u5BF9\uFF0C\u4E0D\u80FD\u76F2\u76EE\u91CD\u590D\u5916\u90E8\u5199\u5165\u3002`);
+    }
+    const fingerprint2 = digest2({ id: run.id, revision: run.revision, scope: this.checkpointScope(run), checkpoint: run.nodeCheckpoint, state: state?.workspaceFingerprint, journal: this.checkpointNodes(run), retryFromTaskId, blockers });
+    return { id: run.id, revision: run.revision, fingerprint: fingerprint2, canResume: blockers.length === 0, strategy: "preserve-files", ...run.nodeCheckpoint ? { checkpoint: run.nodeCheckpoint } : {}, reusedTaskIds, rerunTaskIds, invalidatedTaskIds, blockers, warnings, currentFilesPreserved: true, externalEffectsReverted: false };
   }
   configuration(operation) {
     if (this.configAbort.signal.aborted) return Promise.reject(new Error("Workflow engine is closed."));
@@ -50498,7 +51071,7 @@ var WorkflowEngine = class {
   }
   async executionEnvironment(projectPath, signal = this.configAbort.signal) {
     if (!this.adapter.executionEnvironment) throw new Error("This worker adapter cannot provide the Codex model catalogue.");
-    const cwd = await realpath11(projectPath ?? process.cwd());
+    const cwd = await realpath12(projectPath ?? process.cwd());
     if (!(await stat3(cwd)).isDirectory()) throw new Error("projectPath must be a directory");
     return this.adapter.executionEnvironment(cwd, signal);
   }
@@ -50553,7 +51126,7 @@ var WorkflowEngine = class {
     validateWorkflowArgs(meta3, input2.args === void 0 ? {} : input2.args);
     const nodeSettings = validateNodeSettings(input2.nodeSettings, meta3);
     const approvalMode = resolveApprovalMode(input2.approvalMode, "auto-review");
-    const projectPath = await realpath11(input2.projectPath);
+    const projectPath = await realpath12(input2.projectPath);
     if (!(await stat3(projectPath)).isDirectory()) throw new Error("projectPath must be a directory");
     const maintenance = validateMaintenanceScope(input2);
     if (input2.allowedMcpServers?.some((name) => !/^[a-zA-Z0-9_.-]{1,128}$/.test(name) || /workflows/i.test(name))) throw new Error("Invalid or recursive MCP server grant");
@@ -50561,7 +51134,7 @@ var WorkflowEngine = class {
     const limits = { ...defaults, ...input2.limits };
     if (!Number.isInteger(limits.maxReadWorkers) || limits.maxReadWorkers < 1 || limits.maxReadWorkers > 16 || !Number.isInteger(limits.maxCalls) || limits.maxCalls < 1 || limits.maxCalls > 1e3 || limits.timeoutMs < 100 || limits.timeoutMs > 24 * 60 * 60 * 1e3 || limits.maxTokens < 0) throw new Error("Invalid workflow limits");
     const run = {
-      id: `wf_${randomBytes8(12).toString("hex")}`,
+      id: `wf_${randomBytes9(12).toString("hex")}`,
       revision: 0,
       createdAt: now(),
       updatedAt: now(),
@@ -50675,7 +51248,7 @@ var WorkflowEngine = class {
     if (run.deletionPending) throw new Error("\u5DE5\u4F5C\u6D41\u6E05\u7406\u5C1A\u672A\u5B8C\u6210\uFF0C\u8BF7\u5148\u7EE7\u7EED\u5220\u9664\u3002");
   }
   lease(input2) {
-    const id = input2.leaseId ?? randomBytes8(16).toString("hex");
+    const id = input2.leaseId ?? randomBytes9(16).toString("hex");
     if (input2.leaseId && !this.leases.has(id)) throw new Error("Panel lease is unknown or expired; reconnect the panel");
     if (input2.release) {
       this.leases.delete(id);
@@ -50702,6 +51275,7 @@ var WorkflowEngine = class {
   async start(input2, resume = false) {
     if (this.closing) throw new Error("Workflow execution service is closing");
     if (!resume && input2.approvalMode !== void 0) throw new Error("Choose worker approval mode in the preview before workflow_start");
+    if (input2.recoveryFingerprint !== void 0 && (!resume || !/^[a-f0-9]{64}$/.test(input2.recoveryFingerprint))) throw new Error("A recovery fingerprint requires workflow_resume and a current recovery preview");
     if (input2.approvalMode !== void 0) resolveApprovalMode(input2.approvalMode);
     let run = await this.load(input2.id);
     this.assertActionAvailable(run);
@@ -50721,6 +51295,10 @@ var WorkflowEngine = class {
       this.assertRevision(run, input2.revision);
       if (resume ? !["stopped", "failed"].includes(run.execution) : run.execution !== "draft") throw new Error("Workflow state changed before start");
       const retryFrom = this.retryBoundary(run, input2.retryFromTaskId, resume);
+      if (input2.recoveryFingerprint !== void 0) {
+        const preview = await this.recoveryPreview(run, input2.retryFromTaskId, true);
+        if (preview.fingerprint !== input2.recoveryFingerprint || !preview.canResume) throw new Error("Recovery preview changed or is blocked; refresh the preview before confirming. No workers were started.");
+      }
       const approvalMode = resolveApprovalMode(input2.approvalMode, resolveApprovalMode(run.approvalMode));
       const { meta: meta3, mayUseAgent } = validateScript(run.script);
       validateWorkflowArgs(meta3, run.args);
@@ -50738,7 +51316,7 @@ var WorkflowEngine = class {
         for (const task of run.tasks) if (task.index >= retryFrom) task.cacheInvalidated = true;
         this.log(run, `Explicit retry from ${input2.retryFromTaskId}: preserving earlier results and invalidating this task and its following results.`);
       }
-      run.controlId = randomBytes8(16).toString("hex");
+      run.controlId = randomBytes9(16).toString("hex");
       run.execution = "preparing";
       run.review = "unavailable";
       run.application = "none";
@@ -50814,6 +51392,8 @@ var WorkflowEngine = class {
   }
   async prepare(run, active, settings, needsEnvironment, resume) {
     let releaseProject;
+    let readOnlyChanged = false;
+    let validatedFingerprint;
     try {
       validateMaintenanceScope(run);
       if (run.workspaceMode === "local" && run.maintenance && run.localGitWrite !== true) throw new Error("Local command operations require a new preview with recorded local Git write scope; legacy write scope cannot be expanded");
@@ -50841,13 +51421,26 @@ var WorkflowEngine = class {
         }
         let context;
         try {
+          if (!run.allowWrite && run.nodeCheckpoint) {
+            const state = await this.captureCheckpointState(run);
+            if (state.workspaceFingerprint !== (await this.checkpoints.read(run)).workspaceFingerprint) {
+              readOnlyChanged = true;
+              for (const task of run.tasks) {
+                task.cacheInvalidated = true;
+                task.status = "interrupted";
+              }
+              this.log(run, "Read-only project changed; saved task results will not be reused.");
+            }
+            run.contextDigest = state.workspaceFingerprint;
+            return;
+          }
           const gitlinks = await listGitlinks(run.projectPath);
           if (gitlinks.length && run.allowWrite && run.workspaceMode !== "git-worktree") throw new Error("Snapshot writing does not copy Git submodules. Create a new preview with workspaceMode: git-worktree to retain their commit and initialization state.");
           context = gitlinks.length ? await gitAwareContextDigest(run.projectPath) : await contextDigest(run.projectPath);
           if (!run.allowWrite) context = digest2({ files: context, git: await readOnlyGitContextDigest(run.projectPath) });
         } catch (error62) {
-          if (run.allowWrite) throw error62;
-          context = randomBytes8(16).toString("hex");
+          if (run.allowWrite || run.nodeCheckpoint) throw error62;
+          context = randomBytes9(16).toString("hex");
         }
         if (run.contextDigest && run.contextDigest !== context) {
           if (run.workspace) throw new Error("Project changed since the workspace snapshot. Create a new preview to preserve those changes.");
@@ -50865,6 +51458,24 @@ var WorkflowEngine = class {
       await this.preparationStage(run, active, "validation", "\u9A8C\u8BC1\u5DE5\u4F5C\u533A\u4E0E\u6267\u884C\u8303\u56F4", async () => {
         if (run.workspace && !(await stat3(run.workspace.root)).isDirectory()) throw new Error("Saved workspace is missing; cannot resume");
         if (run.maintenance) await this.validateOperationWorkspace(run);
+        if (run.nodeCheckpoint) {
+          if (resume && run.checkpointState?.status === "failed") throw new LocalReplayError("Previous node checkpoint commit failed. Inspect storage and create a new preview before continuing.");
+          const checkpoint = await this.checkpoints.read(run);
+          if (checkpoint.planDigest !== this.checkpointScope(run)) {
+            if (resume) throw new LocalReplayError("Execution plan, model or permissions changed since the node checkpoint. Create a new preview.");
+            for (const task of run.tasks) task.cacheInvalidated = true;
+            this.log(run, "Explicitly edited plan: all earlier task results require revalidation; history is retained.");
+          }
+          const state = await this.captureCheckpointState(run);
+          validatedFingerprint = state.workspaceFingerprint;
+          if (checkpoint.workspaceFingerprint !== state.workspaceFingerprint && !readOnlyChanged) throw new LocalReplayError("Project or workspace changed since the last checkpoint. Existing files are preserved; create a new preview before reusing results.");
+          this.verifyCheckpointJournal(run, checkpoint);
+          for (const task of run.tasks) if (task.status === "completed" && !this.committedTask(task, checkpoint)) {
+            if (task.mode === "write") throw new LocalReplayError("A write task returned without a committed node checkpoint. Inspect its actual effects and create a new preview; it will not be repeated automatically.");
+            task.cacheInvalidated = true;
+          }
+          return;
+        }
         if (run.workspaceMode === "local") {
           if (!run.workspace || run.workspace.kind !== "local" || run.workspacePath !== run.workspace.root) throw new Error("Local project workspace identity is missing or inconsistent");
           await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id));
@@ -50881,39 +51492,47 @@ var WorkflowEngine = class {
               throw new LocalReplayError(`Local project or build artifacts changed since the last checkpoint. ${detail}\u8BF7\u70B9\u51FB\u201C\u91CD\u65B0\u68C0\u67E5\u201D\u521B\u5EFA\u65B0\u9884\u89C8\uFF0C\u518D\u4ECE\u5934\u6838\u5BF9\u5F53\u524D\u9879\u76EE\uFF1B\u539F\u9879\u76EE\u5DF2\u6709\u6539\u52A8\u4F1A\u4FDD\u7559\u3002`);
             }
             if (saved.startsWith("local-v1:")) this.log(run, "Legacy local checkpoint verified exactly; Codex internal turn checkpoints are excluded from future project checkpoints.");
+            validatedFingerprint = checkpoints.current;
           } else if (run.tasks.some((task) => task.status === "completed" || task.attempts.some((attempt) => attempt.startedAt))) throw new LocalReplayError("Local project has previously started workers without a reliable checkpoint. \u8BF7\u70B9\u51FB\u201C\u91CD\u65B0\u68C0\u67E5\u201D\u521B\u5EFA\u65B0\u9884\u89C8\uFF0C\u6838\u5BF9\u5DF2\u6709\u6539\u52A8\u540E\u518D\u542F\u52A8\u3002");
         } else if (run.workspace?.kind === "git-worktree") {
           await validateGitWorkspace(run.workspace);
-          if (run.workspaceCheckpoint && await maintenanceFingerprint(run.workspace) !== run.workspaceCheckpoint) throw new Error("Saved Git checkout or artifacts changed; cached steps cannot safely replay. Create a new preview.");
+          if (run.workspaceCheckpoint) {
+            const current2 = await maintenanceFingerprint(run.workspace);
+            if (current2 !== run.workspaceCheckpoint) throw new Error("Saved Git checkout or artifacts changed; cached steps cannot safely replay. Create a new preview.");
+            validatedFingerprint = current2;
+          }
         } else if (run.workspace) {
           if (run.workspaceCheckpoint) {
             if (!run.workspaceCheckpoint.startsWith("snapshot-v1:")) throw new Error("Saved snapshot checkpoint format is unsupported. Create a new preview before replaying verified results.");
-            if (await snapshotFingerprint(run.workspace, active.controller.signal) !== run.workspaceCheckpoint) throw new Error("Saved snapshot workspace or artifacts changed; cached verification cannot safely replay. Create a new preview.");
+            const current2 = await snapshotFingerprint(run.workspace, active.controller.signal);
+            if (current2 !== run.workspaceCheckpoint) throw new Error("Saved snapshot workspace or artifacts changed; cached verification cannot safely replay. Create a new preview.");
+            validatedFingerprint = current2;
           } else if (run.tasks.some((task) => task.status === "completed" || task.attempts.some((attempt) => attempt.startedAt))) throw new Error("Saved snapshot lacks a verified execution checkpoint. Create a new preview before replaying previously started workers or verified results.");
         }
+        if (!run.allowWrite && !run.nodeCheckpoint && run.tasks.length) {
+          for (const task of run.tasks) task.cacheInvalidated = true;
+          this.log(run, "Legacy read-only progress will be revalidated before creating node checkpoints.");
+        }
+        validatedFingerprint ??= (await this.captureCheckpointState(run)).workspaceFingerprint;
       });
       run.preparation.endedAt = now();
       run.execution = "running";
-      if (run.workspaceMode === "local") {
-        delete run.workspaceCheckpoint;
-        delete run.localCheckpointState;
-      }
       this.log(run, resume ? "Manual resume: replaying script and validating saved results in launch order." : "Execution prepared; dispatching workflow tasks.");
-      await this.persist(run);
+      await this.commitNodeCheckpoint(run, resume ? "recovery" : "initial", void 0, validatedFingerprint);
       this.preparationGuard(run, active);
       await this.execute(run, active);
     } catch (error62) {
-      const interrupted = this.closing || active.controller.signal.aborted && (run.execution === "stopping" || Boolean(run.stopReason));
-      this.finishPreparation(run, interrupted ? "interrupted" : "failed");
-      run.execution = interrupted ? "stopped" : "failed";
+      const interrupted2 = this.closing || active.controller.signal.aborted && (run.execution === "stopping" || Boolean(run.stopReason));
+      this.finishPreparation(run, interrupted2 ? "interrupted" : "failed");
+      run.execution = interrupted2 ? "stopped" : "failed";
       run.endedAt = now();
-      if (interrupted) {
+      if (interrupted2) {
         run.stopReason ??= this.closing ? "service-shutdown" : "requested";
         delete run.error;
         this.log(run, stopSummary(run.stopReason));
       } else {
         run.error = message(error62);
-        run.failureContext = { kind: "preparation", ...error62 instanceof LocalReplayError ? { recovery: error62.recovery } : {} };
+        run.failureContext = { kind: "preparation", ...error62 instanceof LocalReplayError || error62 instanceof CheckpointCommitError ? { recovery: "new-preview" } : {} };
         this.log(run, run.error, void 0, "error");
       }
       await this.persist(run);
@@ -50932,12 +51551,19 @@ var WorkflowEngine = class {
     }
     const expectedKind = run.workspaceMode ?? "snapshot";
     if ((workspace.kind ?? "snapshot") !== expectedKind) throw new Error("Command operation workspace kind differs from its previewed scope");
-    const owned = path15.join(await realpath11(await this.store.ownedDirectory(run.id)), "workspace");
-    const entry = await lstat12(workspace.root);
-    if (!entry.isDirectory() || entry.isSymbolicLink() || await realpath11(workspace.root) !== owned || await realpath11(workspace.original) !== run.projectPath || owned === await realpath11(workspace.original)) throw new Error("Command operations must remain bound to this run's owned isolated workspace");
+    const owned = path16.join(await realpath12(await this.store.ownedDirectory(run.id)), "workspace");
+    const entry = await lstat13(workspace.root);
+    if (!entry.isDirectory() || entry.isSymbolicLink() || await realpath12(workspace.root) !== owned || await realpath12(workspace.original) !== run.projectPath || owned === await realpath12(workspace.original)) throw new Error("Command operations must remain bound to this run's owned isolated workspace");
     if (workspace.kind === "git-worktree") await validateGitWorkspace(workspace);
   }
   async execute(run, active) {
+    let authority;
+    try {
+      authority = await this.checkpoints.read(run);
+    } catch (error62) {
+      throw new CheckpointCommitError("Committed node checkpoint could not be read before execution", { cause: error62 });
+    }
+    const checkpointGate = new StableCheckpointGate(() => this.commitNodeCheckpoint(run, "node"));
     const readPool = new Pool(run.limits.maxReadWorkers);
     let index = 0;
     let cacheInvalidFrom = Number.POSITIVE_INFINITY;
@@ -50949,6 +51575,9 @@ var WorkflowEngine = class {
     let phase;
     let reviewing = false;
     const journal = structuredClone(run.tasks);
+    for (const [position, task] of journal.entries()) {
+      if ((task.mode === "write" || task.options.operation !== void 0) && (task.status !== "completed" || task.cacheInvalidated || !Object.hasOwn(task, "output"))) cacheInvalidFrom = Math.min(cacheInvalidFrom, position);
+    }
     const configurationScope = digest2({ projectPath: run.projectPath, goal: run.meta.description, args: run.args });
     const issued = /* @__PURE__ */ new Set();
     const dispatch = (prompt, rawOptions, scriptSignal, operationId) => {
@@ -50980,6 +51609,7 @@ var WorkflowEngine = class {
         } catch (error62) {
           cacheInvalidFrom = Math.min(cacheInvalidFrom, position);
           const errorText = message(error62);
+          if (previous) await this.checkpoints.archiveTask(run.id, previous, "replaced-by-configuration-failure");
           run.tasks[position] = { id: `task_${position + 1}`, index: position, prompt, options, mode: options.mode === "write" || options.isolation === "worktree" ? "write" : "read", status: "failed", cached: false, attempts: [...previous?.attempts ?? [], { id: `task_${position + 1}_attempt_${(previous?.attempts.length ?? 0) + 1}`, status: "failed", error: errorText, endedAt: now() }], error: errorText, ...configurationTarget ? { configurationTarget } : {}, ...taskPhase !== void 0 ? { phase: taskPhase } : {}, ...typeof options.label === "string" ? { label: options.label } : {} };
           this.log(run, errorText, `task_${position + 1}`, "error");
           await this.persist(run);
@@ -50988,8 +51618,9 @@ var WorkflowEngine = class {
         const mode = options.mode === "write" ? "write" : "read";
         const fingerprint2 = taskFingerprint(prompt, options, executionSettings);
         const task = { id: `task_${position + 1}`, index: position, prompt, options, mode, status: "queued", cached: false, attempts: previous?.attempts ?? [], ...configurationTarget ? { configurationTarget } : {}, ...executionSettings ? { executionSettings } : {}, ...typeof options.label === "string" ? { label: options.label } : {}, ...taskPhase !== void 0 ? { phase: taskPhase } : {} };
+        if (previous && (taskFingerprint(previous.prompt, previous.options, previous.executionSettings) !== fingerprint2 || previous.phase !== taskPhase)) await this.checkpoints.archiveTask(run.id, previous, "replaced-by-replay");
         run.tasks[position] = task;
-        if (position < cacheInvalidFrom && previous?.status === "completed" && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint2 && Object.hasOwn(previous, "output")) {
+        if (position < cacheInvalidFrom && previous?.status === "completed" && this.committedTask(previous, authority) && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint2 && Object.hasOwn(previous, "output")) {
           try {
             if (options.schema) validateTaskOutput(previous.output, options.schema, options.accept);
           } catch (error62) {
@@ -51028,11 +51659,13 @@ var WorkflowEngine = class {
         let accountedTokens = 0;
         task.attempts.push(attempt);
         await this.persist(run);
+        let checkpointRelease;
         try {
           return await (mode === "write" ? this.writePool : readPool).use(controller.signal, async () => {
             const releaseWriter = mode === "write" ? await this.store.acquireNamed("writer", controller.signal) : void 0;
             try {
               if (run.limits.maxTokens > 0 && totalTokens >= run.limits.maxTokens) throw new Error("Workflow token budget exhausted before worker dispatch");
+              checkpointRelease = await checkpointGate.enter(controller.signal);
               if (run.workspaceMode === "local") {
                 if (!run.workspace || run.workspace.kind !== "local" || run.workspacePath !== run.workspace.root) throw new Error("Local project workspace identity is missing or inconsistent");
                 await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id));
@@ -51042,22 +51675,23 @@ var WorkflowEngine = class {
                 const step = run.maintenance.steps.find((step2) => step2.id === operationId);
                 if (step.protectedPaths !== void 0) {
                   if (run.workspace?.kind !== "git-worktree") throw new Error("Protected maintenance paths require an independent Git workspace");
-                  const owned = path15.join(await realpath11(await this.store.ownedDirectory(run.id)), "workspace");
-                  if (run.workspace.root !== owned || run.workspacePath !== run.workspace.root || run.workspace.root === run.workspace.original || run.workspace.root === await realpath11(run.workspace.original)) throw new Error("Protected maintenance paths must remain bound to this run's owned isolated workspace");
+                  const owned = path16.join(await realpath12(await this.store.ownedDirectory(run.id)), "workspace");
+                  if (run.workspace.root !== owned || run.workspacePath !== run.workspace.root || run.workspace.root === run.workspace.original || run.workspace.root === await realpath12(run.workspace.original)) throw new Error("Protected maintenance paths must remain bound to this run's owned isolated workspace");
                   await validateGitWorkspace(run.workspace);
                 }
               }
               task.status = "running";
               attempt.status = "running";
               attempt.startedAt = now();
+              run.checkpointState = { status: "dirty" };
               this.activity(run, task, attempt, { id: `${attempt.id}:dispatch`, kind: "waiting", label: mode === "write" ? "\u7B49\u5F85\u6267\u884C\u5668\u5F00\u59CB\u4EFB\u52A1" : "\u7B49\u5F85\u4EE3\u7406\u5F00\u59CB\u68C0\u67E5", status: "running", startedAt: attempt.startedAt });
-              this.log(run, `Worker started (${mode}).`, task.id);
+              this.log(run, `Worker started (${mode}).`, task.id, "info", attempt.id);
               await this.persist(run);
               if (operationId) {
                 const step = run.maintenance.steps.find((step2) => step2.id === operationId);
                 if (!this.adapter.command) throw new Error("This adapter cannot execute approved operations");
                 const report2 = await this.adapter.command({ id: attempt.id, command: step.command, cwd: run.workspacePath, networkAccess: step.networkAccess ?? false, timeoutMs: Math.min(step.timeoutMs ?? run.limits.timeoutMs, run.limits.timeoutMs), retries: step.retries ?? 0, ...step.protectedPaths !== void 0 ? { protectedPaths: step.protectedPaths } : {} }, controller.signal, (event) => {
-                  if (event.type === "log") this.log(run, event.message, task.id);
+                  if (event.type === "log") this.log(run, event.message, task.id, "info", attempt.id);
                   else if (event.type === "activity") this.activity(run, task, attempt, event.activity);
                 });
                 task.output = report2;
@@ -51099,7 +51733,7 @@ var WorkflowEngine = class {
                 } else if (event.type === "execution-settings") {
                   task.executionSettings = event.settings;
                   attempt.executionSettings = event.settings;
-                } else if (event.type === "log") this.log(run, event.message, task.id);
+                } else if (event.type === "log") this.log(run, event.message, task.id, "info", attempt.id);
                 else if (event.type === "activity") this.activity(run, task, attempt, event.activity);
                 else if (event.type === "usage") {
                   attempt.usage = { inputTokens: event.inputTokens, outputTokens: event.outputTokens, totalTokens: event.totalTokens };
@@ -51152,7 +51786,7 @@ var WorkflowEngine = class {
           attempt.status = task.status;
           task.error = message(error62);
           attempt.error = task.error;
-          this.log(run, task.error, task.id, "error");
+          this.log(run, task.error, task.id, "error", attempt.id);
           throw new WorkflowTaskError(error62, { taskId: task.id, attemptId: attempt.id, ...taskPhase !== void 0 ? { phase: taskPhase } : {} });
         } finally {
           attempt.endedAt = now();
@@ -51167,6 +51801,14 @@ var WorkflowEngine = class {
           }
           active.controller.signal.removeEventListener("abort", abort);
           scriptSignal?.removeEventListener("abort", abort);
+          if (checkpointRelease) {
+            try {
+              await checkpointRelease();
+            } catch (error62) {
+              active.controller.abort();
+              throw error62 instanceof CheckpointCommitError ? error62 : new CheckpointCommitError(message(error62), { cause: error62 });
+            }
+          }
           await this.persist(run);
         }
       })();
@@ -51181,13 +51823,14 @@ var WorkflowEngine = class {
           phase = title;
           this.log(run, `Phase: ${title}`);
         },
-        log: (text2) => {
-          this.log(run, text2);
+        log: (text3) => {
+          this.log(run, text3);
         },
         agent: (prompt, options, signal) => dispatch(prompt, options, signal),
         operation: (id, signal) => dispatch(`Operation: ${id}`, {}, signal, id)
       }, active.controller.signal, { timeoutMs: run.limits.timeoutMs, maxCalls: run.limits.maxCalls, memoryMb: 64 });
       await Promise.allSettled(issued);
+      for (const retired of run.tasks.slice(index)) await this.checkpoints.archiveTask(run.id, retired, "branch-no-longer-dispatched");
       run.tasks.length = index;
       if (active.controller.signal.aborted) throw new Error("Workflow interrupted");
       run.result = result2;
@@ -51211,8 +51854,8 @@ var WorkflowEngine = class {
       if (run.execution === "stopped") {
         run.stopReason ??= this.closing ? "service-shutdown" : "requested";
         delete run.error;
-      } else run.error = message(error62);
-      if (run.execution === "failed") run.failureContext = !reviewing && error62 instanceof WorkflowTaskError ? {
+      } else run.error = run.checkpointState?.status === "failed" ? run.checkpointState.error ?? message(error62) : message(error62);
+      if (run.execution === "failed") run.failureContext = error62 instanceof CheckpointCommitError || run.checkpointState?.status === "failed" ? { kind: "checkpoint", recovery: "new-preview" } : !reviewing && error62 instanceof WorkflowTaskError ? {
         kind: "task",
         ...error62.origin
       } : {
@@ -51229,36 +51872,15 @@ var WorkflowEngine = class {
       if (run.execution === "stopped") this.log(run, stopSummary(run.stopReason));
       else this.log(run, run.error, void 0, "error");
     } finally {
-      if (run.workspace?.kind === "local") {
+      if (run.checkpointState?.status !== "failed") {
         try {
-          await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id));
-          const checkpoint = await captureLocalWorkspaceCheckpoints(run.workspace);
-          run.workspaceCheckpoint = checkpoint.current;
-          run.localCheckpointState = { filesDigest: checkpoint.filesDigest, gitDigest: checkpoint.gitDigest };
+          for (const retired of run.tasks.slice(index)) await this.checkpoints.archiveTask(run.id, retired, "branch-no-longer-dispatched");
+          run.tasks.length = index;
+          await this.commitNodeCheckpoint(run, "final");
         } catch (error62) {
-          delete run.workspaceCheckpoint;
-          delete run.localCheckpointState;
           run.execution = run.execution === "completed" ? "failed" : run.execution;
-          run.error = `Could not checkpoint local project: ${message(error62)}`;
+          run.error = `Could not commit final node checkpoint: ${message(error62)}`;
           run.failureContext = { kind: "checkpoint", recovery: "new-preview", ...phase ? { phase } : {} };
-          this.log(run, run.error, void 0, "error");
-        }
-      } else if (run.workspace?.kind === "git-worktree") {
-        try {
-          run.workspaceCheckpoint = await maintenanceFingerprint(run.workspace);
-        } catch (error62) {
-          run.execution = run.execution === "completed" ? "failed" : run.execution;
-          run.error = `Could not checkpoint isolated checkout: ${message(error62)}`;
-          run.failureContext = { kind: "checkpoint", ...phase ? { phase } : {} };
-          this.log(run, run.error, void 0, "error");
-        }
-      } else if (run.workspace) {
-        try {
-          run.workspaceCheckpoint = await snapshotFingerprint(run.workspace);
-        } catch (error62) {
-          run.execution = run.execution === "completed" ? "failed" : run.execution;
-          run.error = `Could not checkpoint isolated snapshot: ${message(error62)}`;
-          run.failureContext = { kind: "checkpoint", ...phase ? { phase } : {} };
           this.log(run, run.error, void 0, "error");
         }
       }
@@ -51305,7 +51927,7 @@ var WorkflowEngine = class {
     validateTaskContracts(options.schema, options.accept);
     return options;
   }
-  async stop(id, reason = "requested") {
+  async stop(id, reason2 = "requested") {
     const run = await this.load(id);
     this.assertActionAvailable(run);
     const active = this.active.get(id);
@@ -51322,7 +51944,7 @@ var WorkflowEngine = class {
       return structuredClone(run);
     }
     if (run.execution !== "stopping") {
-      run.stopReason = reason;
+      run.stopReason = reason2;
       run.execution = "stopping";
       for (const task of run.tasks) if (task.status === "running") {
         task.status = "stopping";

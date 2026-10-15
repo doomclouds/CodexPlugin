@@ -152,3 +152,19 @@ test("a pending recheck response cannot adopt an old project's draft after autho
   assert.equal(calls.some(call => ["workflow_start", "workflow_resume"].includes(call.name)), false);
   await panel.teardown();
 });
+
+test("explicit checkpoint recovery hints create an exact new preview for readonly and isolated scopes", async () => {
+  for (const mode of ["snapshot", "git-worktree"] as const) {
+    const previous = run({ workspaceMode: mode, allowWrite: mode === "git-worktree", networkAccess: false, allowedMcpServers: [], allowedMcpTools: {}, failureContext: { kind: "checkpoint", recovery: "new-preview" }, error: "Saved checkpoint cannot be verified" });
+    const { panel, calls, records } = fixture(previous);
+    await panel.connected();
+    assert.equal(requiresNewLocalPreview(previous), true);
+    assert.deepEqual(primaryWorkflowAction(previous), { action: "recheck", label: "重新检查" });
+    await panel.recheckFromCurrent();
+    const expected = inputFor(previous);
+    assert.deepEqual(calls.find(call => call.name === "workflow_preview")?.args, expected);
+    assert.deepEqual(records.get(previous.id), previous);
+    assert.equal(calls.some(call => ["workflow_start", "workflow_resume", "workflow_update"].includes(call.name)), false);
+    await panel.teardown();
+  }
+});

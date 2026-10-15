@@ -5,7 +5,7 @@ const maximumBytes = 3 * 1024 * KiB;
 const maximumDiffBytes = 256 * KiB;
 const maximumLogBytes = 128 * KiB;
 const maximumNewControlBytes = 2 * 1024 * KiB;
-const controlKeys = ["id", "revision", "meta", "script", "args", "projectPath", "allowWrite", "networkAccess", "allowedMcpServers", "allowedMcpTools", "workspaceMode", "approvalMode", "localGitWrite", "workspace", "workspacePath", "maintenance", "nodeSettings", "limits", "executionSettings", "sourceDefinition", "execution", "review", "application", "deletionPending", "deletionTarget", "scriptDigest", "contextDigest", "workspaceCheckpoint"];
+const controlKeys = ["id", "revision", "meta", "script", "args", "projectPath", "allowWrite", "networkAccess", "allowedMcpServers", "allowedMcpTools", "workspaceMode", "approvalMode", "localGitWrite", "workspace", "workspacePath", "maintenance", "nodeSettings", "limits", "executionSettings", "sourceDefinition", "execution", "review", "application", "deletionPending", "deletionTarget", "scriptDigest", "contextDigest", "workspaceCheckpoint", "nodeCheckpoint", "checkpointState"];
 
 export class TransportProjectionError extends Error {
   readonly code: string;
@@ -37,7 +37,12 @@ function pageNumber(value: number | undefined, fallback: number, maximum: number
 function controlPlane(source: RecordValue): RecordValue {
   // Authorization and replay inputs remain exact. A large control plane must
   // fail visibly rather than return an apparently editable weakened plan.
-  return Object.fromEntries(controlKeys.filter(key => Object.hasOwn(source, key)).map(key => [key, source[key]]));
+  return Object.fromEntries(controlKeys.filter(key => Object.hasOwn(source, key)).map(key => {
+    const state = key === "checkpointState" ? object(source[key]) : undefined;
+    // Status and immutable checkpoint identity are exact replay metadata.
+    // A checkpoint failure message is display-only diagnostic text.
+    return [key, state ? { status: state.status } : source[key]];
+  }));
 }
 
 /** Call before a plan mutation. It validates size without changing its inputs. */
@@ -121,6 +126,8 @@ export function projectRunForTransport(run: WorkflowRun, options: { artifactOffs
   };
   limitLogs(maximumLogBytes);
   text(view, "error", 16 * KiB, "error");
+  const checkpointState = object(view.checkpointState);
+  if (checkpointState) text(checkpointState, "error", 4 * KiB, "checkpointState.error");
   if (Object.hasOwn(view, "result")) allOutputFields.push({ record: view, key: "result", field: "result" });
   tasks.forEach((task, index) => {
     const base = `tasks[${index}]`;

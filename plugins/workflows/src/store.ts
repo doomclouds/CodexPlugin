@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rename, writeFile, rm, lstat } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, writeFile, rm, lstat } from "node:fs/promises";
 import path from "node:path";
 import { homedir } from "node:os";
 import type { WorkflowRun } from "./types.ts";
@@ -71,8 +71,8 @@ export class RunStore {
     await this.writePrivateJson(path.join(".deletions", "runs", `${id}.json`), { schemaVersion: 1, id, deletionId, revision, ...(summary ? { summary } : {}), ...(target ? { target } : {}) });
   }
   async create(run: WorkflowRun) { return this.writeRun(run, true); }
-  async save(run: WorkflowRun) { return this.writeRun(run, false); }
-  private async writeRun(run: WorkflowRun, create: boolean) {
+  async save(run: WorkflowRun, durable = false) { return this.writeRun(run, false, durable); }
+  private async writeRun(run: WorkflowRun, create: boolean, durable = false) {
     const directory = this.directory(run.id);
     const content = JSON.stringify(run);
     if (Buffer.byteLength(content) > 32 * 1024 * 1024) throw new Error("Workflow state exceeds 32 MiB");
@@ -105,8 +105,18 @@ export class RunStore {
       }
       await this.ownedDirectory(run.id, create);
       const temporary = path.join(directory, `run.json.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
-      await writeFile(temporary, content, { mode: 0o600, flag: "wx" });
-      try { await rename(temporary, path.join(directory, "run.json")); }
+      try {
+        const file = await open(temporary, "wx", 0o600);
+        try { await file.writeFile(content); if (durable) await file.sync(); }
+        finally { await file.close(); }
+        await rename(temporary, path.join(directory, "run.json"));
+        // Windows cannot provide the POSIX directory-fsync guarantee. File
+        // contents are flushed there, but rename durability remains OS-managed.
+        if (durable && process.platform !== "win32") {
+          const parent = await open(directory, "r");
+          try { await parent.sync(); } finally { await parent.close(); }
+        }
+      }
       finally { await rm(temporary, { force: true }); }
     }));
     this.pending.set(run.id, next);

@@ -358,3 +358,42 @@ test("read-only network access is independently declared without authorizing fil
     assert.equal((capability.structuredContent?.execution as Record<string, unknown>).networkAccessIndependentFromWrite, true);
   } finally { await close(); }
 });
+
+test("checkpoint recovery tools route read-only previews and paged history without dispatch", async () => {
+  const { client, calls, engine, close } = await fixture();
+  const checkpoint = { id: "cp_1", sequence: 1, createdAt: "2026-10-15T00:00:00Z", reason: "task-completed", completedTasks: 1 };
+  try {
+    engine.previewRecovery = async input => {
+      calls.push({ action: "preview-recovery", input });
+      return { id, revision: input.revision, fingerprint: "c".repeat(64), canResume: true, strategy: "preserve-files", checkpoint, reusedTaskIds: ["task_1"], rerunTaskIds: ["task_2"], invalidatedTaskIds: ["task_2"], blockers: [], warnings: [], currentFilesPreserved: true, externalEffectsReverted: false };
+    };
+    engine.listCheckpoints = async input => { calls.push({ action: "list-checkpoints", input }); return { checkpoints: [checkpoint], total: 2, nextOffset: 1 }; };
+    engine.taskHistory = async input => { calls.push({ action: "task-history", input }); return { history: [], total: 0 }; };
+    const tools = (await client.listTools()).tools;
+    for (const name of ["workflow_preview_recovery", "workflow_get_checkpoints", "workflow_get_task_history"]) {
+      assert.equal(tools.find(tool => tool.name === name)?.annotations?.readOnlyHint, true);
+    }
+    assert.deepEqual(tools.find(tool => tool.name === "workflow_preview_recovery")?._meta?.ui, { visibility: ["model", "app"] });
+    const preview = await client.callTool({ name: "workflow_preview_recovery", arguments: { id, revision: 1, retryFromTaskId: "task_2" } });
+    assert.equal(preview.isError, undefined);
+    assert.equal((preview.structuredContent?.preview as { fingerprint: string }).fingerprint, "c".repeat(64));
+    const checkpoints = await client.callTool({ name: "workflow_get_checkpoints", arguments: { id, offset: 0, limit: 1 } });
+    assert.deepEqual(checkpoints.structuredContent, { checkpoints: [checkpoint], total: 2, nextOffset: 1 });
+    assert.equal((await client.callTool({ name: "workflow_get_task_history", arguments: { id, offset: 2, limit: 10, taskId: "task_2", detail: "brief" } })).isError, undefined);
+    assert.deepEqual(calls, [
+      { action: "preview-recovery", input: { id, revision: 1, retryFromTaskId: "task_2" } },
+      { action: "list-checkpoints", input: { id, offset: 0, limit: 1 } },
+      { action: "task-history", input: { id, offset: 2, limit: 10, taskId: "task_2", detail: "brief" } },
+    ]);
+    assert.equal((await client.callTool({ name: "workflow_resume", arguments: { id, revision: 1, retryFromTaskId: "task_2", recoveryFingerprint: "c".repeat(64) } })).isError, undefined);
+    assert.deepEqual(calls.at(-1), { action: "resume", input: { id, revision: 1, retryFromTaskId: "task_2", recoveryFingerprint: "c".repeat(64) } });
+    const prior = calls.length;
+    for (const [name, args] of [
+      ["workflow_preview_recovery", { id, revision: 1, retryFromTaskId: "wrong" }],
+      ["workflow_resume", { id, revision: 1, recoveryFingerprint: "weak" }],
+      ["workflow_get_checkpoints", { id, limit: 101 }],
+      ["workflow_get_task_history", { id, offset: -1 }],
+    ] as const) assert.equal((await client.callTool({ name, arguments: args })).isError, true);
+    assert.equal(calls.length, prior);
+  } finally { await close(); }
+});

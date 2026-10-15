@@ -7,7 +7,7 @@ import { executeScript, validateScript, validateWorkflowArgs } from "./script.ts
 import { RunStore } from "./store.ts";
 import { listGitlinks, gitAwareContextDigest, readOnlyGitContextDigest } from "./submodules.ts";
 import { snapshotFingerprint } from "./snapshot-checkpoint.ts";
-import { createLocalWorkspace, validateLocalWorkspace, localWorkspaceDiff, captureLocalWorkspaceCheckpoints } from "./local-workspace.ts";
+import { createLocalWorkspace, validateLocalWorkspace, localWorkspaceDiff, captureLocalWorkspaceCheckpoints, readOnlyProjectCheckpoint } from "./local-workspace.ts";
 import { stopSummary } from "./stop-context.ts";
 import { nodeProcess } from "./node-process.ts";
 import type { WorkflowStopReason } from "./stop-context.ts";
@@ -20,6 +20,10 @@ import { WorkflowTaskError } from "./task-failure.ts";
 import { ExecutionSettingsStore, modelSettingsSchema, resolveExecutionSettings, validateExplicitModelSettings, validateNodeSettings } from "./execution-settings.ts";
 import type { EffectiveExecutionSettings, ExecutionEnvironment, ModelSettings, NodeSettings, StoredExecutionSettings } from "./execution-settings.ts";
 import { buildWorkerPrompt } from "./worker-prompt.ts";
+import { CheckpointStore } from "./checkpoint-store.ts";
+import type { CheckpointManifest, CheckpointNode, CheckpointReason } from "./checkpoint-store.ts";
+import { StableCheckpointGate } from "./checkpoint-gate.ts";
+import { projectRunForTransport } from "./run-view.ts";
 
 const now = () => new Date().toISOString();
 function canonical(value: unknown): unknown {
@@ -36,6 +40,7 @@ interface Active { controller: AbortController; done: Promise<void>; tasks: Map<
 class LocalReplayError extends Error {
   readonly recovery = "new-preview";
 }
+class CheckpointCommitError extends Error {}
 
 class Pool {
   private running = 0;
@@ -59,6 +64,8 @@ class Pool {
 
 export class WorkflowEngine {
   readonly store: RunStore;
+  private readonly checkpoints: CheckpointStore;
+  private readonly checkpointCoverage = new Map<string, { id: string; keys: Set<string> }>();
   private adapter: WorkerAdapter;
   private runs = new Map<string, WorkflowRun>();
   private active = new Map<string, Active>();
@@ -74,6 +81,7 @@ export class WorkflowEngine {
   private closing = false;
   constructor(options: { store?: RunStore; adapter?: WorkerAdapter } = {}) {
     this.store = options.store ?? new RunStore();
+    this.checkpoints = new CheckpointStore(this.store);
     this.adapter = options.adapter ?? new CodexAdapter();
     this.settings = new ExecutionSettingsStore(this.store);
     this.initialization = this.initialize();
@@ -147,16 +155,16 @@ export class WorkflowEngine {
     } finally { await release(); }
   }
   private clearProgress(id: string) { const timer = this.progressTimers.get(id); if (timer) clearTimeout(timer); this.progressTimers.delete(id); }
-  private async persist(run: WorkflowRun) { this.clearProgress(run.id); run.updatedAt = now(); run.revision++; await this.store.save(run); }
-  private async persistProgress(run: WorkflowRun) { this.clearProgress(run.id); run.updatedAt = now(); run.progressSequence = (run.progressSequence ?? 0) + 1; await this.store.save(run); }
+  private async persist(run: WorkflowRun, durable = false) { this.clearProgress(run.id); run.updatedAt = now(); run.revision++; await this.store.save(run, durable || Boolean(run.nodeCheckpoint)); }
+  private async persistProgress(run: WorkflowRun) { this.clearProgress(run.id); run.updatedAt = now(); run.progressSequence = (run.progressSequence ?? 0) + 1; await this.store.save(run, Boolean(run.nodeCheckpoint)); }
   private scheduleProgress(run: WorkflowRun) {
     if (!this.active.has(run.id) || this.progressTimers.has(run.id)) return;
     const timer = setTimeout(() => { void this.persistProgress(run).catch(error => { const active = this.active.get(run.id); run.error = `Could not save workflow progress: ${message(error)}`; active?.controller.abort(); }); }, 250);
     timer.unref(); this.progressTimers.set(run.id, timer);
   }
-  private log(run: WorkflowRun, text: string, taskId?: string, level: "info" | "error" = "info") {
+  private log(run: WorkflowRun, text: string, taskId?: string, level: "info" | "error" = "info", attemptId?: string) {
     if (run.logs.length >= 5000) run.logs.shift();
-    run.logs.push({ at: now(), level, message: text.slice(0, 16000), ...(taskId ? { taskId } : {}) });
+    run.logs.push({ at: now(), level, message: text.slice(0, 16000), ...(taskId ? { taskId } : {}), ...(attemptId ? { attemptId } : {}) });
     this.scheduleProgress(run);
   }
   private async load(id: string) {
@@ -176,13 +184,149 @@ export class WorkflowEngine {
   async getNodeProcess(id: string, input: Parameters<typeof nodeProcess>[1]) {
     // Diagnostics remain readable while terminal checkpoint and lock cleanup
     // finish; this bounded projection never supplies an actionable run scope.
-    return nodeProcess(await this.load(id), input);
+    const run = await this.load(id);
+    let coverage: Set<string> | undefined;
+    if (run.nodeCheckpoint) {
+      const cached = this.checkpointCoverage.get(id);
+      if (this.active.has(id) && cached?.id === run.nodeCheckpoint.id) coverage = cached.keys;
+      else if (!this.active.has(id)) try { coverage = new Set((await this.checkpoints.read(run)).nodes.filter(node => node.status === "completed" && node.attemptId).map(node => `${node.taskId}:${node.attemptId}`)); this.checkpointCoverage.set(id, { id: run.nodeCheckpoint.id, keys: coverage }); }
+      catch { /* A missing/corrupt manifest is never advertised as covered. */ }
+    }
+    return nodeProcess(run, input, coverage);
   }
   async list(projectPath?: string) {
     await this.initialization;
     const project = projectPath ? await realpath(projectPath) : undefined;
     const runs = await this.store.list();
     return runs.filter(run => !project || run.projectPath === project);
+  }
+  private checkpointScope(run: WorkflowRun): string {
+    return digest({ projectPath: run.projectPath, script: run.script, args: run.args, allowWrite: run.allowWrite, networkAccess: run.networkAccess ?? false, allowedMcpServers: run.allowedMcpServers ?? [], allowedMcpTools: run.allowedMcpTools ?? {}, workspaceMode: run.workspaceMode ?? "snapshot", localGitWrite: run.localGitWrite ?? false, maintenance: run.maintenance, nodeSettings: run.nodeSettings ?? {}, executionSettings: run.executionSettings ?? {}, limits: run.limits });
+  }
+  private checkpointNodes(run: WorkflowRun): CheckpointNode[] {
+    return run.tasks.filter(task => !["queued", "running", "stopping"].includes(task.status)).map(task => ({
+      taskId: task.id, index: task.index, fingerprint: taskFingerprint(task.prompt, task.options, task.executionSettings), status: task.cacheInvalidated ? "invalidated" : task.status,
+      ...(task.attempts.at(-1)?.id ? { attemptId: task.attempts.at(-1)!.id } : {}),
+      ...(Object.hasOwn(task, "output") ? { outputDigest: digest(task.output) } : {}),
+      ...(task.label ? { label: task.label } : {}), ...(task.phase ? { phase: task.phase } : {}),
+    }));
+  }
+  private async captureCheckpointState(run: WorkflowRun) {
+    if (run.workspace?.kind === "local") {
+      await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id));
+      const state = await captureLocalWorkspaceCheckpoints(run.workspace);
+      return { workspaceFingerprint: state.current, localState: { filesDigest: state.filesDigest, gitDigest: state.gitDigest } };
+    }
+    if (run.workspace?.kind === "git-worktree") return { workspaceFingerprint: await maintenanceFingerprint(run.workspace) };
+    if (run.workspace) return { workspaceFingerprint: await snapshotFingerprint(run.workspace) };
+    if (!run.tasks.length && !run.maintenance && !validateScript(run.script).mayUseAgent) return { workspaceFingerprint: `script-only-v1:${digest({ script: run.script, args: run.args })}` };
+    return { workspaceFingerprint: await readOnlyProjectCheckpoint(run.projectPath) };
+  }
+  private async commitNodeCheckpoint(run: WorkflowRun, reason: CheckpointReason, captured?: Awaited<ReturnType<WorkflowEngine["captureCheckpointState"]>>, expectedFingerprint?: string) {
+    const previous = run.nodeCheckpoint;
+    run.checkpointState = { status: "saving" };
+    this.log(run, "Saving a stable node checkpoint; current files are preserved.");
+    try {
+      await this.persistProgress(run);
+      const state = captured ?? await this.captureCheckpointState(run);
+      if (expectedFingerprint !== undefined && state.workspaceFingerprint !== expectedFingerprint) throw new LocalReplayError("Project changed after recovery validation. Existing files and the previous checkpoint are preserved; create a new preview.");
+      const nodes = this.checkpointNodes(run);
+      const checkpoint = await this.checkpoints.write(run, { reason, planDigest: this.checkpointScope(run), workspaceFingerprint: state.workspaceFingerprint, nodes });
+      run.nodeCheckpoint = checkpoint;
+      if (run.workspace) run.workspaceCheckpoint = state.workspaceFingerprint;
+      else run.contextDigest = state.workspaceFingerprint;
+      if (state.localState) run.localCheckpointState = state.localState;
+      run.checkpointState = { status: "ready" };
+      this.log(run, `Node checkpoint ${checkpoint.sequence} saved (${checkpoint.completedTasks} completed tasks).`);
+      // The immutable manifest is written first. Its pointer, all task results
+      // and the matching file state become visible in this one durable rename.
+      await this.persist(run, true);
+      this.checkpointCoverage.set(run.id, { id: checkpoint.id, keys: new Set(nodes.filter(node => node.status === "completed" && node.attemptId).map(node => `${node.taskId}:${node.attemptId}`)) });
+    } catch (error) {
+      if (previous) run.nodeCheckpoint = previous; else delete run.nodeCheckpoint;
+      run.checkpointState = { status: "failed", error: `Could not save node checkpoint: ${message(error).slice(0, 2000)}` };
+      this.log(run, `Could not save node checkpoint: ${message(error)}`, undefined, "error");
+      await this.persist(run).catch(() => {});
+      throw new CheckpointCommitError(`Could not save node checkpoint: ${message(error)}`, { cause: error });
+    }
+  }
+  async listCheckpoints(input: { id: string; offset?: number; limit?: number }) {
+    await this.initialization;
+    const run = this.active.has(input.id) ? this.runs.get(input.id)! : await this.store.load(input.id);
+    return { ...(await this.checkpoints.list(run, input)), state: run.checkpointState ?? { status: "unavailable" }, ...(run.nodeCheckpoint ? { latest: run.nodeCheckpoint } : {}) };
+  }
+  async taskHistory(input: { id: string; offset?: number; limit?: number; taskId?: string; historyId?: string; detail?: "brief" | "developer" }) {
+    await this.initialization;
+    const run = this.active.has(input.id) ? this.runs.get(input.id)! : await this.store.load(input.id);
+    this.assertActionAvailable(run);
+    const page = await this.checkpoints.listTaskHistory(input.id, input);
+    if (!input.historyId) return page;
+    const task = await this.checkpoints.readTaskHistory(input.id, input.historyId);
+    const history = page.history.find(item => item.id === input.historyId);
+    if (input.detail !== "developer") return { ...(history ? { history } : {}), task: { id: task.id, index: task.index, status: task.status, label: task.label, phase: task.phase, attempts: task.attempts.map(attempt => ({ id: attempt.id, status: attempt.status, startedAt: attempt.startedAt, endedAt: attempt.endedAt, recoveryAttempts: attempt.recoveryAttempts })) } };
+    const historyView = { ...run, tasks: [task], logs: [] };
+    delete historyView.workspace; delete historyView.diff; delete historyView.maintenanceReview; delete historyView.result;
+    const view = projectRunForTransport(historyView);
+    return { ...(history ? { history } : {}), task: (view.tasks as unknown[])[0], ...(view.transportPreview ? { transportPreview: view.transportPreview } : {}) };
+  }
+  private verifyCheckpointJournal(run: WorkflowRun, checkpoint: CheckpointManifest) {
+    for (const entry of checkpoint.nodes.filter(node => node.status === "completed")) {
+      const task = run.tasks.find(item => item.id === entry.taskId);
+      if (task?.status === "completed" && task.attempts.at(-1)?.id === entry.attemptId && !task.cacheInvalidated && (entry.fingerprint !== taskFingerprint(task.prompt, task.options, task.executionSettings) || !Object.hasOwn(task, "output") || entry.outputDigest !== digest(task.output))) throw new LocalReplayError("Saved task result no longer matches its committed node checkpoint. Create a new preview.");
+    }
+  }
+  private committedTask(task: Task, checkpoint: CheckpointManifest): boolean {
+    return checkpoint.nodes.some(entry => entry.taskId === task.id && entry.attemptId === task.attempts.at(-1)?.id && ["completed", "invalidated"].includes(entry.status) && entry.fingerprint === taskFingerprint(task.prompt, task.options, task.executionSettings) && Object.hasOwn(task, "output") && entry.outputDigest === digest(task.output));
+  }
+  async previewRecovery(input: { id: string; revision: number; retryFromTaskId?: string }) {
+    await this.initialization;
+    const run = this.active.has(input.id) ? this.runs.get(input.id)! : await this.store.load(input.id);
+    this.assertRevision(run, input.revision);
+    return this.recoveryPreview(run, input.retryFromTaskId);
+  }
+  private async recoveryPreview(run: WorkflowRun, retryFromTaskId?: string, ownsLock = false) {
+    const blockers: Array<{ code: string; message: string }> = [], warnings: string[] = [];
+    if (run.deletionPending || run.application !== "none") blockers.push({ code: "state_unavailable", message: "运行正在清理或已有应用操作，不能恢复。" });
+    if (!["stopped", "failed"].includes(run.execution) || this.active.has(run.id) || !ownsLock && await this.store.isLocked(run.id)) blockers.push({ code: "owner_active", message: "运行尚未停止或旧执行器尚未退出。" });
+    let boundary: number | undefined;
+    try { boundary = this.retryBoundary(run, retryFromTaskId, true); }
+    catch (error) { blockers.push({ code: "retry_boundary", message: message(error) }); }
+    let manifest: CheckpointManifest | undefined, state: Awaited<ReturnType<WorkflowEngine["captureCheckpointState"]>> | undefined;
+    try {
+      state = await this.captureCheckpointState(run);
+      if (run.nodeCheckpoint) {
+        manifest = await this.checkpoints.read(run);
+        this.verifyCheckpointJournal(run, manifest);
+        if (manifest.planDigest !== this.checkpointScope(run)) blockers.push({ code: "plan_changed", message: "执行计划、模型或授权范围已改变，请创建新预览。" });
+        if (manifest.workspaceFingerprint !== state.workspaceFingerprint) {
+          if (run.allowWrite) blockers.push({ code: "workspace_changed", message: "当前项目、Git 状态或产物与已保存检查点不一致；现有文件保留，请重新检查。" });
+          else warnings.push("只读项目状态已变化，本次将重新执行全部读取，不复用旧结果。");
+        }
+      } else if (run.workspace) {
+        if (!run.workspaceCheckpoint || run.workspaceCheckpoint !== state.workspaceFingerprint) blockers.push({ code: "legacy_checkpoint_unverified", message: "旧运行缺少可核验检查点，不能把旧结果当作新的验证；请重新检查。" });
+        else warnings.push("旧运行只有整轮检查点；通过当前状态校验后才建立新的节点检查点。");
+      } else warnings.push("旧只读运行没有节点检查点，本次将重新执行全部读取后建立检查点。");
+    } catch (error) { blockers.push({ code: "checkpoint_unavailable", message: `检查点无法核对：${message(error)}` }); }
+    if (run.checkpointState?.status === "failed") blockers.push({ code: "checkpoint_commit_failed", message: "上次检查点保存失败，不能跳过核验；请重新检查并创建新预览。" });
+    const reusedTaskIds: string[] = [], rerunTaskIds: string[] = [], invalidatedTaskIds: string[] = [];
+    let cutoff = boundary ?? Number.POSITIVE_INFINITY;
+    if (!run.allowWrite && !manifest && run.tasks.length) cutoff = 0;
+    if (!run.allowWrite && manifest && state && manifest.workspaceFingerprint !== state.workspaceFingerprint) cutoff = 0;
+    for (const task of run.tasks) if (task.cacheInvalidated || task.status !== "completed" && !(task.status === "interrupted" && task.mode === "read") || task.status === "completed" && !Object.hasOwn(task, "output")) cutoff = Math.min(cutoff, task.index);
+    for (const task of run.tasks) if (manifest && task.status === "completed" && !this.committedTask(task, manifest)) {
+      cutoff = Math.min(cutoff, task.index);
+      if (task.mode === "write") blockers.push({ code: "uncommitted_write_result", message: `写入节点 ${task.label ?? task.id} 的结果未完成检查点提交，须先核对副作用并创建新预览。` });
+      else warnings.push(`读取节点 ${task.label ?? task.id} 未完成检查点提交，将重新执行而不复用孤立结果。`);
+    }
+    for (const task of run.tasks) {
+      const reusable = task.index < cutoff && task.status === "completed" && !task.cacheInvalidated && Object.hasOwn(task, "output");
+      if (reusable) reusedTaskIds.push(task.id); else { rerunTaskIds.push(task.id); if (task.status === "completed") invalidatedTaskIds.push(task.id); }
+      const operation = task.options.operation as { id?: string } | undefined;
+      if (!reusable && operation && task.attempts.some(attempt => attempt.startedAt) && run.maintenance?.steps.find(step => step.id === operation.id)?.idempotent !== true) blockers.push({ code: "unknown_operation_effect", message: `命令 ${operation.id} 已开始且未声明幂等，必须先核对实际效果，不能自动重复。` });
+      else if (!reusable && task.mode === "write" && task.attempts.some(attempt => attempt.startedAt)) warnings.push(`节点 ${task.label ?? task.id} 可能已有部分效果，恢复时须先核对，不能盲目重复外部写入。`);
+    }
+    const fingerprint = digest({ id: run.id, revision: run.revision, scope: this.checkpointScope(run), checkpoint: run.nodeCheckpoint, state: state?.workspaceFingerprint, journal: this.checkpointNodes(run), retryFromTaskId, blockers });
+    return { id: run.id, revision: run.revision, fingerprint, canResume: blockers.length === 0, strategy: "preserve-files" as const, ...(run.nodeCheckpoint ? { checkpoint: run.nodeCheckpoint } : {}), reusedTaskIds, rerunTaskIds, invalidatedTaskIds, blockers, warnings, currentFilesPreserved: true as const, externalEffectsReverted: false as const };
   }
   private configuration<T>(operation: () => Promise<T>): Promise<T> {
     if (this.configAbort.signal.aborted) return Promise.reject(new Error("Workflow engine is closed."));
@@ -355,9 +499,10 @@ export class WorkflowEngine {
     }
     return task.index;
   }
-  async start(input: { id: string; revision: number; leaseId?: string; retryFromTaskId?: string; approvalMode?: ApprovalMode }, resume = false) {
+  async start(input: { id: string; revision: number; leaseId?: string; retryFromTaskId?: string; approvalMode?: ApprovalMode; recoveryFingerprint?: string }, resume = false) {
     if (this.closing) throw new Error("Workflow execution service is closing");
     if (!resume && input.approvalMode !== undefined) throw new Error("Choose worker approval mode in the preview before workflow_start");
+    if (input.recoveryFingerprint !== undefined && (!resume || !/^[a-f0-9]{64}$/.test(input.recoveryFingerprint))) throw new Error("A recovery fingerprint requires workflow_resume and a current recovery preview");
     if (input.approvalMode !== undefined) resolveApprovalMode(input.approvalMode);
     let run = await this.load(input.id);
     this.assertActionAvailable(run);
@@ -377,6 +522,10 @@ export class WorkflowEngine {
       this.assertRevision(run, input.revision);
       if (resume ? !["stopped", "failed"].includes(run.execution) : run.execution !== "draft") throw new Error("Workflow state changed before start");
       const retryFrom = this.retryBoundary(run, input.retryFromTaskId, resume);
+      if (input.recoveryFingerprint !== undefined) {
+        const preview = await this.recoveryPreview(run, input.retryFromTaskId, true);
+        if (preview.fingerprint !== input.recoveryFingerprint || !preview.canResume) throw new Error("Recovery preview changed or is blocked; refresh the preview before confirming. No workers were started.");
+      }
       const approvalMode = resolveApprovalMode(input.approvalMode, resolveApprovalMode(run.approvalMode));
       const { meta, mayUseAgent } = validateScript(run.script);
       validateWorkflowArgs(meta, run.args);
@@ -441,6 +590,8 @@ export class WorkflowEngine {
   }
   private async prepare(run: WorkflowRun, active: Active, settings: StoredExecutionSettings, needsEnvironment: boolean, resume: boolean) {
     let releaseProject: (() => Promise<void>) | undefined;
+    let readOnlyChanged = false;
+    let validatedFingerprint: string | undefined;
     try {
       validateMaintenanceScope(run);
       if (run.workspaceMode === "local" && run.maintenance && run.localGitWrite !== true) throw new Error("Local command operations require a new preview with recorded local Git write scope; legacy write scope cannot be expanded");
@@ -464,11 +615,21 @@ export class WorkflowEngine {
         }
         let context: string;
         try {
+          if (!run.allowWrite && run.nodeCheckpoint) {
+            const state = await this.captureCheckpointState(run);
+            if (state.workspaceFingerprint !== (await this.checkpoints.read(run)).workspaceFingerprint) {
+              readOnlyChanged = true;
+              for (const task of run.tasks) { task.cacheInvalidated = true; task.status = "interrupted"; }
+              this.log(run, "Read-only project changed; saved task results will not be reused.");
+            }
+            run.contextDigest = state.workspaceFingerprint;
+            return;
+          }
           const gitlinks = await listGitlinks(run.projectPath);
           if (gitlinks.length && run.allowWrite && run.workspaceMode !== "git-worktree") throw new Error("Snapshot writing does not copy Git submodules. Create a new preview with workspaceMode: git-worktree to retain their commit and initialization state.");
           context = gitlinks.length ? await gitAwareContextDigest(run.projectPath) : await contextDigest(run.projectPath);
           if (!run.allowWrite) context = digest({ files: context, git: await readOnlyGitContextDigest(run.projectPath) });
-        } catch (error) { if (run.allowWrite) throw error; context = randomBytes(16).toString("hex"); }
+        } catch (error) { if (run.allowWrite || run.nodeCheckpoint) throw error; context = randomBytes(16).toString("hex"); }
         if (run.contextDigest && run.contextDigest !== context) {
           if (run.workspace) throw new Error("Project changed since the workspace snapshot. Create a new preview to preserve those changes.");
           for (const task of run.tasks) task.status = "interrupted";
@@ -482,6 +643,27 @@ export class WorkflowEngine {
       await this.preparationStage(run, active, "validation", "验证工作区与执行范围", async () => {
         if (run.workspace && !(await stat(run.workspace.root)).isDirectory()) throw new Error("Saved workspace is missing; cannot resume");
         if (run.maintenance) await this.validateOperationWorkspace(run);
+        if (run.nodeCheckpoint) {
+          if (resume && run.checkpointState?.status === "failed") throw new LocalReplayError("Previous node checkpoint commit failed. Inspect storage and create a new preview before continuing.");
+          const checkpoint = await this.checkpoints.read(run);
+          if (checkpoint.planDigest !== this.checkpointScope(run)) {
+            if (resume) throw new LocalReplayError("Execution plan, model or permissions changed since the node checkpoint. Create a new preview.");
+            // An explicitly edited draft may start a new plan in its retained
+            // workspace, but no old observation can race ahead of a changed
+            // writer/model while asynchronous discovery is still in progress.
+            for (const task of run.tasks) task.cacheInvalidated = true;
+            this.log(run, "Explicitly edited plan: all earlier task results require revalidation; history is retained.");
+          }
+          const state = await this.captureCheckpointState(run);
+          validatedFingerprint = state.workspaceFingerprint;
+          if (checkpoint.workspaceFingerprint !== state.workspaceFingerprint && !readOnlyChanged) throw new LocalReplayError("Project or workspace changed since the last checkpoint. Existing files are preserved; create a new preview before reusing results.");
+          this.verifyCheckpointJournal(run, checkpoint);
+          for (const task of run.tasks) if (task.status === "completed" && !this.committedTask(task, checkpoint)) {
+            if (task.mode === "write") throw new LocalReplayError("A write task returned without a committed node checkpoint. Inspect its actual effects and create a new preview; it will not be repeated automatically.");
+            task.cacheInvalidated = true;
+          }
+          return;
+        }
         if (run.workspaceMode === "local") {
           if (!run.workspace || run.workspace.kind !== "local" || run.workspacePath !== run.workspace.root) throw new Error("Local project workspace identity is missing or inconsistent");
           await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id));
@@ -498,21 +680,32 @@ export class WorkflowEngine {
               throw new LocalReplayError(`Local project or build artifacts changed since the last checkpoint. ${detail}请点击“重新检查”创建新预览，再从头核对当前项目；原项目已有改动会保留。`);
             }
             if (saved.startsWith("local-v1:")) this.log(run, "Legacy local checkpoint verified exactly; Codex internal turn checkpoints are excluded from future project checkpoints.");
+            validatedFingerprint = checkpoints.current;
           } else if (run.tasks.some(task => task.status === "completed" || task.attempts.some(attempt => attempt.startedAt))) throw new LocalReplayError("Local project has previously started workers without a reliable checkpoint. 请点击“重新检查”创建新预览，核对已有改动后再启动。");
         } else if (run.workspace?.kind === "git-worktree") {
           await validateGitWorkspace(run.workspace);
-          if (run.workspaceCheckpoint && await maintenanceFingerprint(run.workspace) !== run.workspaceCheckpoint) throw new Error("Saved Git checkout or artifacts changed; cached steps cannot safely replay. Create a new preview.");
+          if (run.workspaceCheckpoint) {
+            const current = await maintenanceFingerprint(run.workspace);
+            if (current !== run.workspaceCheckpoint) throw new Error("Saved Git checkout or artifacts changed; cached steps cannot safely replay. Create a new preview.");
+            validatedFingerprint = current;
+          }
         } else if (run.workspace) {
           if (run.workspaceCheckpoint) {
             if (!run.workspaceCheckpoint.startsWith("snapshot-v1:")) throw new Error("Saved snapshot checkpoint format is unsupported. Create a new preview before replaying verified results.");
-            if (await snapshotFingerprint(run.workspace, active.controller.signal) !== run.workspaceCheckpoint) throw new Error("Saved snapshot workspace or artifacts changed; cached verification cannot safely replay. Create a new preview.");
+            const current = await snapshotFingerprint(run.workspace, active.controller.signal);
+            if (current !== run.workspaceCheckpoint) throw new Error("Saved snapshot workspace or artifacts changed; cached verification cannot safely replay. Create a new preview.");
+            validatedFingerprint = current;
           } else if (run.tasks.some(task => task.status === "completed" || task.attempts.some(attempt => attempt.startedAt))) throw new Error("Saved snapshot lacks a verified execution checkpoint. Create a new preview before replaying previously started workers or verified results.");
         }
+        if (!run.allowWrite && !run.nodeCheckpoint && run.tasks.length) {
+          for (const task of run.tasks) task.cacheInvalidated = true;
+          this.log(run, "Legacy read-only progress will be revalidated before creating node checkpoints.");
+        }
+        validatedFingerprint ??= (await this.captureCheckpointState(run)).workspaceFingerprint;
       });
       run.preparation!.endedAt = now(); run.execution = "running";
-      if (run.workspaceMode === "local") { delete run.workspaceCheckpoint; delete run.localCheckpointState; }
       this.log(run, resume ? "Manual resume: replaying script and validating saved results in launch order." : "Execution prepared; dispatching workflow tasks.");
-      await this.persist(run);
+      await this.commitNodeCheckpoint(run, resume ? "recovery" : "initial", undefined, validatedFingerprint);
       this.preparationGuard(run, active);
       await this.execute(run, active);
     } catch (error) {
@@ -520,7 +713,7 @@ export class WorkflowEngine {
       this.finishPreparation(run, interrupted ? "interrupted" : "failed");
       run.execution = interrupted ? "stopped" : "failed"; run.endedAt = now();
       if (interrupted) { run.stopReason ??= this.closing ? "service-shutdown" : "requested"; delete run.error; this.log(run, stopSummary(run.stopReason)); }
-      else { run.error = message(error); run.failureContext = { kind: "preparation", ...(error instanceof LocalReplayError ? { recovery: error.recovery } : {}) }; this.log(run, run.error, undefined, "error"); }
+      else { run.error = message(error); run.failureContext = { kind: "preparation", ...(error instanceof LocalReplayError || error instanceof CheckpointCommitError ? { recovery: "new-preview" as const } : {}) }; this.log(run, run.error, undefined, "error"); }
       await this.persist(run);
     } finally {
       await releaseProject?.();
@@ -543,6 +736,10 @@ export class WorkflowEngine {
     if (workspace.kind === "git-worktree") await validateGitWorkspace(workspace);
   }
   private async execute(run: WorkflowRun, active: Active) {
+    let authority: CheckpointManifest;
+    try { authority = await this.checkpoints.read(run); }
+    catch (error) { throw new CheckpointCommitError("Committed node checkpoint could not be read before execution", { cause: error }); }
+    const checkpointGate = new StableCheckpointGate(() => this.commitNodeCheckpoint(run, "node"));
     const readPool = new Pool(run.limits.maxReadWorkers);
     let index = 0;
     let cacheInvalidFrom = Number.POSITIVE_INFINITY;
@@ -552,6 +749,11 @@ export class WorkflowEngine {
     let phase: string | undefined;
     let reviewing = false;
     const journal = structuredClone(run.tasks);
+    // Repeating an unfinished writer can change what later readers observed.
+    // Establish this boundary before concurrent launches await model discovery.
+    for (const [position, task] of journal.entries()) {
+      if ((task.mode === "write" || task.options.operation !== undefined) && (task.status !== "completed" || task.cacheInvalidated || !Object.hasOwn(task, "output"))) cacheInvalidFrom = Math.min(cacheInvalidFrom, position);
+    }
     // Bind observed-task choices to their producing inputs, independently of
     // launch position or later UI model/effort overrides. Hash shared args once.
     const configurationScope = digest({ projectPath: run.projectPath, goal: run.meta.description, args: run.args });
@@ -586,6 +788,7 @@ export class WorkflowEngine {
             } catch (error) {
               cacheInvalidFrom = Math.min(cacheInvalidFrom, position);
               const errorText = message(error);
+              if (previous) await this.checkpoints.archiveTask(run.id, previous, "replaced-by-configuration-failure");
               run.tasks[position] = { id: `task_${position + 1}`, index: position, prompt, options, mode: options.mode === "write" || options.isolation === "worktree" ? "write" : "read", status: "failed", cached: false, attempts: [...(previous?.attempts ?? []), { id: `task_${position + 1}_attempt_${(previous?.attempts.length ?? 0) + 1}`, status: "failed", error: errorText, endedAt: now() }], error: errorText, ...(configurationTarget ? { configurationTarget } : {}), ...(taskPhase !== undefined ? { phase: taskPhase } : {}), ...(typeof options.label === "string" ? { label: options.label } : {}) };
               this.log(run, errorText, `task_${position + 1}`, "error");
               await this.persist(run);
@@ -594,8 +797,9 @@ export class WorkflowEngine {
             const mode = options.mode === "write" ? "write" : "read";
             const fingerprint = taskFingerprint(prompt, options, executionSettings);
             const task: Task = { id: `task_${position + 1}`, index: position, prompt, options, mode, status: "queued", cached: false, attempts: previous?.attempts ?? [], ...(configurationTarget ? { configurationTarget } : {}), ...(executionSettings ? { executionSettings } : {}), ...(typeof options.label === "string" ? { label: options.label } : {}), ...(taskPhase !== undefined ? { phase: taskPhase } : {}) };
+            if (previous && (taskFingerprint(previous.prompt, previous.options, previous.executionSettings) !== fingerprint || previous.phase !== taskPhase)) await this.checkpoints.archiveTask(run.id, previous, "replaced-by-replay");
             run.tasks[position] = task;
-            if (position < cacheInvalidFrom && previous?.status === "completed" && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint && Object.hasOwn(previous, "output")) {
+            if (position < cacheInvalidFrom && previous?.status === "completed" && this.committedTask(previous, authority) && taskFingerprint(previous.prompt, previous.options, previous.executionSettings) === fingerprint && Object.hasOwn(previous, "output")) {
               try { if (options.schema) validateTaskOutput(previous.output, options.schema, options.accept); }
               catch (error) {
                 task.status = "failed"; task.output = previous.output;
@@ -631,11 +835,13 @@ export class WorkflowEngine {
             let accountedTokens = 0;
             task.attempts.push(attempt);
             await this.persist(run);
+            let checkpointRelease: (() => Promise<void>) | undefined;
             try {
               return await (mode === "write" ? this.writePool : readPool).use(controller.signal, async () => {
                 const releaseWriter = mode === "write" ? await this.store.acquireNamed("writer", controller.signal) : undefined;
                 try {
                 if (run.limits.maxTokens > 0 && totalTokens >= run.limits.maxTokens) throw new Error("Workflow token budget exhausted before worker dispatch");
+                checkpointRelease = await checkpointGate.enter(controller.signal);
                 if (run.workspaceMode === "local") {
                   if (!run.workspace || run.workspace.kind !== "local" || run.workspacePath !== run.workspace.root) throw new Error("Local project workspace identity is missing or inconsistent");
                   await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id));
@@ -651,13 +857,14 @@ export class WorkflowEngine {
                   }
                 }
                 task.status = "running"; attempt.status = "running"; attempt.startedAt = now();
+                run.checkpointState = { status: "dirty" };
                 this.activity(run, task, attempt, { id: `${attempt.id}:dispatch`, kind: "waiting", label: mode === "write" ? "等待执行器开始任务" : "等待代理开始检查", status: "running", startedAt: attempt.startedAt });
-                this.log(run, `Worker started (${mode}).`, task.id);
+                this.log(run, `Worker started (${mode}).`, task.id, "info", attempt.id);
                 await this.persist(run);
                 if (operationId) {
                   const step = run.maintenance!.steps.find(step => step.id === operationId)!;
                   if (!this.adapter.command) throw new Error("This adapter cannot execute approved operations");
-                  const report = await this.adapter.command({ id: attempt.id, command: step.command, cwd: run.workspacePath!, networkAccess: step.networkAccess ?? false, timeoutMs: Math.min(step.timeoutMs ?? run.limits.timeoutMs, run.limits.timeoutMs), retries: step.retries ?? 0, ...(step.protectedPaths !== undefined ? { protectedPaths: step.protectedPaths } : {}) }, controller.signal, event => { if (event.type === "log") this.log(run, event.message, task.id); else if (event.type === "activity") this.activity(run, task, attempt, event.activity); });
+                  const report = await this.adapter.command({ id: attempt.id, command: step.command, cwd: run.workspacePath!, networkAccess: step.networkAccess ?? false, timeoutMs: Math.min(step.timeoutMs ?? run.limits.timeoutMs, run.limits.timeoutMs), retries: step.retries ?? 0, ...(step.protectedPaths !== undefined ? { protectedPaths: step.protectedPaths } : {}) }, controller.signal, event => { if (event.type === "log") this.log(run, event.message, task.id, "info", attempt.id); else if (event.type === "activity") this.activity(run, task, attempt, event.activity); });
                   task.output = report;
                   attempt.output = report;
                   attempt.outcome = "confirmed";
@@ -686,7 +893,7 @@ export class WorkflowEngine {
                 }, controller.signal, event => {
                   if (event.type === "identity") { attempt.threadId = event.threadId; if (event.turnId) attempt.turnId = event.turnId; }
                   else if (event.type === "execution-settings") { task.executionSettings = event.settings; attempt.executionSettings = event.settings; }
-                  else if (event.type === "log") this.log(run, event.message, task.id);
+                  else if (event.type === "log") this.log(run, event.message, task.id, "info", attempt.id);
                   else if (event.type === "activity") this.activity(run, task, attempt, event.activity);
                   else if (event.type === "usage") {
                     attempt.usage = { inputTokens: event.inputTokens, outputTokens: event.outputTokens, totalTokens: event.totalTokens };
@@ -729,13 +936,17 @@ export class WorkflowEngine {
               if (operationId && attempt.startedAt && attempt.outcome !== "confirmed") attempt.outcome = "unknown";
               task.status = active.controller.signal.aborted || scriptSignal?.aborted ? "interrupted" : "failed";
               attempt.status = task.status; task.error = message(error); attempt.error = task.error;
-              this.log(run, task.error, task.id, "error");
+              this.log(run, task.error, task.id, "error", attempt.id);
               throw new WorkflowTaskError(error, { taskId: task.id, attemptId: attempt.id, ...(taskPhase !== undefined ? { phase: taskPhase } : {}) });
             } finally {
               attempt.endedAt = now(); active.tasks.delete(task.id);
               for (const activity of attempt.activities ?? []) if (activity.status === "running") { activity.status = attempt.status === "completed" ? "completed" : attempt.status === "interrupted" ? "interrupted" : "failed"; activity.endedAt = attempt.endedAt; }
               if (task.currentActivity?.status === "running") { task.currentActivity.status = attempt.status === "completed" ? "completed" : attempt.status === "interrupted" ? "interrupted" : "failed"; task.currentActivity.endedAt = attempt.endedAt; }
               active.controller.signal.removeEventListener("abort", abort); scriptSignal?.removeEventListener("abort", abort);
+              if (checkpointRelease) {
+                try { await checkpointRelease(); }
+                catch (error) { active.controller.abort(); throw error instanceof CheckpointCommitError ? error : new CheckpointCommitError(message(error), { cause: error }); }
+              }
               await this.persist(run);
             }
           })();
@@ -751,6 +962,7 @@ export class WorkflowEngine {
         operation: (id, signal) => dispatch(`Operation: ${id}`, {}, signal, id),
       }, active.controller.signal, { timeoutMs: run.limits.timeoutMs, maxCalls: run.limits.maxCalls, memoryMb: 64 });
       await Promise.allSettled(issued);
+      for (const retired of run.tasks.slice(index)) await this.checkpoints.archiveTask(run.id, retired, "branch-no-longer-dispatched");
       run.tasks.length = index;
       if (active.controller.signal.aborted) throw new Error("Workflow interrupted");
       run.result = result;
@@ -769,8 +981,8 @@ export class WorkflowEngine {
       await Promise.allSettled(issued);
       run.execution = active.controller.signal.aborted && (run.execution === "stopping" || this.closing) ? "stopped" : "failed";
       if (run.execution === "stopped") { run.stopReason ??= this.closing ? "service-shutdown" : "requested"; delete run.error; }
-      else run.error = message(error);
-      if (run.execution === "failed") run.failureContext = !reviewing && error instanceof WorkflowTaskError ? {
+      else run.error = run.checkpointState?.status === "failed" ? run.checkpointState.error ?? message(error) : message(error);
+      if (run.execution === "failed") run.failureContext = error instanceof CheckpointCommitError || run.checkpointState?.status === "failed" ? { kind: "checkpoint", recovery: "new-preview" } : !reviewing && error instanceof WorkflowTaskError ? {
         kind: "task", ...error.origin,
       } : {
         kind: reviewing ? "review" : "script", ...(phase ? { phase } : {}),
@@ -780,20 +992,17 @@ export class WorkflowEngine {
       if (run.execution === "stopped") this.log(run, stopSummary(run.stopReason));
       else this.log(run, run.error!, undefined, "error");
     } finally {
-      if (run.workspace?.kind === "local") {
+      if (run.checkpointState?.status !== "failed") {
         try {
-          await validateLocalWorkspace(run.workspace, run.projectPath, this.store.directory(run.id));
-          const checkpoint = await captureLocalWorkspaceCheckpoints(run.workspace);
-          run.workspaceCheckpoint = checkpoint.current;
-          run.localCheckpointState = { filesDigest: checkpoint.filesDigest, gitDigest: checkpoint.gitDigest };
+          for (const retired of run.tasks.slice(index)) await this.checkpoints.archiveTask(run.id, retired, "branch-no-longer-dispatched");
+          run.tasks.length = index;
+          await this.commitNodeCheckpoint(run, "final");
+        } catch (error) {
+          run.execution = run.execution === "completed" ? "failed" : run.execution;
+          run.error = `Could not commit final node checkpoint: ${message(error)}`;
+          run.failureContext = { kind: "checkpoint", recovery: "new-preview", ...(phase ? { phase } : {}) };
+          this.log(run, run.error, undefined, "error");
         }
-        catch (error) { delete run.workspaceCheckpoint; delete run.localCheckpointState; run.execution = run.execution === "completed" ? "failed" : run.execution; run.error = `Could not checkpoint local project: ${message(error)}`; run.failureContext = { kind: "checkpoint", recovery: "new-preview", ...(phase ? { phase } : {}) }; this.log(run, run.error, undefined, "error"); }
-      } else if (run.workspace?.kind === "git-worktree") {
-        try { run.workspaceCheckpoint = await maintenanceFingerprint(run.workspace); }
-        catch (error) { run.execution = run.execution === "completed" ? "failed" : run.execution; run.error = `Could not checkpoint isolated checkout: ${message(error)}`; run.failureContext = { kind: "checkpoint", ...(phase ? { phase } : {}) }; this.log(run, run.error, undefined, "error"); }
-      } else if (run.workspace) {
-        try { run.workspaceCheckpoint = await snapshotFingerprint(run.workspace); }
-        catch (error) { run.execution = run.execution === "completed" ? "failed" : run.execution; run.error = `Could not checkpoint isolated snapshot: ${message(error)}`; run.failureContext = { kind: "checkpoint", ...(phase ? { phase } : {}) }; this.log(run, run.error, undefined, "error"); }
       }
       run.endedAt = now();
       await this.persist(run);

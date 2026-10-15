@@ -7,7 +7,7 @@ description: 根据用户任务生成、保存并执行 Workflows 动态工作�
 
 ## 根据任务创建并执行
 
-正常完成的任务结果仍可能被脚本的业务断言拒绝，不猜测 `ok` 等任意字段，也不把 worker 完成当成验收通过。普通恢复可以复用这些已完成结果；用户已要求重新执行某节点时，向 `workflow_resume` 追加实际 `retryFromTaskId`，保留前缀并使该节点和后续缓存失效。工具核对当前版本，保留尝试历史；后续已开始的非幂等命令禁止重复，先核对实际效果再重新预览。节点弹窗提供同一重试操作。
+正常完成的任务结果仍可能被脚本的业务断言拒绝，不猜测 `ok` 等任意字段，也不把 worker 完成当成验收通过。普通恢复可以复用这些已完成结果；用户已要求重新执行某节点时，先用 `workflow_preview_recovery` 传实际 `retryFromTaskId` 核对范围，再向 `workflow_resume` 传同一任务、当前 revision 和返回的 `recoveryFingerprint`，保留有效前缀并使该节点和后续缓存失效。工具核对当前版本，保留尝试历史；后续已开始的非幂等命令禁止重复，先核对实际效果再重新预览。节点弹窗提供同一重试操作。
 
 `failureContext.kind: "review"` 表示任务完成后的改动审查失败，不能据此把已成功 worker 当成失败。面板显示独立审查失败卡；全部任务为 `completed` 时提供“重试审查”，按已有授权使用普通 `workflow_resume` 回放仍有效的缓存并重试审查，不传 `retryFromTaskId` 要求重跑 worker。脚本忽略的失败或中断任务仍需普通恢复时，面板显示“继续”，可能重新执行这些任务，不能承诺只重建审查。项目或工作区检查失败仍按真实原因处理，不绕过恢复校验。业务脚本结果失败继续先查看原因，再明确选择是否重试节点。
 
@@ -27,7 +27,7 @@ description: 根据用户任务生成、保存并执行 Workflows 动态工作�
 
 响应含 `operationAccepted: true`、`listSummary: true` 和 `projectionError` 时，动作已经被接受，只是完整详情无法装入响应。先按返回的真实运行 ID 查询详情，不因读取失败重发启动、恢复或应用，不把缺失字段补成空脚本或空权限。详情未确认时仍可按用户要求停止该运行；报告须明确区分动作结果与详情读取状态。
 
-等待运行达到真实终态，处理实际失败原因，不返回虚构结果。用户要求停止或取消任务时调用 `workflow_stop` 或 `workflow_cancel_task`，等待退出。恢复使用新读取的版本调用 `workflow_resume`；聊天启动的运行不依赖面板保持打开。面板断线只保留最后读到的记录；重连重建租约、读取实际状态，不因连接恢复而自动启动、恢复或重跑任务。
+等待运行达到真实终态，处理实际失败原因，不返回虚构结果。用户要求停止或取消任务时调用 `workflow_stop` 或 `workflow_cancel_task`，等待退出。恢复先用新读取的版本调用 `workflow_preview_recovery`，核对范围后带其 `fingerprint` 作为 `workflow_resume.recoveryFingerprint`；聊天启动的运行不依赖面板保持打开。面板断线只保留最后读到的记录；重连重建租约、读取实际状态，不因连接恢复而自动启动、恢复或重跑任务。
 
 脚本首条语句必须是纯字面量 `export const meta`，含小写短横线名称、非空描述和可选阶段。使用 `args`、`agent`、`parallel`、`pipeline`、`operation`、`phase`、`log` 及普通分支循环，最终返回有用结果。循环须有结束条件；不得直接调用 Node、文件、shell、网络、模块、定时器、时钟或随机数。
 
@@ -69,6 +69,15 @@ description: 根据用户任务生成、保存并执行 Workflows 动态工作�
 需要应用后激活 MCP 时，在 `maintenance.activation` 声明 `serverName`、可执行文件 `command` 和 `args`。插件路径参数使用 `${WORKSPACE}`，由运行时替换为本次保留工作区；不能固化开发者机器目录。只运行已声明的激活配置。配置更新或进程启动不等于当前宿主已经重载；`pending_restart` 仍需宿主重新加载及实际版本核对，只有 `verified` 才可称激活已验证。
 
 ## 保存、复用与恢复
+
+0.8.0 在执行前、稳定节点结束后及整轮收尾时提交检查点，将任务结果、实际 attempt 和相同文件状态一起持久化。并行节点只在实际 worker 全部退出后的稳定边界保存；尚在写入或保存失败时不宣称已完成可用检查点。`checkpointState` 区分 `saving`、`dirty`、`ready`、`failed`；`ready` 仍须在恢复时核对当前文件和结果，不能跳过校验。
+
+恢复策略为 `preserve-files`：保留当前文件和已有修改，通过从头确定性重放编排脚本来复用有效结果，不是旧文件回滚、模型会话恢复或任意外部操作的 exactly-once。先读取运行详情，用当前 `id`、`revision` 和可选实际 `retryFromTaskId` 调用 `workflow_preview_recovery`；检查 `canResume`、`reusedTaskIds`、`rerunTaskIds`、`invalidatedTaskIds`、`blockers`、`warnings`，再按已有执行授权传同一目标和 `recoveryFingerprint: preview.fingerprint` 调用 `workflow_resume`。普通继续或重试审查省略任务 ID；不能为通过校验而改指纹、删除检查点或假定失败的写操作没有生效。预览不执行，面板会展示范围供确认；已有执行授权不要求 Agent 再重复询问。
+
+服务端会在执行锁内再次核对版本、指纹、计划、文件及结果。版本或当前状态变化时重新读取和预览，不自动重发已被接受的恢复。写入项目与产物发生漂移时保留文件并拒绝复用；只读项目变化时会重新读取全部内容，不复用旧观察。显式 `failureContext.recovery: "new-preview"` 适用于所有模式，须按原授权范围创建独立新预览，不扩大文件、Git、网络或 MCP 权限，也不修改旧运行冒充恢复。
+
+使用 `workflow_get_checkpoints` 分页读取记录的进度边界，`workflow_get_task_history` 分页读取动态分支中被替换或退休的任务。旧检查点不提供文件回滚入口。节点过程默认读取最新真实 attempt，可通过 `taskId` 加 `attemptId` 查看旧尝试；`phase`、`scope` 不接受 `attemptId`。旧执行状态和失败保留，缓存校验失败单独报告；未关联 attempt 的旧日志标注其来源，不能猜测归属。归档历史不当成当前任务输出或恢复授权。所有检查点、退休历史与临时文件保存在该运行的数据目录，彻底删除运行时一并清理，原项目文件保留。
+
 
 快照检查点包含忽略产物，隔离区被外部修改时停止旧验证重放。旧快照已派发任务而没有检查点，须新建预览。只读 Git 缓存随提交、分支、索引、引用和本地配置变化失效；网络、外部 MCP、工具链或其他动态事实的新鲜度应按任务明确核验，需要时显式重试，不假设本地源码未变就代表外部事实未变。
 
