@@ -20,4 +20,6 @@
 
 ## 安装
 
-按用户授权，从 GitHub 市场更新与安装。安装后的版本、运行包身份、工具发现与当前聊天加载状态分别记录。
+按用户授权，代码以 `5a0166c` 推送到 GitHub `main`，使用 `codex plugin marketplace upgrade codex-plugin-workspace --json` 更新市场，再执行 `codex plugin add design@codex-plugin-workspace --json` 安装 `0.1.0`。市场快照 HEAD 为 `5a0166c`，更新报告无错误。
+
+直接从安装缓存、在其他工作目录和隔离数据目录启动 MCP：版本 `0.1.0`、26 个工具、编辑器入口、`text/html;profile=mcp-app` 资源、6 个艺术方向及能力读取均成功；安装缓存 runtime 与发布 runtime 的 SHA-256 相同。当前聊天的可用工具清单尚未包含 Design，不能将上述结果当成当前聊天面板已加载；实际试用须在新聊天中选择插件并确认握手。
