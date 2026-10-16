@@ -1,0 +1,4 @@
+{
+  "compilerOptions": { "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext", "strict": true, "noUncheckedIndexedAccess": true, "verbatimModuleSyntax": true, "skipLibCheck": true, "types": ["node"], "lib": ["ES2022", "DOM"], "allowImportingTsExtensions": true, "noEmit": true },
+  "include": ["src/**/*.ts", "ui/**/*.ts", "tests/**/*.ts"]
+}

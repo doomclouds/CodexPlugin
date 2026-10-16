@@ -3,6 +3,12 @@
   "interface": { "displayName": "Codex Plugin Workspace" },
   "plugins": [
     {
+      "name": "design",
+      "source": { "source": "local", "path": "./plugins/design" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    },
+    {
       "name": "workflows",
       "source": { "source": "local", "path": "./plugins/workflows" },
       "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },

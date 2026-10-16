@@ -19,6 +19,8 @@
     "check": "npm run typecheck && npm run build && npm run validate && npm run test:portability && npm run smoke",
     "dev:workflows": "npm run dev --workspace=@codex-plugin/workflows",
     "prototype:workflows": "npm run prototype --workspace=@codex-plugin/workflows",
+    "dev:design": "npm run dev --workspace=@codex-plugin/design",
+    "preview:design": "npm run preview --workspace=@codex-plugin/design",
     "test:portability": "node --test scripts/tests/portability.test.mjs"
   },
   "devDependencies": {

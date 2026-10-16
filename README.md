@@ -9,6 +9,7 @@
 ```text
 .agents/plugins/marketplace.json  本仓库的本地插件目录
 plugins/
+  design/                       本地设计画布、原型与 Codex 生成
   workflows/                    动态工作流、独立定义库与任务面板
 scripts/validate-plugins.mjs     清单、目录和组件路径检查
 docs/codex-extension-boundaries.md  宿主能力与产品讨论依据
@@ -61,6 +62,19 @@ codex plugin add workflows@codex-plugin-workspace
 ```
 
 新增工具在当前 App 中是否立即可用，应以宿主实际加载结果为准；CLI 安装成功和当前聊天已加载是两项验证。
+
+## Design
+
+`design 0.1.0` 是用于实际试用的本地设计插件：多画板、图层属性、组件、设计令牌、原型交互、评论、撤销重做、历史恢复及 HTML/JSON/SVG/ZIP 导出；本机有 Chromium 时可导出 PNG/PDF。默认由当前聊天使用设计工具；独立模式通过本机 Codex app-server 沿用 ChatGPT 登录，不需要 API Key。
+
+当前版本以结构化设计文档为源，不是任意前端代码的无损编辑器。对标 Claude Design 的真实组件代码工作流仍在研究与迭代，安装此版本不代表已经达到完整体验对等。
+
+```shell
+codex plugin marketplace upgrade codex-plugin-workspace
+codex plugin add design@codex-plugin-workspace
+```
+
+使用见 [Design 说明](plugins/design/README.md)。安装后需核对新聊天是否实际加载 `design_open_editor` 等工具。
 
 ## Workflows
 
