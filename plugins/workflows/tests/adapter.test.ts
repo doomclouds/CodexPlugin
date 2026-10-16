@@ -432,8 +432,8 @@ test("ephemeral workers exclude code-mode delegation without disabling native ex
 test("model and effort overrides are catalogue-validated and observed configured settings are reported", async () => {
   const context = await setup("complete");
   try {
-    const result = await context.adapter.run({ ...context.request, model: "explicit-test-model", reasoningEffort: "high", settingsSource: "phase" }, context.controller.signal, event => context.events.push(event));
-    assert.deepEqual(result.executionSettings, { model: "explicit-test-model", reasoningEffort: "high", source: "phase", provenance: "configured" });
+    const result = await context.adapter.run({ ...context.request, model: "explicit-test-model", reasoningEffort: "high", settingsSource: "task" }, context.controller.signal, event => context.events.push(event));
+    assert.deepEqual(result.executionSettings, { model: "explicit-test-model", reasoningEffort: "high", source: "task", provenance: "configured" });
     assert.ok(context.events.some(event => event.type === "execution-settings" && event.settings.provenance === "configured"));
     const transcript = await context.transcript();
     assert.equal(transcript.find(message => message.method === "thread/start")?.params.config.model_reasoning_effort, "high");
@@ -1214,7 +1214,7 @@ test("command protocol grants only its declared existing protected directory", a
   for (const relative of [".agents/skills", ".codex"]) {
     const context = await setup(relative === ".codex" ? "command-protected-codex" : "command-protected");
     try {
-      await mkdir(path.join(context.request.cwd, ".git"));
+      execFileSync("git", ["init", "-q"], { cwd: context.request.cwd });
       await mkdir(path.join(context.request.cwd, relative), { recursive: true });
       const result = await context.adapter.command({ id: "protected", command: ["git", "merge", "--ff-only", "fixed-target"], cwd: context.request.cwd, protectedPaths: [relative, relative] }, context.controller.signal);
       assert.equal(result.exitCode, 0);
@@ -1259,7 +1259,7 @@ test("protected command scope rejects linked ancestors and linked leaf directori
 test("protected command scope rechecks links after executor startup", async () => {
   const context = await setup("command-protected-swap");
   try {
-    await mkdir(path.join(context.request.cwd, ".git"));
+    execFileSync("git", ["init", "-q"], { cwd: context.request.cwd });
     await mkdir(path.join(context.request.cwd, ".agents/skills"), { recursive: true });
     await assert.rejects(context.adapter.command({ id: "swapped-protected", command: ["git", "status"], cwd: context.request.cwd, protectedPaths: [".agents/skills"] }, context.controller.signal), /without symbolic links/);
     const transcript = await context.transcript();

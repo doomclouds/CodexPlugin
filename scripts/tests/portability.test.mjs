@@ -191,18 +191,11 @@ test("global skill dependencies are rejected, including symbolic environment pat
   assert.ok(result.issues.some(issue => issue.code === "external-skill-reference"));
 });
 
-test("Emscripten virtual HOME is allowed only in the exact published vendor context", async t => {
+test("all bundled personal HOME values and source-root paths are rejected", async t => {
   const { options, put, check, root } = await fixture(t);
-  const context = 'const environment = { USER: "web_user", LOGNAME: "web_user", PATH: "/", PWD: "/", HOME: "/home/web_user" };\n';
-  await put("runtime/script-worker.js", context);
-  assert.deepEqual((await check()).issues, []);
-  await put("src/unrelated.js", context);
-  assert.ok((await check()).issues.some(issue => issue.file === "src/unrelated.js" && /personal-home-path/.test(issue.code)));
-  await rm(path.join(root, "src/unrelated.js"));
-  await put("runtime/script-worker.js", 'export const accidental = "/home/web_user";\n');
-  assert.ok((await check()).issues.length > 0);
-  await put("runtime/script-worker.js", context);
-  assert.ok((await checkPluginPortability(root, { ...options, authorHome: "/home/web_user" })).issues.some(issue => /current-machine-path/.test(issue.code)));
+  await put("runtime/vendor.js", 'const environment = { USER: "web_user", LOGNAME: "web_user", PATH: "/", PWD: "/", HOME: "/home/web_user" };\n');
+  assert.ok((await check()).issues.some(issue => issue.file === "runtime/vendor.js" && issue.code === "personal-home-path"));
+  await rm(path.join(root, "runtime/vendor.js"));
   for (const authorCwd of ["/srv/portable-fixture", String.raw`Z:\portable-fixture`]) {
     await put("src/source-root.js", `export const source = ${JSON.stringify(authorCwd + "/source.js")};\n`);
     assert.ok((await checkPluginPortability(root, { ...options, authorCwd })).issues.some(issue => issue.file === "src/source-root.js" && /current-machine-path/.test(issue.code)));

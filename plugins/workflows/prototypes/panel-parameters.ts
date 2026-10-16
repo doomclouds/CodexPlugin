@@ -1,97 +1,74 @@
-export interface WorkflowParameter {
-  name: string;
-  label: string;
-  type: "string" | "number" | "boolean" | "string[]";
-  required?: boolean;
-  description?: string;
-  placeholder?: string;
-  multiline?: boolean;
-}
+import type { DefinitionParameter } from "../src/definition.ts";
+export type WorkflowParameter = DefinitionParameter;
 export type ParameterValues = ReadonlyMap<string, unknown> | Readonly<Record<string, unknown>>;
-
-const escape = (value: unknown): string => String(value ?? "").replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
-const parameterTypes = new Set<string>(["string", "number", "boolean", "string[]"]);
-
-function validateType(parameter: WorkflowParameter): void {
-  if (!parameterTypes.has(parameter.type)) throw new Error(`参数“${parameter.label}”使用了不支持的字段类型`);
+const escape = (value: unknown): string => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
+function object(value: unknown): Record<string, unknown> { if (value === undefined)
+    return {}; if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("工作流参数必须是对象"); return value as Record<string, unknown>; }
+function readValue(parameter: WorkflowParameter, raw: unknown): unknown {
+    const fail = (): never => { throw new Error(`参数“${parameter.label ?? parameter.name}”格式不正确`); };
+    if (raw === undefined || raw === "" && parameter.type !== "string") {
+        if (parameter.required && parameter.default === undefined)
+            throw new Error(`请填写“${parameter.label ?? parameter.name}”`);
+        return parameter.default;
+    }
+    let value: unknown = raw;
+    if (parameter.type === "number" || parameter.type === "integer") {
+        value = typeof raw === "string" && raw.trim() ? Number(raw) : raw;
+        if (typeof value !== "number" || !Number.isFinite(value) || parameter.type === "integer" && !Number.isSafeInteger(value))
+            fail();
+    }
+    else if (parameter.type === "boolean") {
+        if (raw === "true" || raw === "false")
+            value = raw === "true";
+        if (typeof value !== "boolean")
+            fail();
+    }
+    else if (parameter.type === "array" || parameter.type === "object") {
+        if (typeof raw === "string") {
+            try {
+                value = JSON.parse(raw);
+            }
+            catch {
+                fail();
+            }
+        }
+        if (parameter.type === "array" ? !Array.isArray(value) : !value || typeof value !== "object" || Array.isArray(value))
+            fail();
+    }
+    else if (typeof value !== "string" || parameter.required && !value.trim())
+        fail();
+    if (parameter.enum && !parameter.enum.some(item => JSON.stringify(item) === JSON.stringify(value)))
+        fail();
+    return value;
 }
-
-function argumentObject(args: unknown): Record<string, unknown> {
-  if (args === undefined) return {};
-  if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("声明输入字段的工作流需要对象形式的参数");
-  return args as Record<string, unknown>;
-}
-
-function valueFor(values: ParameterValues, name: string): { present: boolean; value: unknown } {
-  if (values instanceof Map) return { present: values.has(name), value: values.get(name) };
-  const record = values as Readonly<Record<string, unknown>>;
-  return { present: Object.hasOwn(record, name), value: record[name] };
-}
-
-function parameterValue(parameter: WorkflowParameter, value: unknown): unknown {
-  validateType(parameter);
-  const invalid = (type: string): never => { throw new Error(`参数“${parameter.label}”必须是${type}`); };
-  let parsed: unknown;
-  switch (parameter.type) {
-    case "string":
-      if (value === undefined) parsed = undefined;
-      else parsed = typeof value === "string" ? value : invalid("文本");
-      break;
-    case "number":
-      if (value === undefined || typeof value === "string" && !value.trim()) parsed = undefined;
-      else if (typeof value === "number" && Number.isFinite(value)) parsed = value;
-      else if (typeof value === "string" && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value.trim()) && Number.isFinite(Number(value))) parsed = Number(value);
-      else invalid("有限数字");
-      break;
-    case "boolean":
-      if (value === undefined) parsed = undefined;
-      else if (typeof value === "boolean") parsed = value;
-      else if (value === "true" || value === "false") parsed = value === "true";
-      else invalid("布尔值");
-      break;
-    case "string[]":
-      if (value === undefined) parsed = undefined;
-      else if (typeof value === "string") parsed = value.replace(/\r\n?/g, "\n").split("\n").filter(line => line.length > 0);
-      else if (Array.isArray(value) && value.every(item => typeof item === "string")) parsed = [...value];
-      else invalid("文本列表");
-      break;
-  }
-  if (parameter.required && (parsed === undefined || typeof parsed === "string" && !parsed.trim() || Array.isArray(parsed) && parsed.length === 0)) throw new Error(`请填写“${parameter.label}”`);
-  return parsed;
-}
-
-/** Read only declared fields; preserve existing keys so switching away from JSON loses no caller input. */
 export function readParameters(parameters: readonly WorkflowParameter[], values: ParameterValues, initialArgs?: unknown): Record<string, unknown> {
-  const initial = argumentObject(initialArgs);
-  const args = { ...initial };
-  for (const parameter of parameters) {
-    const supplied = valueFor(values, parameter.name);
-    const raw = supplied.present ? supplied.value : Object.hasOwn(initial, parameter.name) ? initial[parameter.name] : undefined;
-    const value = parameterValue(parameter, raw);
-    if (value === undefined) delete args[parameter.name];
-    else Object.defineProperty(args, parameter.name, { value, writable: true, configurable: true, enumerable: true });
-  }
-  return args;
+    const initial = object(initialArgs), args = { ...initial };
+    for (const parameter of parameters) {
+        const present = values instanceof Map ? values.has(parameter.name) : Object.hasOwn(values, parameter.name);
+        const raw = present ? values instanceof Map ? values.get(parameter.name) : (values as Record<string, unknown>)[parameter.name] : initial[parameter.name];
+        const value = readValue(parameter, raw);
+        if (value === undefined)
+            delete args[parameter.name];
+        else
+            Object.defineProperty(args, parameter.name, { value, writable: true, configurable: true, enumerable: true });
+    }
+    return args;
 }
-
-/** Controls come solely from metadata: names such as URL or Bug ID do not change the declared type. */
-export function renderParameterFields(parameters: readonly WorkflowParameter[], args: unknown, disabled = false): string {
-  if (!parameters.length) return "";
-  const initial = argumentObject(args);
-  const fields = parameters.map((parameter, index) => {
-    validateType(parameter);
-    const id = `wf-parameter-${index}`;
-    const value = Object.hasOwn(initial, parameter.name) ? initial[parameter.name] : undefined;
-    const description = [parameter.description, parameter.type === "string[]" ? "每行一项，空行不计入列表。" : undefined].filter(Boolean).join(" ");
-    const attributes = `id="${id}" name="${escape(parameter.name)}" class="wf-parameter-input" data-parameter="${escape(parameter.name)}" data-parameter-type="${parameter.type}"${disabled ? " disabled" : ""}${parameter.required ? ' aria-required="true"' : ""}${parameter.required && parameter.type !== "boolean" ? " required" : ""}${description ? ` aria-describedby="${id}-description"` : ""}`;
-    const placeholder = parameter.placeholder === undefined ? "" : ` placeholder="${escape(parameter.placeholder)}"`;
-    const label = `<label class="wf-parameter-label" for="${id}">${escape(parameter.label)}${parameter.required ? '<span class="wf-parameter-required" aria-hidden="true"> *</span>' : ""}</label>`;
-    let control: string;
-    if (parameter.type === "boolean") control = `<input type="checkbox" ${attributes}${value === true ? " checked" : ""}>`;
-    else if (parameter.type === "string[]") control = `<textarea ${attributes}${placeholder} rows="4">${escape(Array.isArray(value) ? value.join("\n") : value ?? "")}</textarea>`;
-    else if (parameter.type === "string" && parameter.multiline) control = `<textarea ${attributes}${placeholder} rows="4">${escape(value ?? "")}</textarea>`;
-    else control = `<input type="${parameter.type === "number" ? "number" : "text"}" ${attributes}${placeholder}${parameter.type === "number" ? ' step="any"' : ""} value="${escape(value ?? "")}">`;
-    return `<div class="wf-parameter-field" data-type="${parameter.type}">${parameter.type === "boolean" ? `<div class="wf-parameter-checkbox">${control}${label}</div>` : label + control}${description ? `<p class="wf-parameter-description" id="${id}-description">${escape(description)}</p>` : ""}</div>`;
-  });
-  return `<div class="wf-parameter-fields">${fields.join("")}</div>`;
+export function renderParameterFields(parameters: readonly WorkflowParameter[], args?: unknown, disabled = false): string {
+    const initial = object(args);
+    return parameters.map((parameter, index) => {
+        const id = `wf-parameter-${index}`, value = Object.hasOwn(initial, parameter.name) ? initial[parameter.name] : parameter.default;
+        const attributes = `id="${id}" data-parameter="${escape(parameter.name)}" data-parameter-type="${parameter.type}"${disabled ? " disabled" : ""}${parameter.required ? " required" : ""}`;
+        let control: string;
+        if (parameter.enum)
+            control = `<select ${attributes}>${parameter.required ? "" : '<option value="">未设置</option>'}${parameter.enum.map(item => `<option value="${escape(typeof item === "string" ? item : JSON.stringify(item))}"${JSON.stringify(item) === JSON.stringify(value) ? " selected" : ""}>${escape(typeof item === "string" ? item : JSON.stringify(item))}</option>`).join("")}</select>`;
+        else if (parameter.type === "boolean")
+            control = `<select ${attributes}><option value="">未设置</option><option value="true"${value === true ? " selected" : ""}>是</option><option value="false"${value === false ? " selected" : ""}>否</option></select>`;
+        else if (parameter.type === "object" || parameter.type === "array")
+            control = `<div id="${id}" class="wf-structured-parameter"><small>${value === undefined ? "尚未配置。请在对话中让 AI 填写此结构化参数。" : "此结构化参数由 AI 维护，修改请在对话中说明。"}</small>${value === undefined ? "" : `<details><summary>查看当前值</summary><pre>${escape(JSON.stringify(value, null, 2))}</pre></details>`}</div>`;
+        else
+            control = `<input ${attributes} type="${parameter.type === "number" || parameter.type === "integer" ? "number" : "text"}"${parameter.type === "number" ? ' step="any"' : ""} value="${escape(value ?? "")}">`;
+        return `<div class="wf-field"><label for="${id}">${escape(parameter.label ?? parameter.name)}${parameter.required ? " *" : ""}</label>${control}${parameter.description ? `<small>${escape(parameter.description)}</small>` : ""}</div>`;
+    }).join("");
 }

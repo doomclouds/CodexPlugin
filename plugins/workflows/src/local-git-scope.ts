@@ -2,10 +2,10 @@ import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import { gitCommand } from "./submodules.ts";
 
-interface DirectoryIdentity { path: string; dev: number; ino: number }
+interface DirectoryIdentity { path: string; dev: string; ino: string }
 export interface LocalGitScope {
   project: DirectoryIdentity;
-  entry?: { dev: number; ino: number; kind: "directory" | "file" | "link" | "other" };
+  entry?: { dev: string; ino: string; kind: "directory" | "file" | "link" | "other" };
   git?: DirectoryIdentity;
   common?: DirectoryIdentity;
   state: "absent" | "contained" | "restricted";
@@ -14,25 +14,25 @@ export interface LocalGitScope {
 
 const within = (root: string, target: string) => target === root || target.startsWith(root + path.sep);
 async function identity(name: string): Promise<DirectoryIdentity> {
-  const canonical = await realpath(name), stat = await lstat(canonical);
+  const canonical = await realpath(name), stat = await lstat(canonical, { bigint: true });
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Local Git write scope requires real directories");
-  return { path: canonical, dev: stat.dev, ino: stat.ino };
+  return { path: canonical, dev: stat.dev.toString(), ino: stat.ino.toString() };
 }
 
 // This is an internal capability for newly previewed local write plans. It can
 // reopen only this project's own .git, never a shared worktree/common directory.
 export async function captureLocalGitScope(cwd: string): Promise<LocalGitScope> {
-  const requested = await lstat(cwd);
+  const requested = await lstat(cwd, { bigint: true });
   if (!requested.isDirectory() || requested.isSymbolicLink() || await realpath(cwd) !== path.resolve(cwd)) throw new Error("Local Git write scope requires the unchanged canonical project directory without symbolic links");
   const project = await identity(cwd), roots = [project.path];
-  if (project.path !== path.resolve(cwd) || project.dev !== requested.dev || project.ino !== requested.ino) throw new Error("Local project directory identity changed while capturing Git write scope");
+  if (project.path !== path.resolve(cwd) || project.dev !== requested.dev.toString() || project.ino !== requested.ino.toString()) throw new Error("Local project directory identity changed while capturing Git write scope");
   let stat;
-  try { stat = await lstat(path.join(project.path, ".git")); }
+  try { stat = await lstat(path.join(project.path, ".git"), { bigint: true }); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { project, state: "absent", writableRoots: roots };
     throw error;
   }
-  const entry: NonNullable<LocalGitScope["entry"]> = { dev: stat.dev, ino: stat.ino, kind: stat.isSymbolicLink() ? "link" : stat.isDirectory() ? "directory" : stat.isFile() ? "file" : "other" };
+  const entry: NonNullable<LocalGitScope["entry"]> = { dev: stat.dev.toString(), ino: stat.ino.toString(), kind: stat.isSymbolicLink() ? "link" : stat.isDirectory() ? "directory" : stat.isFile() ? "file" : "other" };
   const restricted: LocalGitScope = { project, entry, state: "restricted", writableRoots: roots };
   // A Git file may point at shared metadata outside this project. Ordinary
   // source editing remains available, but no metadata write grant is inferred.

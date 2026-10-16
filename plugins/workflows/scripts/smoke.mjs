@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,132 +7,107 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const pluginRoot = fileURLToPath(new URL("../", import.meta.url));
-const isolatedRoot = await mkdtemp(path.join(tmpdir(), "codex-workflows-smoke-"));
-assert.equal(path.dirname(isolatedRoot), path.resolve(tmpdir()));
-await cp(path.join(pluginRoot, "runtime"), path.join(isolatedRoot, "runtime"), { recursive: true });
-await cp(path.join(pluginRoot, "package.json"), path.join(isolatedRoot, "package.json"));
-await mkdir(path.join(isolatedRoot, "assets"));
-await cp(path.join(pluginRoot, "assets", "workflows-sidebar-icon.png"), path.join(isolatedRoot, "assets", "workflows-sidebar-icon.png"));
-const iconBytes = await readFile(path.join(isolatedRoot, "assets", "workflows-sidebar-icon.png"));
-const expectedIcons = [{ src: `data:image/png;base64,${iconBytes.toString("base64")}`, mimeType: "image/png", sizes: ["128x128"] }];
-const config = JSON.parse(await readFile(new URL("../mcp.json", import.meta.url), "utf8"));
-const manifest = JSON.parse(await readFile(new URL("../plugin.json", import.meta.url), "utf8"));
-const entry = config.mcpServers.workflows;
-const transport = new StdioClientTransport({
-  command: process.execPath,
-  args: entry.args.map(argument => argument.replaceAll("${PLUGIN_ROOT}", isolatedRoot)),
-  cwd: tmpdir(),
-  env: { ...process.env, WORKFLOWS_DATA_DIR: path.join(isolatedRoot, "data") },
-  stderr: "pipe",
-});
-const client = new Client({ name: "workflows-smoke", version: "0.1.0" });
+const isolated = await realpath(await mkdtemp(path.join(tmpdir(), "workflows-structured-package-")));
+const project = path.join(isolated, "project"), data = path.join(isolated, "data");
+const manifest = JSON.parse(await readFile(path.join(pluginRoot, "plugin.json"), "utf8"));
+await cp(path.join(pluginRoot, "runtime"), path.join(isolated, "runtime"), { recursive: true });
+await cp(path.join(pluginRoot, "package.json"), path.join(isolated, "package.json"));
+await mkdir(path.join(isolated, "assets"));
+await cp(path.join(pluginRoot, "assets", "workflows-sidebar-icon.png"), path.join(isolated, "assets", "workflows-sidebar-icon.png"));
+await mkdir(project);
+await writeFile(path.join(project, "input.txt"), "Unchanged package fixture\n");
+let client, transport;
 let stderr = "";
-transport.stderr?.on("data", chunk => { stderr += chunk.toString(); });
-
-try {
+async function connect() {
+  const environment = Object.fromEntries(Object.entries(process.env).filter(([name, value]) => value !== undefined && name !== "CODEX_APP_TOOLS_PIPE_PATH"));
+  transport = new StdioClientTransport({ command: process.execPath, args: [path.join(isolated, "runtime", "index.js")], cwd: tmpdir(), env: { ...environment, WORKFLOWS_DATA_DIR: data }, stderr: "pipe" });
+  transport.stderr?.on("data", chunk => { stderr = (stderr + chunk.toString()).slice(-16000); });
+  client = new Client({ name: "structured-package-smoke", version: "1" });
   await client.connect(transport);
-  assert.equal(client.getServerVersion()?.version, manifest.version);
-  assert.deepEqual(client.getServerVersion()?.icons, expectedIcons);
-  const { tools } = await client.listTools();
-  assert.deepEqual(tools.map(tool => tool.name).sort(), [
-    "workflow_get_capabilities", "workflow_get_template", "workflow_list_templates", "workflow_open_panel",
-    "workflow_get_execution_settings", "workflow_update_execution_settings",
-    "workflow_get_projects",
-    "workflow_get_node_process", "workflow_preview_recovery", "workflow_get_checkpoints", "workflow_get_task_history", "workflow_preview_deletion", "workflow_delete",
-    "workflow_save_template", "workflow_preview", "workflow_update", "workflow_list_runs", "workflow_get_run", "workflow_stop", "workflow_panel_lease", "workflow_start", "workflow_resume", "workflow_cancel_task", "workflow_apply",
-  ].sort());
-  const panelTool = tools.find(tool => tool.name === "workflow_open_panel");
-  const projectTool = tools.find(tool => tool.name === "workflow_get_projects");
-  assert.deepEqual(projectTool._meta.ui.visibility, ["model", "app"]);
-  assert.equal(projectTool.annotations.readOnlyHint, true);
-  const noProjectContext = await client.callTool({ name: "workflow_get_projects", arguments: {} });
-  assert.equal(noProjectContext.structuredContent.available, false);
-  assert.deepEqual(noProjectContext.structuredContent.projects, []);
-  assert.match(noProjectContext.structuredContent.reason, /real thread identity/);
-  assert.equal(panelTool._meta.ui.resourceUri, "ui://workflows/panel.html");
-  assert.equal(panelTool._meta["ui/resourceUri"], "ui://workflows/panel.html");
-  assert.deepEqual(panelTool._meta["openai/ui"].entrypoints, [{ type: "thread" }]);
-  assert.deepEqual(panelTool.icons, expectedIcons);
-  const panelResult = await client.callTool({ name: "workflow_open_panel", arguments: {} });
-  assert.equal(panelResult.structuredContent.version, manifest.version);
-  assert.equal(panelResult.structuredContent.prototype, false);
-  assert.equal(panelResult.structuredContent.executionAvailable, true);
-  // Plugin upgrades may remove the old checkout after its MCP process starts.
-  await rm(path.join(isolatedRoot, "runtime", "panel.html"));
-  await rm(path.join(isolatedRoot, "runtime", "script-worker.js"));
-  await rm(path.join(isolatedRoot, "assets", "workflows-sidebar-icon.png"));
-  const panelResource = await client.readResource({ uri: panelTool._meta.ui.resourceUri });
-  assert.equal(panelResource.contents[0].mimeType, "text/html;profile=mcp-app");
-  assert.deepEqual(panelResource.contents[0]._meta["openai/ui"], { availableDisplayModes: ["fullscreen"] });
-  assert.match(panelResource.contents[0].text, /workflow-panel/);
-  const aliases = ["ui://workflows/prototype/0.1.4.html", "ui://workflows/panel/0.2.0.html", "ui://workflows/panel/0.2.1.html"];
-  const { resources } = await client.listResources();
-  assert.deepEqual((await client.listTools()).tools.find(tool => tool.name === "workflow_open_panel").icons, expectedIcons);
-  for (const uri of [panelTool._meta.ui.resourceUri, ...aliases]) {
-    assert.ok(resources.some(resource => resource.uri === uri), `Missing panel resource: ${uri}`);
-    assert.deepEqual(resources.find(resource => resource.uri === uri).icons, expectedIcons);
-    const resource = await client.readResource({ uri });
-    assert.equal(resource.contents[0].uri, uri);
-    assert.equal(resource.contents[0].mimeType, panelResource.contents[0].mimeType);
-    assert.equal(resource.contents[0].text, panelResource.contents[0].text, `Panel alias has different HTML: ${uri}`);
-    assert.deepEqual(resource.contents[0]._meta, panelResource.contents[0]._meta);
-  }
-  for (const name of ["workflow_start", "workflow_resume", "workflow_apply", "workflow_cancel_task"]) assert.deepEqual(tools.find(tool => tool.name === name)._meta.ui.visibility, ["model", "app"]);
-  assert.deepEqual(tools.find(tool => tool.name === "workflow_panel_lease")._meta.ui.visibility, ["app"]);
-
-  const capabilities = await client.callTool({ name: "workflow_get_capabilities", arguments: {} });
-  assert.equal(capabilities.isError, undefined);
-  assert.equal(capabilities.structuredContent.version, manifest.version);
-  assert.equal(capabilities.structuredContent.execution.available, true);
-  const emptyCatalog = await client.callTool({ name: "workflow_list_templates", arguments: {} });
-  assert.equal(emptyCatalog.isError, undefined);
-  assert.deepEqual(emptyCatalog.structuredContent.templates, []);
-  const script = 'export const meta = { name: "smoke", description: "Standalone saved runtime check", parameters: [{ name: "value", label: "Value", type: "number", required: true }] }; return args.value + 1;';
-  for (const id of ["review-changes", "builtin:review-changes"]) {
-    const removed = await client.callTool({ name: "workflow_get_template", arguments: { id } });
-    assert.equal(removed.isError, true);
-    assert.match(removed.content[0].text, /Unknown workflow template/);
-    const rejected = await client.callTool({ name: "workflow_preview", arguments: { projectPath: tmpdir(), script, sourceDefinition: { id, revision: 0 } } });
-    assert.equal(rejected.isError, true);
-  }
-  assert.deepEqual((await client.callTool({ name: "workflow_list_runs", arguments: {} })).structuredContent.runs, []);
-  const saved = await client.callTool({ name: "workflow_save_template", arguments: { script, args: { value: 6 } } });
-  assert.equal(saved.isError, undefined);
-  const definition = saved.structuredContent.template;
-  assert.equal(definition.id, "saved:smoke");
-  assert.equal(definition.source, "saved");
-  const catalog = await client.callTool({ name: "workflow_list_templates", arguments: {} });
-  assert.deepEqual(catalog.structuredContent.templates.map(template => template.id), [definition.id]);
-  const template = await client.callTool({ name: "workflow_get_template", arguments: { id: definition.id } });
-  assert.equal(template.isError, undefined);
-  assert.equal(template.structuredContent.script, script);
-  assert.equal(template.structuredContent.revision, definition.revision);
-  const preview = await client.callTool({ name: "workflow_preview", arguments: { projectPath: tmpdir(), script: template.structuredContent.script, args: definition.args, sourceDefinition: { id: definition.id, revision: definition.revision } } });
-  assert.equal(preview.isError, undefined);
-  assert.equal(preview.structuredContent.run.execution, "draft");
-  assert.deepEqual(preview.structuredContent.run.sourceDefinition, { id: definition.id, revision: definition.revision });
-  const lease = await client.callTool({ name: "workflow_panel_lease", arguments: {} });
-  const runId = preview.structuredContent.run.id;
-  const started = await client.callTool({ name: "workflow_start", arguments: { id: runId, revision: preview.structuredContent.run.revision } });
-  assert.equal(started.isError, undefined);
-  let finished;
-  for (let index = 0; index < 100; index++) {
-    const current = await client.callTool({ name: "workflow_get_run", arguments: { id: runId } });
-    finished = current.structuredContent.run;
-    if (!["preparing", "running", "stopping"].includes(finished.execution)) break;
+}
+async function call(name, args = {}) {
+  const result = await client.callTool({ name, arguments: args });
+  assert.notEqual(result.isError, true, `${name}: ${JSON.stringify(result.content)}`);
+  return result.structuredContent;
+}
+async function settle(id) {
+  for (let index = 0; index < 300; index++) {
+    const view = await call("workflow_get_run", { id });
+    if (["completed", "waiting", "paused", "stopped", "failed", "unknown"].includes(view.run.status) && !view.run.ownerToken) return view;
     await new Promise(resolve => setTimeout(resolve, 20));
   }
-  assert.equal(finished.execution, "completed", finished.error);
-  assert.equal(finished.result, 7);
-  await client.callTool({ name: "workflow_panel_lease", arguments: { leaseId: lease.structuredContent.leaseId, release: true } });
-
-  const missing = await client.callTool({ name: "workflow_get_template", arguments: { id: "../package.json" } });
-  assert.equal(missing.isError, true);
-  assert.match(missing.content[0].text, /Unknown workflow template/);
-  assert.equal(stderr, "");
-  console.log("Workflows MCP smoke passed: discovery, versions, stable panel resource and cached aliases after file removal, capabilities, empty catalogue, removed builtin rejection, saved definition read/execution, unknown ID, independent cwd, standalone bundle.");
-} finally {
+  throw new Error("The isolated pure workflow did not settle");
+}
+try {
+  await connect();
+  assert.equal(client.getServerVersion().version, manifest.version);
+  const tools = (await client.listTools()).tools;
+  const names = tools.map(tool => tool.name);
+  assert.equal(names.length, 27);
+  for (const name of ["workflow_preview", "workflow_retry_node", "workflow_pause", "workflow_resolve_wait", "workflow_resolve_unknown", "workflow_get_events", "workflow_review"]) assert.ok(names.includes(name));
+  for (const name of ["workflow_update", "workflow_panel_lease", "workflow_get_task_history", "workflow_cancel_task"]) assert.equal(names.includes(name), false);
+  const entry = tools.find(tool => tool.name === "workflow_open_panel");
+  assert.deepEqual(entry._meta["openai/ui"].entrypoints, [{ type: "thread" }]);
+  assert.ok(entry.icons[0].src.startsWith("data:image/png;base64,"));
+  assert.equal((await call("workflow_get_capabilities")).version, manifest.version);
+  assert.deepEqual((await call("workflow_list_templates")).templates, []);
+  const panel = await client.readResource({ uri: entry._meta.ui.resourceUri });
+  assert.deepEqual(panel.contents[0]._meta["openai/ui"].availableDisplayModes, ["fullscreen"]);
+  assert.match(panel.contents[0].text, /workflow-panel/);
+  const invalid = await client.callTool({ name: "workflow_preview", arguments: { projectPath: project, script: "return 1" } });
+  assert.equal(invalid.isError, true, "Legacy script input must not execute or migrate");
+  const definition = { schemaVersion: 1, name: "package-smoke", description: "Standalone structured runtime and durable input", parameters: [{ name: "value", type: "integer", default: 6 }], steps: [
+    { id: "first", type: "transform", value: { op: "add", args: [{ ref: "args.value" }, 1] } },
+    { id: "route", type: "choice", cases: [{ id: "valid", when: { op: "eq", args: [{ ref: "steps.first.output" }, 7] }, steps: [
+      { id: "together", type: "parallel", policy: "all-settled", branches: [{ id: "a", steps: [{ id: "aValue", type: "transform", value: true }] }, { id: "b", steps: [{ id: "bValue", type: "transform", value: true }] }] },
+    ] }], default: [] },
+    { id: "loop", type: "repeat", maxIterations: 3, until: { op: "gte", args: [{ ref: "iteration" }, 1] }, steps: [{ id: "round", type: "transform", value: { ref: "iteration" } }] },
+    { id: "confirm", type: "wait", message: "Provide explicit fixture confirmation", schema: { type: "boolean" } },
+    { id: "done", type: "transform", value: { ref: "steps.confirm.output" } },
+  ] };
+  const template = (await call("workflow_save_template", { definition })).template;
+  const draft = (await call("workflow_preview", { projectPath: project, definition: template.definition, sourceDefinition: { id: template.id, revision: template.revision } })).run;
+  assert.equal(draft.status, "draft");
+  await call("workflow_start", { id: draft.id, revision: draft.revision });
+  let view = await settle(draft.id);
+  assert.equal(view.run.status, "waiting", view.run.error);
+  const first = view.run.instances.find(instance => instance.nodeId === "first");
+  const firstProcess = (await call("workflow_get_node_process", { id: draft.id, instanceId: first.id, detail: "developer" })).process;
+  assert.equal(firstProcess.output, 7);
+  assert.equal(view.run.instances.filter(instance => instance.type === "scope" && instance.nodeId === "loop").length, 2);
+  const waiting = view.run.instances.find(instance => instance.nodeId === "confirm");
+  await call("workflow_resolve_wait", { id: draft.id, revision: view.run.revision, instanceId: waiting.id, value: true });
+  view = await call("workflow_get_run", { id: draft.id });
+  const recovery = await call("workflow_preview_recovery", { id: draft.id, revision: view.run.revision });
+  assert.equal(recovery.canResume, true, JSON.stringify(recovery.blockers));
+  await call("workflow_resume", { id: draft.id, revision: view.run.revision, recoveryFingerprint: recovery.fingerprint });
+  view = await settle(draft.id);
+  assert.equal(view.run.status, "completed", view.run.error);
+  assert.equal(view.run.result.done, true);
+  assert.equal(view.run.instances.reduce((count, instance) => count + instance.attempts.length, 0), 0, "Package smoke never sends a model or native command");
+  const round = view.run.instances.find(instance => instance.type === "scope" && instance.nodeId === "loop");
+  const scoped = await call("workflow_get_run", { id: draft.id, scopeInstanceId: round.id });
+  assert.equal(scoped.projection.scopeInstanceId, round.id);
+  assert.ok((await call("workflow_get_checkpoints", { id: draft.id })).checkpoints.length > 0);
+  assert.ok((await call("workflow_get_events", { id: draft.id })).events.length > 0);
+  const frozenHash = view.run.definitionHash;
+  await call("workflow_save_template", { id: template.id, revision: template.revision, definition: { ...definition, description: "New immutable definition revision" } });
+  assert.equal((await call("workflow_get_run", { id: draft.id })).run.definitionHash, frozenHash);
+  const expectedProjection = view.projection;
   await client.close();
-  await transport.close();
-  await rm(isolatedRoot, { recursive: true, force: true });
+  await connect();
+  assert.deepEqual((await call("workflow_get_run", { id: draft.id })).projection, expectedProjection);
+  assert.equal(await readFile(path.join(project, "input.txt"), "utf8"), "Unchanged package fixture\n");
+  const latest = (await call("workflow_get_run", { id: draft.id })).run;
+  const deletion = await call("workflow_preview_deletion", { kind: "run", id: draft.id, revision: latest.revision });
+  await call("workflow_delete", { kind: "run", id: draft.id, revision: latest.revision, fingerprint: deletion.fingerprint });
+  assert.deepEqual((await call("workflow_list_runs", { projectPath: project })).runs, []);
+  assert.equal(await readFile(path.join(project, "input.txt"), "utf8"), "Unchanged package fixture\n");
+  console.log(JSON.stringify({ passed: true, version: manifest.version, tools: names.length, isolatedPackage: true, modelTurns: 0, legacyScriptRejected: true, branchParallelLoopWait: true, restartProjectionStable: true, deletionPreservesProject: true }));
+} catch (error) {
+  if (stderr) console.error(stderr);
+  throw error;
+} finally {
+  await client?.close();
+  await rm(isolated, { recursive: true, force: true });
 }

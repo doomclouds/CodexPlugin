@@ -2,8 +2,6 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { z } from "zod";
-import type { RunStore } from "./store.ts";
-import type { WorkflowMeta } from "./script.ts";
 
 export interface ModelSettings { model?: string | undefined; reasoningEffort?: string | undefined }
 export interface StoredExecutionSettings extends ModelSettings { revision: number }
@@ -11,24 +9,21 @@ export interface WorkflowModel {
   id: string; displayName: string; supportedReasoningEfforts: string[]; defaultReasoningEffort: string;
 }
 export interface EffectiveExecutionSettings extends ModelSettings {
-  source: "task" | "phase" | "script" | "workflow-settings" | "codex-config";
+  source: "task" | "workflow-settings" | "codex-config";
   provenance?: "requested" | "configured" | "runtime";
 }
 export interface ExecutionEnvironment {
   defaults: ModelSettings; models: WorkflowModel[];
 }
-export interface NodeModelSettings extends ModelSettings { identity?: string | undefined }
-export type NodeSettings = Record<string, NodeModelSettings>;
 
 const namedValue = z.string().trim().min(1).max(256);
 export const modelSettingsSchema = z.strictObject({ model: namedValue.optional(), reasoningEffort: namedValue.optional() });
-export const nodeModelSettingsSchema = modelSettingsSchema.extend({ identity: z.string().regex(/^[a-f0-9]{64}$/).optional() });
 const storedSchema = modelSettingsSchema.extend({ revision: z.number().int().nonnegative() });
 
 export class ExecutionSettingsStore {
   private readonly filename: string;
-  private readonly store: RunStore;
-  constructor(store: RunStore) { this.store = store; this.filename = path.join(store.root, "settings.json"); }
+  private readonly store: { root: string; acquireNamed(name: string): Promise<() => Promise<void>> };
+  constructor(store: { root: string; acquireNamed(name: string): Promise<() => Promise<void>> }) { this.store = store; this.filename = path.join(store.root, "settings.json"); }
   async get(): Promise<StoredExecutionSettings> {
     try { return storedSchema.parse(JSON.parse(await readFile(this.filename, "utf8"))); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { revision: 0 }; throw error; }
@@ -47,21 +42,6 @@ export class ExecutionSettingsStore {
       return settings;
     } finally { await release(); }
   }
-}
-
-export function validateNodeSettings(value: unknown, meta: WorkflowMeta): NodeSettings {
-  if (value === undefined) return {};
-  const parsed = z.record(z.string(), nodeModelSettingsSchema).parse(value);
-  const phases = new Set(meta.phases?.map(phase => phase.title) ?? []);
-  for (const key of Object.keys(parsed)) {
-    if (key.startsWith("phase:") && phases.has(key.slice(6))) {
-      if (parsed[key]?.identity !== undefined) throw new Error("Task configuration identity applies only to task overrides.");
-      continue;
-    }
-    if (/^task:(?:0|[1-9][0-9]*)$/.test(key) && Number.isSafeInteger(Number(key.slice(5))) && Number(key.slice(5)) < 1000) continue;
-    throw new Error(`Unknown workflow node settings key: ${key}`);
-  }
-  return parsed;
 }
 
 export function resolveExecutionSettings(environment: ExecutionEnvironment, layers: Array<{ settings?: ModelSettings | undefined; source: EffectiveExecutionSettings["source"] }>): EffectiveExecutionSettings {

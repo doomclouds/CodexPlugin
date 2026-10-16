@@ -117,7 +117,7 @@ class HostClient {
 async function variant(name, mutation) {
   const directory = path.join(root, name), home = path.join(directory, "home"), marketplace = path.join(directory, "marketplace"), plugin = path.join(marketplace, "plugins", "workflows");
   await mkdir(home, { recursive: true }); await mkdir(plugin, { recursive: true });
-  for (const item of ["plugin.json", "package.json", "mcp.json", "runtime", "assets", "workflows", "skills", ".codex-plugin"]) await cp(path.join(packageRoot, item), path.join(plugin, item), { recursive: true });
+  for (const item of ["plugin.json", "package.json", "mcp.json", "runtime", "assets", "skills", ".codex-plugin"]) await cp(path.join(packageRoot, item), path.join(plugin, item), { recursive: true });
   const mcp = JSON.parse(await readFile(path.join(plugin, "mcp.json"), "utf8"));
   mcp.mcpServers.workflows.env = { ...(mcp.mcpServers.workflows.env ?? {}), WORKFLOWS_DATA_DIR: path.join(directory, "workflow-state") };
   await mutation(mcp, plugin);
@@ -149,13 +149,19 @@ async function variant(name, mutation) {
     }
     assert.equal(registered.length, 1);
     const thread = await host.request("thread/start", { cwd: directory, approvalPolicy: "never", sandbox: "read-only", ephemeral: true });
-    const inventory = await host.request("mcpServerStatus/list", { threadId: thread.thread.id, limit: 100 });
-    const server = inventory.data.find(server => server.pluginId?.includes("workflows") || server.name.includes("workflows"));
+    let inventory, server;
+    const deadline = Date.now() + 20000;
+    do {
+      inventory = await host.request("mcpServerStatus/list", { threadId: thread.thread.id, limit: 100 });
+      server = inventory.data.find(server => server.pluginId?.includes("workflows") || server.name.includes("workflows"));
+      if (server && server.runtimeStatus !== "starting") break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } while (Date.now() < deadline);
     assert.ok(server, "Native plugin MCP server is present in the actual host runtime");
     assert.equal(server.runtimeStatus, "connected", server.toolsError ?? "Native plugin MCP did not connect");
     assert.equal(server.toolsError, null);
     const tools = Object.values(server.tools);
-    assert.equal(tools.length, 24);
+    assert.equal(tools.length, 27);
     const entrypoint = tools.find(tool => tool.name === "workflow_open_panel");
     assert.ok(entrypoint, "Actual host discovers the Workflows entrypoint tool");
     assert.deepEqual(entrypoint._meta["openai/ui"].entrypoints, [{ type: "thread" }]);
@@ -165,7 +171,7 @@ async function variant(name, mutation) {
     assert.notEqual(capabilities.isError, true);
     const lifecycle = capabilities.structuredContent.runtimeLifecycle;
     assert.equal(lifecycle.globalSingleton, false);
-    assert.equal(lifecycle.instanceScope, "host-connection");
+    assert.equal(lifecycle.scope, "host-connection");
     assert.equal(lifecycle.parentProcessId, host.child.pid, "The stdio runtime must remain a direct child of this genuine Codex host");
     for (let opening = 0; opening < 2; opening++) {
       const opened = await host.request("mcpServer/tool/call", { threadId: thread.thread.id, server: server.name, tool: "workflow_open_panel", arguments: {} });

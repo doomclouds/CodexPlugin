@@ -8,8 +8,6 @@ import path from "node:path";
 import test from "node:test";
 import type { TestContext } from "node:test";
 import { callerContext, CodexProjectsProvider, mapProjects } from "../src/projects.ts";
-import { WorkflowEngine } from "../src/engine.ts";
-import { RunStore } from "../src/store.ts";
 
 type Request = { id: string; jsonrpc: string; method: string; params?: { namespace: string; tool: string; arguments: Record<string, unknown>; callerSource: string; threadId: string; callId: string; turnId: string } };
 function encode(value: unknown): Buffer {
@@ -268,7 +266,7 @@ test("one shared provider keeps concurrent callers isolated when host responses 
   assert.equal(fixture.requests.filter(request => request.params?.threadId === "caller-b").length, 2);
 });
 
-test("a real symbolic-link project preserves host ownership and matches the engine's canonical run directory", async t => {
+test("a real symbolic-link project preserves host ownership and canonical directory identity", async t => {
   let root = "", alias = "";
   const fixture = await pipeFixture(t, (request, socket) => {
     if (request.method !== "tools/call") return;
@@ -286,14 +284,9 @@ test("a real symbolic-link project preserves host ownership and matches the engi
   assert.equal(result.currentProjectId, "project-a");
   assert.equal(result.contextSource, "thread");
   assert.equal(result.projects[0]!.path, await realpath(alias));
-  const engine = new WorkflowEngine({ store: new RunStore(path.join(root, "isolated-state")) });
-  try {
-    const run = await engine.preview({ projectPath: alias, script: 'export const meta={name:"canonical-project",description:"Canonical project fixture"}; return args;' });
-    assert.equal(run.projectPath, result.projects[0]!.path, "The project-bound panel must recognize the engine's canonical run as its own.");
-    const unassigned = await provider.getProjects({ meta: { threadId: "unassigned-thread", projectPath: alias }, signal: new AbortController().signal });
-    assert.equal(unassigned.available, true);
-    if (unassigned.available) assert.equal(unassigned.currentProjectId, undefined, "Filesystem aliases must never supply missing host thread ownership.");
-  } finally { await engine.close(); }
+  const unassigned = await provider.getProjects({ meta: { threadId: "unassigned-thread", projectPath: alias }, signal: new AbortController().signal });
+  assert.equal(unassigned.available, true);
+  if (unassigned.available) assert.equal(unassigned.currentProjectId, undefined, "Filesystem aliases must never supply missing host thread ownership.");
 });
 
 test("a missing or non-directory current project is unavailable and cannot fall back to another local project", async t => {

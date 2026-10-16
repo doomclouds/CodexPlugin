@@ -181,13 +181,6 @@ function personalPaths(text, roots) {
   return matches;
 }
 
-function emscriptenVfs(text, relative, offset, finding) {
-  if (relative !== "runtime/script-worker.js" || finding.code !== "personal-home-path" || finding.value !== "/home/web_user") return false;
-  const context = text.slice(Math.max(0, offset - 220), offset + 35);
-  // This is Emscripten's virtual environment default, not a host filesystem path.
-  return /USER\s*:\s*["']web_user["']\s*,\s*LOGNAME\s*:\s*["']web_user["']\s*,\s*PATH\s*:\s*["']\/["']\s*,\s*PWD\s*:\s*["']\/["']\s*,\s*HOME\s*:\s*["']\/home\/web_user["']/.test(context);
-}
-
 function literalImports(text, typed = false) {
   if (!typed) {
     const links = [], literals = [];
@@ -343,12 +336,12 @@ export async function checkPluginPortability(pluginRoot, options = {}) {
     const data = await readFile(filename);
     const text = data.toString("utf8");
     const binary = data.includes(0) && !textExtensions.has(extension);
-    for (const finding of personalPaths(text, localRoots)) if (!emscriptenVfs(text, relative, finding.offset, finding)) add(filename, text, finding.offset, binary ? `binary-${finding.code}` : finding.code);
+    for (const finding of personalPaths(text, localRoots)) add(filename, text, finding.offset, binary ? `binary-${finding.code}` : finding.code);
     const imports = codeExtensions.has(extension) ? literalImports(text, [".ts", ".tsx"].includes(extension)) : undefined;
     if (imports && !imports.parsed) add(filename, text, 0, "unparsed-javascript-references");
     if (!binary && (codeExtensions.has(extension) || [".json", ".jsonc", ".map", ".html", ".htm"].includes(extension))) {
       for (const token of imports?.literals ?? quotedTokens(text)) {
-        for (const finding of personalPaths(token.value, localRoots)) if (!emscriptenVfs(text, relative, token.offset + 1, finding)) add(filename, text, token.offset, "quoted-" + finding.code);
+        for (const finding of personalPaths(token.value, localRoots)) add(filename, text, token.offset, "quoted-" + finding.code);
       }
     }
     const scope = skillScope(filename);

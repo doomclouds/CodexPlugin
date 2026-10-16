@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "workflows",
-  "version": "0.9.1",
-  "description": "Tool-driven dynamic workflows with native Codex execution, scoped MCP tools, durable node checkpoints, recovery previews, and reviewed changes.",
+  "version": "0.10.0",
+  "description": "Structured workflows with one compiled execution graph, durable node instances, native Codex workers, and checkpoint recovery.",
   "license": "MIT",
   "extensions": {
     "com.openai": {

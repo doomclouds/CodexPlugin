@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { commandActivityLabel, itemActivity } from "./activity.ts";
 import { normalizeProtectedPaths } from "./protected-paths.ts";
 import { captureLocalGitScope, validateLocalGitScope } from "./local-git-scope.ts";
+import type { LocalGitScope } from "./local-git-scope.ts";
 import { McpFailureDiagnostics, mcpItemFailed } from "./mcp-diagnostics.ts";
 import { TaskOutputValidationError, validateTaskContracts, validateTaskOutput } from "./task-output.ts";
 import { NativeToolFailureDiagnostics, nativeToolItemFailed } from "./native-tool-diagnostics.ts";
@@ -43,6 +44,7 @@ export interface CommandRequest {
   timeoutMs?: number;
   retries?: number;
   protectedPaths?: string[];
+  readOnly?: boolean;
 }
 
 export interface CommandResult {
@@ -244,6 +246,21 @@ async function protectedCommandRoots(cwd: string, paths: string[] | undefined, h
   return roots;
 }
 
+async function commandDirectoryIdentities(cwd: string, paths: string[] | undefined, hasGit: boolean) {
+  const names = new Set([cwd, ...(hasGit ? [path.join(cwd, ".git")] : [])]);
+  for (const relative of paths ?? []) {
+    let current = cwd;
+    for (const part of relative.split("/")) { current = path.join(current, part); names.add(current); }
+  }
+  const identities = [];
+  for (const name of names) {
+    const stat = await lstat(name, { bigint: true });
+    if (!stat.isDirectory() || stat.isSymbolicLink() || await realpath(name) !== name) throw new Error("Command directory identity is unsafe");
+    identities.push({ path: name, dev: stat.dev.toString(), ino: stat.ino.toString() });
+  }
+  return identities;
+}
+
 function transientNetworkFailure(result: CommandResult): boolean {
   if (result.exitCode === 0 || [124, 137, 143].includes(result.exitCode)) return false;
   const output = result.stdout + "\n" + result.stderr;
@@ -400,7 +417,7 @@ export class CodexAdapter implements WorkerAdapter {
 
   constructor(options: CodexAdapterOptions = {}) {
     this.options = {
-      command: options.command ?? "codex",
+      command: options.command ?? (process.env.CODEX_CLI_PATH?.trim() || "codex"),
       args: options.args ?? ["app-server", "--stdio"],
       startupTimeoutMs: options.startupTimeoutMs ?? 30_000,
       interruptTimeoutMs: options.interruptTimeoutMs ?? 5_000,
@@ -543,7 +560,7 @@ export class CodexAdapter implements WorkerAdapter {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.9.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.10.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config = object(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config, cwd);
@@ -553,10 +570,12 @@ export class CodexAdapter implements WorkerAdapter {
   command(request: CommandRequest, signal: AbortSignal, onEvent: (event: WorkerEvent) => void = () => {}): Promise<CommandResult> {
     if (this.closed) return Promise.reject(new Error("Worker adapter is closed."));
     if (signal.aborted) return Promise.reject(abortError());
-    const allowed = new Set(["id", "command", "cwd", "networkAccess", "timeoutMs", "retries", "protectedPaths"]);
+    const allowed = new Set(["id", "command", "cwd", "networkAccess", "timeoutMs", "retries", "protectedPaths", "readOnly"]);
     if (Object.keys(request).some(key => !allowed.has(key))) return Promise.reject(new Error("Command request contains unsupported fields; environment and extra paths cannot be supplied."));
     if (typeof request.id !== "string" || !request.id.trim() || typeof request.cwd !== "string" || !path.isAbsolute(request.cwd) || !Array.isArray(request.command) || !request.command.length || request.command.some(value => typeof value !== "string" || value.includes("\0")) || !request.command[0]?.trim()) return Promise.reject(new Error("Command requires an ID, an exact argv array, and an absolute working directory."));
     if (request.networkAccess !== undefined && typeof request.networkAccess !== "boolean") return Promise.reject(new Error("Command network authorization must be boolean."));
+    if (request.readOnly !== undefined && typeof request.readOnly !== "boolean") return Promise.reject(new Error("Command read-only scope must be boolean."));
+    if (request.readOnly && request.protectedPaths !== undefined) return Promise.reject(new Error("Read-only commands cannot request protected write directories."));
     if (request.timeoutMs !== undefined && (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 1 || request.timeoutMs > 86_400_000)) return Promise.reject(new Error("Command timeout must be a positive integer of at most 24 hours."));
     if (request.retries !== undefined && (!Number.isSafeInteger(request.retries) || request.retries < 0 || request.retries > 2)) return Promise.reject(new Error("Command retries must be an integer between zero and two."));
     let protectedPaths: string[] | undefined;
@@ -578,6 +597,7 @@ export class CodexAdapter implements WorkerAdapter {
       if (!requestedRoot.isDirectory() || requestedRoot.isSymbolicLink()) throw new Error("Protected maintenance checkout must be a real directory without symbolic links");
     }
     const cwd = await realpath(request.cwd);
+    if (request.readOnly) return this.commandAttempt({ ...request, cwd }, signal, onEvent, 1, false, {});
     const gitPath = path.join(cwd, ".git");
     let hasOwnedGit = false;
     try {
@@ -586,6 +606,9 @@ export class CodexAdapter implements WorkerAdapter {
       hasOwnedGit = true;
     } catch (error) { if (object(error).code !== "ENOENT") throw error; }
     await protectedCommandRoots(cwd, request.protectedPaths, hasOwnedGit);
+    const gitScope = await captureLocalGitScope(cwd);
+    if (hasOwnedGit && gitScope.state !== "contained") throw new Error("Command Git metadata must be fully contained in the project");
+    const identities = await commandDirectoryIdentities(cwd, request.protectedPaths, hasOwnedGit);
     if (signal.aborted) throw abortError();
     const scratch = await mkdtemp(path.join(hasOwnedGit ? gitPath : cwd, ".workflows-command-"));
     try {
@@ -600,7 +623,7 @@ export class CodexAdapter implements WorkerAdapter {
       const attempts = (request.retries ?? 0) + 1;
       for (let attempt = 1; attempt <= attempts; attempt++) {
         if (signal.aborted) throw abortError();
-        const result = await this.commandAttempt({ ...request, cwd }, signal, onEvent, attempt, hasOwnedGit, env);
+        const result = await this.commandAttempt({ ...request, cwd }, signal, onEvent, attempt, hasOwnedGit, env, gitScope, identities);
         if (attempt === attempts || !request.networkAccess || !transientNetworkFailure(result)) return result;
         onEvent({ type: "log", message: "Retrying command after a temporary network failure." });
         await new Promise<void>((resolve, reject) => {
@@ -614,7 +637,7 @@ export class CodexAdapter implements WorkerAdapter {
     } finally { await rm(scratch, { recursive: true, force: true }); }
   }
 
-  private async commandAttempt(request: CommandRequest, signal: AbortSignal, onEvent: (event: WorkerEvent) => void, attempt: number, hasOwnedGit: boolean, env: Record<string, string>): Promise<CommandResult> {
+  private async commandAttempt(request: CommandRequest, signal: AbortSignal, onEvent: (event: WorkerEvent) => void, attempt: number, hasOwnedGit: boolean, env: Record<string, string>, gitScope?: LocalGitScope, identities?: Awaited<ReturnType<typeof commandDirectoryIdentities>>): Promise<CommandResult> {
     const processId = `${request.id}_attempt_${attempt}`;
     const timeoutMs = request.timeoutMs ?? 10 * 60_000;
     const output = { stdout: "", stderr: "" };
@@ -658,7 +681,7 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.9.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.10.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer); startupTimer = undefined;
       if (canceled || signal.aborted) throw canceled ?? abortError();
@@ -666,9 +689,11 @@ export class CodexAdapter implements WorkerAdapter {
       // Recheck after startup and before every attempt; a declared path must
       // never turn into a link or widen to a parent while the executor starts.
       const protectedRoots = await protectedCommandRoots(request.cwd, request.protectedPaths, hasOwnedGit);
+      if (gitScope) await validateLocalGitScope(gitScope);
+      if (identities && JSON.stringify(identities) !== JSON.stringify(await commandDirectoryIdentities(request.cwd, request.protectedPaths, hasOwnedGit))) throw new Error("Command directory identity changed during executor startup");
       sent = true;
       executionTimer = setTimeout(() => cancel(timeoutError("Codex command execution timed out.")), timeoutMs);
-      const sandboxPolicy = { type: "workspaceWrite", writableRoots: [request.cwd, ...(hasOwnedGit ? [path.join(request.cwd, ".git")] : []), ...protectedRoots], networkAccess: request.networkAccess === true, excludeTmpdirEnvVar: true, excludeSlashTmp: true };
+      const sandboxPolicy = request.readOnly ? { type: "readOnly", networkAccess: request.networkAccess === true } : { type: "workspaceWrite", writableRoots: [request.cwd, ...(hasOwnedGit ? [path.join(request.cwd, ".git")] : []), ...protectedRoots], networkAccess: request.networkAccess === true, excludeTmpdirEnvVar: true, excludeSlashTmp: true };
       emit("Command execution started.");
       commandActivity = { id: processId, kind: "command", label: commandActivityLabel(request.command), status: "running", startedAt: new Date().toISOString() };
       activity(commandActivity);
@@ -942,12 +967,12 @@ export class CodexAdapter implements WorkerAdapter {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.9.1" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.10.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object(object(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== undefined || request.reasoningEffort !== undefined) {
         const environment = await this.modelEnvironment(session, effective, request.cwd);
-        executionSettings = { ...resolveExecutionSettings(environment, [{ settings: { ...(request.model ? { model: request.model } : {}), ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}) }, source: request.settingsSource ?? "script" }]), provenance: "requested" };
+        executionSettings = { ...resolveExecutionSettings(environment, [{ settings: { ...(request.model ? { model: request.model } : {}), ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}) }, source: request.settingsSource ?? "task" }]), provenance: "requested" };
       }
       const authorizedMcps = new Set(request.mcpServers ?? []);
       const configuredMcps = object(effective.mcp_servers);
@@ -1019,7 +1044,7 @@ export class CodexAdapter implements WorkerAdapter {
       const configuredEffort = typeof threadResponse.reasoningEffort === "string" ? threadResponse.reasoningEffort : undefined;
       if (request.model !== undefined && configuredModel !== undefined && configuredModel !== request.model) throw new Error("Codex did not enforce the requested model.");
       if (request.reasoningEffort !== undefined && configuredEffort !== undefined && configuredEffort !== request.reasoningEffort) throw new Error("Codex did not enforce the requested reasoning effort.");
-      if (configuredModel && configuredEffort) executionSettings = { model: configuredModel, reasoningEffort: configuredEffort, source: request.settingsSource ?? (request.model || request.reasoningEffort ? "script" : "codex-config"), provenance: "configured" };
+      if (configuredModel && configuredEffort) executionSettings = { model: configuredModel, reasoningEffort: configuredEffort, source: request.settingsSource ?? (request.model || request.reasoningEffort ? "task" : "codex-config"), provenance: "configured" };
       if (executionSettings) emit({ type: "execution-settings", settings: executionSettings });
       if (canceled) throw canceled;
       const actualSandbox = object(threadResponse.sandbox);
