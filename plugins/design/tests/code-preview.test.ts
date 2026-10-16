@@ -4,7 +4,7 @@ import { createCodeTemplate, codeFileHash } from '../src/code-project.ts';
 import type { CodeProject, CodeFile } from '../src/code-project.ts';
 import { anchorCodeElement, compileCodeProject, editCodeElement } from '../src/code-preview.ts';
 function project(entry:string, files:Array<{path:string;content:string;encoding?:'utf8'|'base64'}>):CodeProject{
- const base=createCodeTemplate('Preview test','html');return{...base,entry,files:files.map(file=>({...file,encoding:file.encoding??'utf8'}))};
+ const base=createCodeTemplate('Preview test','html');return{...base,pages:base.pages.map(page=>({...page,entry})),files:files.map(file=>({...file,encoding:file.encoding??'utf8'}))};
 }
 const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jCDcAAAAASUVORK5CYII=';
 function noErrors(result:Awaited<ReturnType<typeof compileCodeProject>>):void{assert.deepEqual(result.diagnostics.filter(item=>item.level==='error'),[],JSON.stringify(result.diagnostics));}

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { CODE_PROJECT_LIMITS, CodeProjectStore, codeFileHash, createCodeTemplate, summarizeCodeFiles, validateCodePath, validateCodeProject } from "../src/code-project.ts";
 import type { CodeFile, CodeProjectUpdate } from "../src/code-project.ts";
-import { DesignError } from "../src/model.ts";
+import { DesignError } from "../src/validation.ts";
 
 const hasCode = (code: DesignError["code"]) => (error: unknown): boolean => error instanceof DesignError && error.code === code;
 async function workspace(run: (store: CodeProjectStore, directory: string) => Promise<void>): Promise<void> {
@@ -20,7 +20,7 @@ test("HTML and React templates contain real source, state handlers, components a
     for (const template of ["html", "react"] as const) {
       const first = await store.create({ name: "真实源码模板", template });
       assert.deepEqual(validateCodeProject(first), first);
-      assert.ok(first.files.some((file) => file.path === first.entry));
+      assert.ok(first.files.some((file) => file.path === first.pages.find(page=>page.id===first.defaultPageId)!.entry));
       assert.ok(first.designSystem.components.length > 0);
       const scripts = first.files.filter((file) => /\.(?:js|tsx)$/.test(file.path)).map((file) => file.content).join("\n");
       assert.ok(template === "react" ? scripts.includes("useState") : scripts.includes("addEventListener"));
@@ -29,7 +29,7 @@ test("HTML and React templates contain real source, state handlers, components a
       assert.equal(summaries.length, first.files.length); assert.match(summaries[0]!.sha256, /^[a-f0-9]{64}$/);
       assert.equal(summaries[0]!.sha256, codeFileHash(first.files[0]!));
     }
-    assert.equal((await store.list()).length, 2);
+    assert.equal((await store.list()).projects.length, 2);
     assert.ok((await readdir(join(directory, "data"))).every((name) => name.endsWith(".json")));
   });
 });
@@ -45,8 +45,8 @@ test("file hash and project revision checks make an entire source update atomic"
     assert.deepEqual(await store.get(first.id), updated);
     await assert.rejects(store.update(first.id, 2, { files: [{ path: file.path, content: "x" }] } as CodeProjectUpdate), hasCode("VALIDATION"));
     await assert.rejects(store.update(first.id, 2, { files: [{ path: "APP.js", content: "x", expectedHash: null }] }), hasCode("VALIDATION"));
-    const third = await store.update(first.id, 2, { files: [{ path: "alternate.html", content: "<!doctype html><h1>Alternate</h1>", expectedHash: null }, { path: "index.html", expectedHash: codeFileHash(updated.files.find((item) => item.path === "index.html")!) }], entry: "alternate.html" });
-    assert.equal(third.entry, "alternate.html"); assert.ok(!third.files.some((value) => value.path === "index.html"));
+    const third = await store.update(first.id, 2, { files: [{ path: "alternate.html", content: "<!doctype html><h1>Alternate</h1>", expectedHash: null }, { path: "index.html", expectedHash: codeFileHash(updated.files.find((item) => item.path === "index.html")!) }], pages:updated.pages.map(page=>({...page,entry:"alternate.html"})) });
+    assert.equal(third.pages[0]!.entry, "alternate.html"); assert.ok(!third.files.some((value) => value.path === "index.html"));
   });
 });
 
@@ -85,7 +85,7 @@ test("read-only directory import ignores reserved trees and symlinks without exe
     const outside = join(directory, "outside.js"); await writeFile(outside, "outside content"); await symlink(outside, join(source, "leak.js")); await symlink(join(source, "src"), join(source, "linked"), "dir");
     const project = await store.importDirectory({ name: "只读导入", directory: source });
     assert.deepEqual(project.files.map((file) => file.path), ["index.html", "src/never.js"]);
-    assert.equal(project.revision, 1); assert.equal(project.entry, "index.html");
+    assert.equal(project.revision, 1); assert.equal(project.pages[0]!.entry, "index.html");
     assert.equal(await readFile(join(source, "src", "never.js"), "utf8"), project.files[1]!.content);
     assert.equal((await store.history(project.id))[0]!.operation, "import");
     await symlink(source, join(directory, "linked-root"), "dir");

@@ -1,21 +1,21 @@
 ---
 name: design
-description: 使用本地 Design 插件创建和编辑真实 HTML、React、TSX、CSS 代码设计、交互原型与设计系统，保留旧图层画板。适用于页面设计、产品工作台、视觉探索、组件复用、源码往返、真实预览与交付。
+description: 使用本地 Design 插件创建和编辑真实 HTML、React、TSX、CSS 代码设计、交互原型与设计系统。适用于页面设计、产品工作台、视觉探索、组件复用、源码往返、真实预览与交付。
 ---
 
 # Design
 
-先调用 `design_get_capabilities` 核对当前加载版本。默认使用**代码项目和当前聊天**：由你直接读取和修改真实文件，沿用当前宿主的模型和授权。不要索取 API Key、复制登录令牌，或未经用户选择额外启动独立模型任务。
+先调用 `design_get_capabilities` 核对当前加载版本。以**真实代码项目**为设计源，默认使用当前聊天：由你直接读取和修改文件，沿用当前宿主的模型和授权。不要索取 API Key、复制登录令牌，或未经用户选择额外启动独立模型任务。
 
 ## 任务与艺术指导
 
-新设计或整体改版前调用 `design_get_guidance`，代码工程传 `medium: "code"`，旧图层传 `medium: "layers"`。阅读 [艺术指导](references/art-direction.md)，按任务、投入、内容、品牌和已有组件作决定。20 张方向卡是可组合的示例，默认只载入摘要，指定方向才读取其细节；自由需求不必映射到预设名称。
+新设计或整体改版前调用 `design_get_guidance`。阅读 [艺术指导](references/art-direction.md)，按任务、投入、内容、品牌和已有组件作决定。20 张方向卡是可组合的示例，默认只载入摘要，指定方向才读取其细节；自由需求不必映射到预设名称。
 
 工作台优先对象、操作与恢复；编辑内容优先完整阅读；数据表达先核实来源、单位与编码；组件工作先确认实际 API、样式与依赖。探索按同一内容比较 2–3 种实质不同构图。局改保留既有语言和无关区域，不为改一段文字重做全页。不要把三卡片、渐变、大标题或某种固定配色当作所有任务的答案。
 
 ## 默认代码工作流
 
-1. 用 `design_code_list` 查找现有项目；新项目用 `design_code_create`，模板是 HTML / React 起点，不是已生成结果。用 `design_open_editor` 的 `code` 模式打开，默认也是该模式。
+1. 用 `design_code_list` 查找现有项目；新项目用 `design_code_create`，模板是 HTML / React 起点，不是已生成结果。读取 `pages` 与 `defaultPageId`，用 `design_open_editor` 打开编辑器。每页由真实入口和路由定义，不能把复制预览尺寸称为新增页面。
 2. 用 `design_code_list_files` 读取清单、项目 revision 和文件 hash，再用 `design_code_read_file` 读取相关源码。需要完整工程时可用 `design_code_get`，不要无故把图片/字体 base64 全量转抄给模型。
 3. 用 `design_code_update` 一次提交相关文件的完整内容，携带准确 `expectedRevision` 和各文件 `expectedHash`；新增文件用 `expectedHash: null`。保留无关文件与用户手动修改。冲突后重新读取并合并意图，不能只换 revision/hash 盲目重发。
 4. 用 `design_code_preview` 编译实际入口，先处理错误与缺失依赖。代码原型运行在与编辑器工具分离的预览中；不执行后端、安装依赖或运行用户包脚本。
@@ -36,7 +36,7 @@ description: 使用本地 Design 插件创建和编辑真实 HTML、React、TSX�
 
 只读取用户明确选择的源目录和资产。`design_code_import_directory` 新建源码项目；它不会执行工程、安装依赖或改原目录。
 
-复用真实 React 组件时，用 `design_code_import_components` 显式指定根目录、组件入口/导出名、需要的 CSS、已有类型声明和用法。先看返回诊断和生成的项目内使用说明，再把实际组件和样式接入页面。**打包或登记成功仍需接入页面、编译、浏览器运行与视觉检查，才能称为接入成功。** 不猜 props、不把静态图层组件当作真实库组件，也不承诺任意依赖或框架兼容。
+复用真实 React 组件时，用 `design_code_import_components` 显式指定根目录、组件入口/导出名、需要的 CSS、已有类型声明和用法。先看返回诊断和生成的项目内使用说明，再把实际组件和样式接入页面。**打包或登记成功仍需接入页面、编译、浏览器运行与视觉检查，才能称为接入成功。** 不猜 props、不以静态占位替代真实组件行为，也不承诺任意依赖或框架兼容。
 
 本地图片/字体用 `design_code_import_asset` 导入实际字节，引用正确项目路径。默认预览限制外部网络；项目或运行包中不存在的字体、图片、脚本不能伪装成已加载。素材生成和外部获取只用当前宿主实际支持且已授权的能力，保留适用来源与许可。
 
@@ -54,10 +54,6 @@ description: 使用本地 Design 插件创建和编辑真实 HTML、React、TSX�
 
 用户明确指定目标目录后，`design_code_write_directory` 导出源码并检查同步清单、revision 与外部变化。发生冲突或部分写入时先核对实际文件，不覆盖未导入改动，也不盲目重试。重新导入目录会新建项目；合并到已有项目需读差异后按当前 hash/revision 更新。源码目录不等于已部署服务，源码 ZIP 也不意味着任意框架可以脱离其运行条件直接启动。
 
-## 旧图层模式与未实现能力
-
-已有画板项目继续使用 `design_open_editor` 的 `layers` 模式、`design_get_project`、`design_apply_changes` 和相关图层工具。图层结构、JSON Patch、稳定 ID 和交互合同见 [图层文档参考](references/document.md)。不要把代码工程转换成受限图层后声称无损往返。
-
-旧图层导出保留 HTML / JSON / SVG / ZIP 与 Chromium PNG/PDF。SVG 使用 HTML foreignObject，需要支持 HTML 的查看器。旧 Design JSON / 交换 HTML 同步使用其原有工具，不能代替任意工程双向编译。
+## 当前边界
 
 在线多人协作、云端分享及独立 Motion 时间线、视频渲染、MP4 导出未实现。前端 CSS/JS 动效可以作为代码原型的一部分，但不等于已有视频制作产品。安装、配置、提交、推送、发布与部署按用户的具体授权执行。

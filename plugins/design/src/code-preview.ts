@@ -6,11 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseHtml } from 'parse5';
 import { parse as parseJavaScript } from '@babel/parser';
 import type * as ESBuild from 'esbuild-wasm';
-import type { CodeProject, CodeFile } from './code-project.ts';
+import type { CodeProject, CodeFile, CodePage } from './code-project.ts';
+import { codePageRuntimeContext, getCodePages, resolveCodePage, resolveCodePageViewport } from './code-pages.ts';
 
 export interface SourceElement { id: string; file: string; start: number; end: number; tag: string; editableText: boolean; fileHash?: string; identity?: 'stable' | 'ephemeral' }
 export interface PreviewDiagnostic { level: 'error' | 'warning'; message: string; file?: string; line?: number }
-export interface CodePreview { projectId: string; revision: number; html: string; diagnostics: PreviewDiagnostic[]; sources: SourceElement[] }
+export interface CodePreview { projectId: string; revision: number; pageId:string;pages:CodePage[];html: string; diagnostics: PreviewDiagnostic[]; sources: SourceElement[] }
 type AnyNode = Record<string, any>;
 type Edit = { start: number; end: number; text: string };
 type ElementRecord = { source: SourceElement; node: AnyNode; language: 'html' | 'jsx' };
@@ -124,7 +125,6 @@ function vfsFiles(project: CodeProject): Map<string, CodeFile> {
     if (!file.path || file.path.startsWith('/') || file.path.includes('\\') || file.path.split('/').some(part => part==='..'||part==='.'||!part) || files.has(file.path)) throw new Error('Project file paths must be unique relative paths contained in the project.');
     files.set(file.path,file);
   }
-  if (!files.has(project.entry)) throw new Error('The project entry file does not exist.');
   return files;
 }
 function resolveFile(files: Map<string, CodeFile>, importer: string, request: string): string {
@@ -148,17 +148,54 @@ const reactShims: Record<string,string> = {
   'react/jsx-runtime': `const r=globalThis.__DesignJSXRuntime;export const {Fragment,jsx,jsxs}=r;`,
   'react/jsx-dev-runtime': `const r=globalThis.__DesignJSXDevRuntime;export const {Fragment,jsxDEV}=r;`,
 };
-function bridge(project: CodeProject, select: boolean, sources: SourceElement[]): string {
+function bridge(project: CodeProject, page:CodePage, select: boolean, sources: SourceElement[]): string {
   const sourceFiles = Object.fromEntries(sources.map(source=>[source.id,source.file]));
   const literalSources = Object.fromEntries(sources.map(source=>[source.id,source.editableText]));
-  return `(function(){const projectId=${JSON.stringify(project.id)},revision=${JSON.stringify(project.revision)},sourceFiles=${JSON.stringify(sourceFiles)},literalSources=${JSON.stringify(literalSources)};let mode=${JSON.stringify(select?'select':'preview')};const post=x=>parent.postMessage(Object.assign({projectId,revision},x),'*');addEventListener('message',e=>{if(e.source!==parent||!e.data||e.data.projectId!==undefined&&e.data.projectId!==projectId||e.data.revision!==undefined&&e.data.revision!==revision)return;if(e.data.type==='design:mode'&&['select','preview'].includes(e.data.mode))mode=e.data.mode;if(e.data.type==='design:focus'&&sourceFiles[e.data.sourceId]){const el=[...document.querySelectorAll('[data-design-source]')].find(x=>x.getAttribute('data-design-source')===e.data.sourceId);if(el){el.scrollIntoView({block:'center',inline:'nearest'});el.animate&&el.animate([{outline:'3px solid #ea6644',outlineOffset:'3px'},{outline:'3px solid transparent',outlineOffset:'8px'}],{duration:1300});}}});addEventListener('click',e=>{if(mode!=='select'){const link=e.target.closest&&e.target.closest('a[href]');if(link&&!link.getAttribute('href').startsWith('#'))e.preventDefault();return;}e.preventDefault();e.stopImmediatePropagation();const el=e.target.closest&&e.target.closest('[data-design-source]');if(!el)return;const sourceId=el.getAttribute('data-design-source');if(!sourceFiles[sourceId])return;const s=getComputedStyle(el),computedStyles={};for(const k of ['color','backgroundColor','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','padding','borderRadius','width','height'])computedStyles[k]=s[k];post({type:'design:selection',sourceId,file:sourceFiles[sourceId],text:el.textContent,computedStyles,runtimeLiteralText:literalSources[sourceId]&&[...el.childNodes].every(n=>n.nodeType===3||n.nodeType===8),ancestorMapped:el!==e.target});},true);addEventListener('error',e=>post({type:'design:runtime-error',message:String(e.message||'Runtime error').slice(0,1000),line:e.lineno}));addEventListener('unhandledrejection',e=>post({type:'design:runtime-error',message:String(e.reason&&e.reason.message||'Unhandled promise rejection').slice(0,1000)}));})();`;
+  return String.raw`(function(){
+const projectId=${JSON.stringify(project.id)},revision=${JSON.stringify(project.revision)},page=${JSON.stringify(page)},pages=${JSON.stringify(getCodePages(project))},sourceFiles=${JSON.stringify(sourceFiles)},literalSources=${JSON.stringify(literalSources)};
+const pageId=page.id;let mode=${JSON.stringify(select?'select':'preview')};
+const post=x=>parent.postMessage(Object.assign({projectId,revision,pageId},x),'*');
+const scroll=hash=>{if(hash){try{document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({block:'start'});}catch{}}};
+let initialLocation;try{initialLocation=JSON.parse(document.getElementById('design-page-context')?.textContent||'null')}catch{}
+const validInitial=initialLocation?.projectId===projectId&&initialLocation?.revision===revision&&initialLocation?.pageId===pageId;
+globalThis.designLocation={pageId,pathname:page.route,search:validInitial&&typeof initialLocation.search==='string'?initialLocation.search:'',hash:validInitial&&typeof initialLocation.hash==='string'?initialLocation.hash:''};
+const navigate=(target,details={})=>{if(!pages.some(p=>p.id===target))throw Error('Unknown project page');if(target===pageId&&details.hash&&(details.search||'')===designLocation.search){designLocation.hash=details.hash;scroll(details.hash);dispatchEvent(new CustomEvent('design:location',{detail:designLocation}));return;}post(Object.assign({type:'design:navigate',targetPageId:target,href:pages.find(p=>p.id===target).route,hash:'',search:''},details));};
+globalThis.designNavigate=target=>navigate(target);
+const linkTarget=href=>{
+  if(typeof href!=='string'||href.length>2048||href.includes('\\')||/[\x00-\x1f]/.test(href)||/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href))return;
+  try{
+    const url=new URL(href,'https://design.invalid'+page.route),entryUrl=new URL(href,'https://design.invalid/'+page.entry);
+    if(url.origin!=='https://design.invalid')return;
+    const target=pages.find(p=>p.route===url.pathname)??pages.find(p=>{const pathname=new URL('/'+p.entry,'https://design.invalid').pathname;return pathname===url.pathname||pathname===entryUrl.pathname;});
+    return target?{targetPageId:target.id,href:url.pathname+url.search+url.hash,hash:url.hash,search:url.search}:undefined;
+  }catch{return;}
+};
+addEventListener('message',e=>{
+  if(e.source!==parent||!e.data||e.data.projectId!==undefined&&e.data.projectId!==projectId||e.data.revision!==undefined&&e.data.revision!==revision||e.data.pageId!==undefined&&e.data.pageId!==pageId)return;
+  if(e.data.type==='design:mode'&&['select','preview'].includes(e.data.mode))mode=e.data.mode;
+  if(e.data.type==='design:location'){globalThis.designLocation={pageId,pathname:page.route,search:e.data.search||'',hash:e.data.hash||''};scroll(e.data.hash);dispatchEvent(new CustomEvent('design:location',{detail:globalThis.designLocation}));}
+  if(e.data.type==='design:focus'&&sourceFiles[e.data.sourceId]){const el=[...document.querySelectorAll('[data-design-source]')].find(x=>x.getAttribute('data-design-source')===e.data.sourceId);if(el){el.scrollIntoView({block:'center',inline:'nearest'});el.animate&&el.animate([{outline:'3px solid #ea6644',outlineOffset:'3px'},{outline:'3px solid transparent',outlineOffset:'8px'}],{duration:1300});}}
+});
+addEventListener('click',e=>{
+  if(mode!=='select')return;
+  e.preventDefault();e.stopImmediatePropagation();const el=e.target.closest&&e.target.closest('[data-design-source]');if(!el)return;
+  const sourceId=el.getAttribute('data-design-source');if(!sourceFiles[sourceId])return;
+  const s=getComputedStyle(el),computedStyles={};for(const k of ['color','backgroundColor','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','padding','borderRadius','width','height'])computedStyles[k]=s[k];
+  post({type:'design:selection',sourceId,file:sourceFiles[sourceId],text:el.textContent,computedStyles,runtimeLiteralText:literalSources[sourceId]&&[...el.childNodes].every(n=>n.nodeType===3||n.nodeType===8),ancestorMapped:el!==e.target});
+},true);
+addEventListener('click',e=>{if(mode==='select'||e.defaultPrevented)return;const link=e.target.closest&&e.target.closest('a[href]');if(!link)return;e.preventDefault();const target=linkTarget(link.getAttribute('href'));if(target)navigate(target.targetPageId,target);});
+addEventListener('error',e=>post({type:'design:runtime-error',message:String(e.message||'Runtime error').slice(0,1000),line:e.lineno}));
+addEventListener('unhandledrejection',e=>post({type:'design:runtime-error',message:String(e.reason&&e.reason.message||'Unhandled promise rejection').slice(0,1000)}));
+})();`;
+
 }
 
-export async function compileCodeProject(project: CodeProject, options: { instrument?: boolean } = {}): Promise<CodePreview> {
+export async function compileCodeProject(project: CodeProject, options: { instrument?: boolean;pageId?:string;viewportId?:string } = {}): Promise<CodePreview> {
   const diagnostics: PreviewDiagnostic[] = []; const sources: SourceElement[] = []; const instrument = options.instrument !== false;
-  const result: CodePreview = {projectId:project.id,revision:project.revision,html:'',diagnostics,sources};
+  const result: CodePreview = {projectId:project.id,revision:project.revision,pageId:options.pageId??project.defaultPageId,pages:[],html:'',diagnostics,sources};
   try {
-    const files = vfsFiles(project); const entry = files.get(project.entry)!;
+    const page=options.viewportId?resolveCodePageViewport(project,options).page:resolveCodePage(project,options.pageId);result.pageId=page.id;result.pages=getCodePages(project);
+    const files = vfsFiles(project); const entry = files.get(page.entry);if(!entry)throw new Error('The selected page entry file does not exist.');
     const virtual = new Map(files); let needReact = false;
     const scriptEntries: string[] = []; const cssEntries: string[] = []; const deferredClassic: string[] = []; let html = '';
     const warn = (message: string, file=entry.path): void => {diagnostics.push({level:'warning',message,file});};
@@ -252,11 +289,11 @@ export async function compileCodeProject(project: CodeProject, options: { instru
     }
     const vendor=needReact?await readFile(fileURLToPath(new URL('../runtime/react-vendor.js',import.meta.url)),'utf8'):'';
     const csp="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
-    const head=`<meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer"><script>${scriptSafe(bridge(project,instrument,sources))}</script><style>${styles.join('\n').replace(/<\/style/gi,'<\\/style')}</style>`;
+    const head=`<meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer">${codePageRuntimeContext(project,page)}<script>${scriptSafe(bridge(project,page,instrument,sources))}</script><style>${styles.join('\n').replace(/<\/style/gi,'<\\/style')}</style>`;
     const runtime=`${vendor?`<script>${scriptSafe(vendor)}</script>`:''}${deferredClassic.join('')}${scripts.map(script=>`<script>${scriptSafe(script)}</script>`).join('')}`;
     // Content is executed only by the caller's sandbox iframe. The backend only parses and compiles it.
     html=/<head(?:\s[^>]*)?>/i.test(html)?html.replace(/<head(?:\s[^>]*)?>/i,match=>match+head):head+html;
-    result.html=/<\/body\s*>/i.test(html)?html.replace(/<\/body\s*>/i,runtime+'</body>'):html+runtime;
+    result.html=/<\/body\s*>/i.test(html)?html.replace(/<\/body\s*>/i,()=>runtime+'</body>'):html+runtime;
     result.sources=[...new Map(sources.map(item=>[item.id,item])).values()];
   }catch(error){
     const errors=(error as {errors?:Array<{text:string;location?:{file:string;line:number}}>}).errors;

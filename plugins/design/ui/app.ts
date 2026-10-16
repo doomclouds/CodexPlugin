@@ -1,8 +1,6 @@
 import { App, applyDocumentTheme, applyHostFonts, applyHostStyleVariables } from '@modelcontextprotocol/ext-apps';
-import { mountEditor, type EditorBridge } from './editor.ts';
-import { mountCodeEditor } from './code-editor.ts';
+import { mountCodeEditor, type CodeEditorBridge } from './code-editor.ts';
 import { VERSION } from '../src/version.ts';
-import './editor.css';
 import './code-editor.css';
 import './studio.css';
 
@@ -17,27 +15,20 @@ function unpack(value:unknown):Record<string,unknown>{
   for(const block of content)if(block.type==='text'&&block.text){try{const data:unknown=JSON.parse(block.text);if(data&&typeof data==='object')return data as Record<string,unknown>;}catch{}}
   return result;
 }
-type Mode='code'|'layers';
-type Controller=ReturnType<typeof mountEditor>|ReturnType<typeof mountCodeEditor>;
-function mountStudio(bridge:EditorBridge){
+function mountStudio(bridge:CodeEditorBridge){
   const container=root!;
-  const navigation=document.createElement('nav');navigation.className='design-studio-modes';navigation.setAttribute('aria-label','设计工作区');
-  navigation.innerHTML='<span class="design-studio-wordmark">DESIGN</span><button data-mode="code">代码设计</button><button data-mode="layers">图层设计</button><button class="design-expand" hidden>展开画布</button>';
-  container.before(navigation);
-  let mode:Mode='code';let editor:Controller=mountCodeEditor(container,bridge);let connected=false;let disposed=false;let switching=Promise.resolve();
-  const update=()=>{for(const button of navigation.querySelectorAll<HTMLButtonElement>('[data-mode]'))button.setAttribute('aria-pressed',String(button.dataset.mode===mode));};update();
-  function select(next:Mode,projectId?:string):Promise<void>{
-    switching=switching.then(async()=>{if(disposed)return;if(next!==mode){await editor.teardown();mode=next;container.replaceChildren();editor=mode==='code'?mountCodeEditor(container,bridge):mountEditor(container,bridge);update();if(connected)await editor.connected();}if(projectId)await editor.setProjectId(projectId);});return switching;
-  }
-  navigation.addEventListener('click',event=>{const target=(event.target as Element).closest<HTMLButtonElement>('[data-mode]');if(target?.dataset.mode)void select(target.dataset.mode as Mode);});
+  const toolbar=document.createElement('div');toolbar.className='design-host-toolbar';toolbar.setAttribute('aria-label','宿主显示');toolbar.hidden=true;
+  toolbar.innerHTML='<button class="design-expand" type="button">展开工作区</button>';
+  container.before(toolbar);
+  const editor=mountCodeEditor(container,bridge);
   return{
-    navigation,
+    toolbar,
     connecting(){editor.connecting();},
-    async connected(){connected=true;await editor.connected();},
-    disconnected(error:unknown){connected=false;editor.disconnected(error);},
-    async receive(result:unknown){const data=unpack(result);const next=data.mode==='layers'||data.document?'layers':data.mode==='code'||data.project?'code':mode;await select(next);editor.receive(result);},
-    async setProjectId(projectId:string,next?:Mode){await select(next??(projectId.startsWith('design_')?'layers':'code'),projectId);},
-    async teardown(){disposed=true;await switching;await editor.teardown();navigation.remove();},
+    async connected(){await editor.connected();},
+    disconnected(error:unknown){editor.disconnected(error);},
+    async receive(result:unknown){editor.receive(result);},
+    async setProjectId(projectId:string){await editor.setProjectId(projectId);},
+    async teardown(){await editor.teardown();toolbar.remove();},
   };
 }
 const previewToken=(globalThis as typeof globalThis&{__DESIGN_PREVIEW_TOKEN__?:string}).__DESIGN_PREVIEW_TOKEN__;
@@ -65,18 +56,21 @@ if(window.parent===window&&previewToken){
     async download(file){if(!app.getHostCapabilities()?.downloadFile)return{saved:false,unsupported:true};try{const resource={uri:`file:///${encodeURIComponent(file.filename)}`,mimeType:file.mimeType,...(file.dataBase64!==undefined?{blob:file.dataBase64}:{text:file.text??''})};const result=await app.downloadFile({contents:[{type:'resource',resource}]});return result.isError?{saved:false,reason:'下载未完成，可能已取消。'}:{saved:true};}catch(error){return{saved:false,reason:`下载失败：${error instanceof Error?error.message:String(error)}`};}},
     async openLink(url){if(!app.getHostCapabilities()?.openLinks)return{opened:false,reason:'当前宿主未提供打开外链的能力。'};try{const result=await app.openLink({url});return result.isError?{opened:false,reason:'宿主未打开链接。'}:{opened:true};}catch(error){return{opened:false,reason:String(error)};}},
   });
-  let pendingProject='';let pendingMode:Mode|undefined;
-  const expand=studio.navigation.querySelector<HTMLButtonElement>('.design-expand')!;
+  let pendingProject='';
+  const expand=studio.toolbar.querySelector<HTMLButtonElement>('.design-expand')!;
   expand.addEventListener('click',()=>{const context=app.getHostContext();const mode=context?.displayMode==='fullscreen'?'inline':'fullscreen';if(context?.availableDisplayModes?.includes(mode))void app.requestDisplayMode({mode});});
   function hostContext(context:Record<string,unknown>){
     if(context.theme==='light'||context.theme==='dark'){applyDocumentTheme(context.theme);document.documentElement.dataset.hostTheme=context.theme;}
     const styles=context.styles as {variables?:Parameters<typeof applyHostStyleVariables>[0];css?:{fonts?:string}}|undefined;
     if(styles?.variables)applyHostStyleVariables(styles.variables);if(styles?.css?.fonts)applyHostFonts(styles.css.fonts);
-    expand.hidden=!Array.isArray(context.availableDisplayModes)||!context.availableDisplayModes.includes('fullscreen');expand.textContent=context.displayMode==='fullscreen'?'返回聊天':'展开画布';
+    const displayModes=Array.isArray(context.availableDisplayModes)?context.availableDisplayModes:[];
+    studio.toolbar.hidden=!displayModes.includes('fullscreen')&&context.displayMode!=='fullscreen';
+    expand.disabled=!displayModes.includes(context.displayMode==='fullscreen'?'inline':'fullscreen');
+    expand.textContent=context.displayMode==='fullscreen'?'返回聊天':'展开工作区';
   }
   app.onhostcontextchanged=hostContext;
-  app.ontoolinput=input=>{if(input.arguments?.mode==='code'||input.arguments?.mode==='layers')pendingMode=input.arguments.mode;if(typeof input.arguments?.projectId==='string'){pendingProject=input.arguments.projectId;void studio.setProjectId(pendingProject,pendingMode);}};
+  app.ontoolinput=input=>{if(typeof input.arguments?.projectId==='string'){pendingProject=input.arguments.projectId;void studio.setProjectId(pendingProject);}};
   app.ontoolresult=result=>void studio.receive(result).catch(error=>studio.disconnected(error));
   app.onteardown=async()=>{await studio.teardown();return{};};window.addEventListener('pagehide',()=>void studio.teardown());
-  if(window.parent!==window){studio.connecting();app.connect().then(async()=>{const context=app.getHostContext();if(context)hostContext(context);document.documentElement.dataset.designHostConnected='true';await studio.connected();if(pendingProject)await studio.setProjectId(pendingProject,pendingMode);}).catch(error=>studio.disconnected(error));}
+  if(window.parent!==window){studio.connecting();app.connect().then(async()=>{const context=app.getHostContext();if(context)hostContext(context);document.documentElement.dataset.designHostConnected='true';await studio.connected();if(pendingProject)await studio.setProjectId(pendingProject);}).catch(error=>studio.disconnected(error));}
 }

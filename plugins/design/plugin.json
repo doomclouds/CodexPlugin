@@ -1,15 +1,15 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "design",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "MIT",
-  "description": "Local design studio with editable HTML/React prototypes, real component imports, visual review, artboards, revision history and export.",
+  "description": "Local design studio with editable HTML/React projects, component systems, interactive previews, revision history and export.",
   "extensions": {
     "com.openai": {
       "interface": {
         "displayName": "Design",
         "shortDescription": "用 Codex 设计、编辑与交付",
-        "longDescription": "当前聊天驱动的本地设计工作台，包含真实 HTML/React 源码、交互预览、组件设计系统、图层画板、版本恢复和导出。可选独立 Codex 模式沿用本机登录，生成提案经过编译与实际截图审阅后再应用。",
+        "longDescription": "当前聊天驱动的本地设计工作台，使用真实 HTML/React 源码与组件系统，支持交互预览、定位修改、版本恢复和导出。可选独立 Codex 任务沿用本机登录。",
         "category": "Productivity",
         "capabilities": [
           "Read",

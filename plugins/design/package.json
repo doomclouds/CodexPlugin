@@ -1,6 +1,6 @@
 {
   "name": "@codex-plugin/design",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -14,7 +14,7 @@
     "start": "node runtime/index.js",
     "dev": "node --experimental-strip-types src/index.ts",
     "preview": "node scripts/preview.mjs",
-    "smoke:real": "node --experimental-strip-types scripts/real-smoke.ts --real-model",
+    "smoke:real": "node --experimental-strip-types scripts/code-real-smoke.ts --real-model",
     "smoke": "node --experimental-strip-types --test tests/*.test.ts && node scripts/smoke.mjs"
   },
   "dependencies": {

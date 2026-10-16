@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { browserExecutable } from './export.ts';
+import { browserExecutable } from './browser.ts';
 
 export interface BrowserInspection {
   png: Buffer;
@@ -13,6 +13,14 @@ export interface BrowserInspection {
   metrics: { title: string; textLength: number; headings: string[]; controls: number; horizontalOverflow: boolean; overflowCandidates: Array<{ tag: string; text: string; sourceId?: string }> };
   errors: string[];
   blockedRequests: number;
+}
+export interface BrowserReadyCondition {
+  selector:string;
+  /** Exact trimmed text of a visible matching DOM element; no page or host code is accepted. */
+  text?:string;
+}
+export interface BrowserInspectionOptions {
+  width:number;height:number;pdf?:boolean;fullPage?:boolean;timeoutMs?:number;waitFor?:BrowserReadyCondition;
 }
 
 class CdpConnection {
@@ -38,20 +46,23 @@ async function terminate(child:ChildProcess):Promise<void>{
 }
 const inspectionScript=`(()=>{const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&s.visibility!=='hidden'&&s.display!=='none'};const all=[...document.body.querySelectorAll('*')];return{title:document.title,textLength:(document.body.innerText||'').trim().length,headings:[...document.querySelectorAll('h1,h2,h3')].filter(visible).slice(0,20).map(e=>(e.innerText||'').slice(0,150)),controls:[...document.querySelectorAll('button,a[href],input,select,textarea,[role="button"]')].filter(visible).length,horizontalOverflow:document.documentElement.scrollWidth>innerWidth+2,overflowCandidates:all.filter(e=>visible(e)&&e.clientWidth>0&&e.scrollWidth>e.clientWidth+3&&!['auto','scroll'].includes(getComputedStyle(e).overflowX)&&getComputedStyle(e).textOverflow!=='ellipsis').slice(0,30).map(e=>({tag:e.tagName,text:(e.innerText||'').slice(0,80),...(e.dataset.designSource?{sourceId:e.dataset.designSource}:{})}))}})()`;
 
-export async function inspectCodeHtml(html:string,options:{width:number;height:number;pdf?:boolean;fullPage?:boolean;timeoutMs?:number}):Promise<BrowserInspection>{
+export async function inspectCodeHtml(html:string,options:BrowserInspectionOptions):Promise<BrowserInspection>{
+  const started=Date.now(),timeoutMs=options.timeoutMs??30000;
+  if(!Number.isInteger(timeoutMs)||timeoutMs<10||timeoutMs>900000)throw new Error('Browser inspection timeout must be between 10 and 900000 milliseconds.');
   if(!Number.isInteger(options.width)||!Number.isInteger(options.height)||options.width<240||options.width>8192||options.height<200||options.height>8192)throw new Error('Choose a viewport between 240–8192px wide and 200–8192px high.');
   if(Buffer.byteLength(html)>32*1024*1024)throw new Error('Preview exceeds the browser input budget.');
+  if(options.waitFor&&(typeof options.waitFor.selector!=='string'||!options.waitFor.selector.trim()||options.waitFor.selector.length>512||options.waitFor.text!==undefined&&(typeof options.waitFor.text!=='string'||options.waitFor.text.length>2000)))throw new Error('A DOM ready condition requires a selector of 1–512 characters and optional exact text of at most 2000 characters.');
   const executable=await browserExecutable();if(!executable)throw new Error('Visual validation requires an installed Chromium browser. Set DESIGN_BROWSER to its executable.');
   const directory=await mkdtemp(path.join(tmpdir(),'design-code-browser-'));
-  let child:ChildProcess|undefined,connection:CdpConnection|undefined;let timedOut=false;
+  let child:ChildProcess|undefined,connection:CdpConnection|undefined;let timedOut=false,awaitingCondition=Boolean(options.waitFor);
   let timer:ReturnType<typeof setTimeout>|undefined;
   try{
     const input=path.join(directory,'preview.html');await writeFile(input,html,{mode:0o600});const inputUrl=pathToFileURL(input).href;
     child=spawn(executable,['--headless=new','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking','--no-proxy-server','--remote-debugging-port=0',`--user-data-dir=${path.join(directory,'profile')}`,'about:blank'],{stdio:'ignore',windowsHide:true});
     const processFailure=new Promise<never>((_,reject)=>{child!.once('error',()=>reject(new Error('Could not start Chromium for visual validation.')));});
-    const deadline=new Promise<never>((_,reject)=>{timer=setTimeout(()=>{timedOut=true;connection?.close();void(child&&terminate(child));reject(new Error('Browser visual validation timed out.'));},options.timeoutMs??30000);});
+    const deadline=new Promise<never>((_,reject)=>{timer=setTimeout(()=>{timedOut=true;connection?.close();void(child&&terminate(child));reject(new Error(awaitingCondition?'Browser visual validation timed out before the requested DOM ready condition was observed.':'Browser visual validation timed out.'));},Math.max(1,timeoutMs-(Date.now()-started)));});
     const work=async():Promise<BrowserInspection>=>{
-      let port='';for(let attempt=0;attempt<100;attempt++){if(timedOut)throw new Error('Browser visual validation timed out.');try{port=(await readFile(path.join(directory,'profile/DevToolsActivePort'),'utf8')).split('\n')[0]!;break;}catch{if(child!.exitCode!==null)throw new Error('Chromium exited before visual validation started.');await sleep(50);}}
+      let port='';while(!port){if(timedOut)throw new Error('Browser visual validation timed out.');try{port=(await readFile(path.join(directory,'profile/DevToolsActivePort'),'utf8')).split('\n')[0]!;}catch{if(child!.exitCode!==null)throw new Error('Chromium exited before visual validation started.');await sleep(50);}}
       if(!/^\d+$/.test(port))throw new Error('Chromium did not expose a local inspection endpoint.');
       const targets=await fetch(`http://127.0.0.1:${port}/json/list`).then(r=>r.json()) as Array<{type:string;webSocketDebuggerUrl:string}>;
       const target=targets.find(t=>t.type==='page');if(!target)throw new Error('Chromium inspection page is missing.');
@@ -67,9 +78,19 @@ export async function inspectCodeHtml(html:string,options:{width:number;height:n
       await cdp.call('Page.enable');await cdp.call('Runtime.enable');await cdp.call('Fetch.enable',{patterns:[{urlPattern:'*'}]});
       await cdp.call('Emulation.setDeviceMetricsOverride',{width:options.width,height:options.height,deviceScaleFactor:1,mobile:false});
       await cdp.call('Page.navigate',{url:inputUrl});
-      for(let attempt=0;attempt<100;attempt++){const ready=await cdp.call('Runtime.evaluate',{expression:'document.readyState',returnByValue:true});if(ready.result?.value==='complete')break;await sleep(50);}
+      while(true){const ready=await cdp.call('Runtime.evaluate',{expression:'document.readyState',returnByValue:true});if(ready.result?.value==='complete')break;if(timedOut)throw new Error('Browser visual validation timed out.');await sleep(50);}
       await cdp.call('Runtime.evaluate',{expression:'Promise.race([document.fonts.ready.then(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))),new Promise(r=>setTimeout(r,1500))])',awaitPromise:true});
-      await sleep(150);
+      if(options.waitFor){
+        const selector=JSON.stringify(options.waitFor.selector),text=JSON.stringify(options.waitFor.text??null);
+        const expression=`(()=>{let matches;try{matches=document.querySelectorAll(${selector})}catch{return{invalidSelector:true}}const expected=${text};return{ready:[...matches].some(element=>{const rect=element.getBoundingClientRect(),style=getComputedStyle(element);return rect.width>0&&rect.height>0&&style.visibility!=='hidden'&&style.display!=='none'&&(expected===null||(element.textContent||'').trim()===expected)})}})()`;
+        while(true){
+          const observed=await cdp.call('Runtime.evaluate',{expression,returnByValue:true});
+          if(observed.result?.value?.invalidSelector)throw new Error('The requested DOM ready condition contains an invalid CSS selector.');
+          if(observed.exceptionDetails)throw new Error('The requested DOM ready condition could not be observed in the browser.');
+          if(observed.result?.value?.ready){awaitingCondition=false;break;}
+          if(timedOut)throw new Error('Browser visual validation timed out before the requested DOM ready condition was observed.');await sleep(25);
+        }
+      }else await sleep(150);
       const observed=await cdp.call('Runtime.evaluate',{expression:inspectionScript,returnByValue:true});
       if(!observed.result?.value)throw new Error('The prototype did not expose a readable document.');
       const layout=await cdp.call('Page.getLayoutMetrics');
