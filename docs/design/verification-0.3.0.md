@@ -41,4 +41,4 @@
 
 从安装缓存启动全新真实stdio服务，返回version0.3.0、33工具、editor=source、projectFormat=2；没有旧图层工具或model.ts/codex.ts/editor.ts/editor.css/document.md旧文件。清单、runtime、panel、React vendor、WASM逐字节匹配已验证包，未调用模型推理。runtime SHA256为02242ccf55e4a495fe851bb733cfd074d6d71c3a9ef04aefafbf2de72b772a74，panel为f0611373ad2afd6b2b1354b30c314632e1d25ce52707d57f347c34a9b7b540d1。
 
-当前聊天旧MCP进程、安装缓存和原生面板加载分别确认，不能用缓存验证冒充原生已切换。目标状态工具当前返回paused，未标记complete；用户最新已要求继续Motion研究，当前按该消息推进研究，但目标自动循环需由应用控制恢复。
+随后通过当前聊天真实 Design MCP 调用 design_get_capabilities，也读回version0.3.0、editor=source、projectFormat=2，说明模型工具已切到新版。原生MCP App界面的完整操作仍需另验，不能用工具版本或开发预览替代。目标状态工具当前返回paused，未标记complete；用户最新已要求继续Motion研究，当前按该消息推进研究，但目标自动循环需由应用控制恢复。
