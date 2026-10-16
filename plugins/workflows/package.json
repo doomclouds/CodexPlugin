@@ -1,6 +1,6 @@
 {
   "name": "@codex-plugin/workflows",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -12,17 +12,24 @@
     "smoke": "node scripts/smoke.mjs && node --experimental-strip-types --test --test-concurrency=4 tests/*.test.ts",
     "smoke:host": "node scripts/host-loader-smoke.mjs",
     "smoke:real": "node --experimental-strip-types scripts/structured-real-smoke.ts --real-workers",
-    "prototype": "node prototypes/serve.mjs"
+    "prototype": "node prototypes/serve.mjs",
+    "prototype:rendering": "node --experimental-strip-types scripts/rendering-preview.ts"
   },
   "dependencies": {
+    "@antv/x6": "3.1.8",
     "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "1.32.1",
+    "elkjs": "0.12.0",
     "proper-lockfile": "4.1.2",
+    "tslib": "2.8.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@antv/g6": "5.1.1",
+    "@antv/util": "3.3.11",
     "@types/node": "24.19.2",
     "@types/proper-lockfile": "4.1.4",
+    "acorn": "8.19.0",
     "esbuild": "0.28.2",
     "typescript": "5.9.3"
   },

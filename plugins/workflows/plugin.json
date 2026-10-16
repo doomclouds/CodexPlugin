@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "workflows",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Structured workflows with one compiled execution graph, durable node instances, native Codex workers, and checkpoint recovery.",
   "license": "MIT",
   "extensions": {

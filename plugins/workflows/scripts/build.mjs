@@ -18,6 +18,16 @@ const built = await build({
 });
 await rm(path.join(pluginRoot, "runtime", "script-worker.js"), { force: true });
 
+const layoutBuild = await build({
+  absWorkingDir: pluginRoot,
+  entryPoints: ["prototypes/graph-layout-worker.ts"],
+  bundle: true, platform: "browser", format: "iife", target: "es2022",
+  // ELK's bundled adapter must export its in-process worker inside our real Worker.
+  // GWT still receives the real global object; no browser globals are mutated.
+  define: { self: "undefined", global: "globalThis" },
+  supported: { "template-literal": false },
+  minify: true, write: false, metafile: true,
+});
 const uiBuild = await build({
   absWorkingDir: pluginRoot,
   entryPoints: ["prototypes/app-bridge.ts"],
@@ -26,12 +36,15 @@ const uiBuild = await build({
   format: "iife",
   target: "es2022",
   minify: true,
+  define: { __WORKFLOW_LAYOUT_WORKER__: JSON.stringify(layoutBuild.outputFiles[0].text) },
+  supported: { "template-literal": false },
   write: false,
   metafile: true,
 });
 await writeFile(path.join(pluginRoot, "runtime", "launcher.mjs"), await readFile(path.join(pluginRoot, "src", "launcher.mjs")));
 const canvasTexture = await readFile(path.join(pluginRoot, "assets", "workflow-canvas.png"));
 const panelFragment = (await readFile(path.join(pluginRoot, "prototypes", "workflow-panel.html"), "utf8")).replaceAll("\r\n", "\n").replaceAll("../assets/workflow-canvas.png", `data:image/png;base64,${canvasTexture.toString("base64")}`);
+const graphStyles = await readFile(path.join(pluginRoot, "prototypes", "graph.css"), "utf8");
 const iconSource = (await readFile(path.join(pluginRoot, "prototypes", "icons.css"), "utf8")).replaceAll("\r\n", "\n");
 const iconPaths = [...new Set([...iconSource.matchAll(/\.\.\/assets\/icons\/([a-z0-9-]+\.svg)/g)].map(match => match[1]))];
 let iconStyles = iconSource;
@@ -40,10 +53,10 @@ for (const filename of iconPaths) {
   iconStyles = iconStyles.replaceAll(`../assets/icons/${filename}`, `data:image/svg+xml;base64,${bytes.toString("base64")}`);
 }
 const bridge = uiBuild.outputFiles[0].text.replaceAll("</script", "<\\/script");
-await writeFile(path.join(pluginRoot, "runtime", "panel.html"), `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workflows</title><style>:root{color-scheme:light dark}body{margin:0}</style></head><body>${panelFragment}<style>${iconStyles}</style><script>${bridge}</script></body></html>`);
+await writeFile(path.join(pluginRoot, "runtime", "panel.html"), `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workflows</title><style>:root{color-scheme:light dark}body{margin:0}</style></head><body>${panelFragment}<style>${iconStyles}\n${graphStyles}</style><script>${bridge}</script></body></html>`);
 
 const packageDirectories = new Set();
-for (const input of [...Object.keys(built.metafile.inputs), ...Object.keys(uiBuild.metafile.inputs)]) {
+for (const input of [...Object.keys(built.metafile.inputs), ...Object.keys(uiBuild.metafile.inputs), ...Object.keys(layoutBuild.metafile.inputs)]) {
   const normalized = input.replaceAll("\\", "/");
   const start = normalized.lastIndexOf("node_modules/");
   if (start < 0) continue;

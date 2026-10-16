@@ -30,7 +30,7 @@ function result(value: unknown): CallToolResult {
 }
 function errorResult(error: unknown): CallToolResult { return { content: [{ type: "text", text: (error instanceof Error ? error.message : String(error)).slice(0, 8000) }], isError: true }; }
 export function createServer(engine: WorkflowEngine, options: { projects?: ProjectsProvider } = {}) {
-  const server = new McpServer({ name: "workflows", version: "0.10.0", icons });
+  const server = new McpServer({ name: "workflows", version: "0.11.0", icons });
   const html = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const projects = options.projects ?? new CodexProjectsProvider();
   const protocol = server.server, original = protocol.setRequestHandler, set = original.bind(protocol);
@@ -38,7 +38,7 @@ export function createServer(engine: WorkflowEngine, options: { projects?: Proje
     if (!Object.is(schema, ListToolsRequestSchema)) return set(schema, handler);
     set(schema, async (request, extra) => { const catalog = await handler(request, extra) as ListToolsResult; return { ...catalog, tools: catalog.tools.map(tool => tool.name === "workflow_open_panel" ? { ...tool, icons } : tool) }; });
   };
-  registerAppTool(server, "workflow_open_panel", { title: "Workflows", description: "Open the project workflow panel. Execution is available directly through tools; no UI scripting is required.", inputSchema: {}, annotations: readOnly, _meta: { ui: { resourceUri: panelUri }, "openai/ui": { entrypoints: [{ type: "thread" }] } } }, async () => result({ version: "0.10.0", format: "structured-v1" }));
+  registerAppTool(server, "workflow_open_panel", { title: "Workflows", description: "Open the project workflow panel. Execution is available directly through tools; no UI scripting is required.", inputSchema: {}, annotations: readOnly, _meta: { ui: { resourceUri: panelUri }, "openai/ui": { entrypoints: [{ type: "thread" }] } } }, async () => result({ version: "0.11.0", format: "structured-v1" }));
   protocol.setRequestHandler = original;
   registerAppResource(server, "Workflows", panelUri, { mimeType: RESOURCE_MIME_TYPE, icons }, async () => ({ contents: [{ uri: panelUri, mimeType: RESOURCE_MIME_TYPE, text: html, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] } }, "openai/ui": { availableDisplayModes: ["fullscreen"] } } }] }));
   function tool<S extends z.ZodRawShape>(name: string, description: string, shape: S, handler: (input: z.infer<z.ZodObject<S>>) => unknown | Promise<unknown>, writes = false, destructive = false) {

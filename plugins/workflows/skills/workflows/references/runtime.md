@@ -1,4 +1,4 @@
-# Workflows 0.10.0 接口与定义
+# Workflows 0.11.0 接口与定义
 
 唯一协议为结构化 JSON；不接受 JavaScript `script`、旧 taskId 或旧数据格式。需要 Node.js >= 22.15.0 及内置 node:sqlite。先调用 capabilities，以当前连接真实返回为准。
 

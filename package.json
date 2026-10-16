@@ -22,6 +22,7 @@
     "test:portability": "node --test scripts/tests/portability.test.mjs"
   },
   "devDependencies": {
-    "acorn": "8.19.0"
+    "acorn": "8.19.0",
+    "parse5": "8.0.1"
   }
 }

@@ -4,6 +4,7 @@ import { builtinModules } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "acorn";
+import { parseFragment } from "parse5";
 
 // This checks concrete Markdown/HTML references, JSON inheritance, and literal JS imports.
 // Text and quoted-string scans are not an evaluator for arbitrary computed JavaScript paths.
@@ -110,15 +111,35 @@ function markdownReferences(text) {
   return links;
 }
 
-function htmlReferences(text) {
+function htmlReferences(text, depth = 0) {
   const links = [];
-  for (const tag of text.matchAll(/<[a-z][^>]*>/gi)) {
-    for (const match of tag[0].matchAll(/\b(href|src|srcset)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
-      const value = htmlDecode(match[2] ?? match[3] ?? match[4]);
-      const destinations = match[1].toLowerCase() === "srcset" && !/^data:/i.test(value) ? value.split(",").map(part => part.trim().split(/\s+/)[0]) : [value];
-      for (const destination of destinations) if (destination) links.push({ destination, offset: tag.index + match.index, kind: "html" });
+  // HTML raw-text elements must be parsed as HTML. A JS comparison such as a<b
+  // is not an opening tag whose attributes extend to a later `.href = value`.
+  function visit(node) {
+    for (const attr of node.attrs ?? []) {
+      if (!["href", "src", "srcset"].includes(attr.name)) continue;
+      const value = attr.value;
+      const location = node.sourceCodeLocation?.attrs?.[attr.prefix ? `${attr.prefix}:${attr.name}` : attr.name];
+      const destinations = attr.name === "srcset" && !/^data:/i.test(value) ? value.split(",").map(part => part.trim().split(/\s+/)[0]) : [value];
+      for (const destination of destinations) if (destination) links.push({ destination, offset: location?.startOffset ?? node.sourceCodeLocation?.startOffset ?? 0, kind: "html" });
     }
+    if (node.tagName === "script" && depth < 4) {
+      const type = node.attrs?.find(attr => attr.name === "type")?.value ?? "";
+      if (["", "module", "text/javascript", "application/javascript"].includes(type)) {
+        const start = node.sourceCodeLocation?.startTag?.endOffset, end = node.sourceCodeLocation?.endTag?.startOffset;
+        if (start !== undefined && end !== undefined) {
+          const source = text.slice(start, end), imports = literalImports(source, false);
+          for (const link of imports.links) links.push({ ...link, offset: start + link.offset });
+          for (const literal of imports.literals) if (/^\s*<(?:[a-z]|!doctype)/i.test(literal.value)) {
+            for (const link of htmlReferences(literal.value, depth + 1)) links.push({ ...link, offset: start + literal.offset });
+          }
+        }
+      }
+    }
+    for (const child of node.childNodes ?? []) visit(child);
+    if (node.content) visit(node.content);
   }
+  visit(parseFragment(text, { sourceCodeLocationInfo: true }));
   return links;
 }
 

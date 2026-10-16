@@ -1,6 +1,8 @@
 import type { WorkflowDefinition, DefinitionPlan } from "../src/definition.ts";
-import { elapsedLabel, escapeHtml, renderWorkflowGraph, statusLabels } from "./panel-graph.ts";
-import type { GraphProjection } from "./panel-graph.ts";
+import { elapsedLabel, escapeHtml, statusLabels } from "./panel-graph.ts";
+import { WorkflowGraphCanvas } from "./graph-renderer.ts";
+import type { CanvasInput } from "./graph-types.ts";
+import type { StructuredProjection as GraphProjection } from "../src/structured-projection.ts";
 import type { StructuredRun, NodeInstance, StructuredAttempt, StructuredDefinitionRecord } from "../src/structured-types.ts";
 export type { NodeInstance } from "../src/structured-types.ts";
 import { readParameters, renderParameterFields } from "./panel-parameters.ts";
@@ -105,6 +107,12 @@ export interface PanelState {
     error: string;
     settings?: ExecutionSettingsResponse;
 }
+/** Execution progress and scope changes retain the same viewport identity. */
+export function panelCanvasInput(state: Pick<PanelState,"run"|"template"|"projection">, selectedNodeId: string | undefined, collapsed: ReadonlySet<string>): CanvasInput {
+    const plan=state.projection??state.run?.compiled.plan??state.template?.plan;
+    const identity=state.run?`run:${state.run.id}:${state.run.definitionHash}`:state.template?`definition:${state.template.id}:${state.template.revision}`:"empty";
+    return {...(plan?{plan}:{}),...(state.projection?{projection:state.projection}:{}),...(selectedNodeId?{selectedNodeId}:{}),collapsed:new Set(collapsed),identity};
+}
 export interface HostStyleEffects {
     theme: (theme: "light" | "dark") => void;
     variables: (variables: Record<string, string | undefined>) => void;
@@ -192,6 +200,7 @@ export class WorkflowPanelController {
     private requestedProject = "";
     private scopeInstanceId: string | undefined;
     private historyInFlight=false;
+    private connectionError:string|undefined;
     private readonly callTool: ToolCaller;
     private readonly changed: () => void;
     private readonly schedule: (callback: () => void, ms: number) => () => void;
@@ -200,8 +209,16 @@ export class WorkflowPanelController {
     get input(): WorkflowRun | TemplateDefinition | undefined { return this.state.run ?? this.state.template; }
     async request(name: string, args: Record<string, unknown> = {}): Promise<Record<string, unknown>> { return toolPayload(await this.callTool(name, args)); }
     connecting(): void { this.state.connection = "connecting"; this.changed(); }
-    disconnected(error: unknown): void { if (this.closed)
-        return; this.state.connection = "degraded"; this.state.error = `连接异常：${message(error)}`; this.changed(); }
+    disconnected(error: unknown): void {
+        if(this.closed)return;this.state.connection="degraded";
+        const next=`连接异常：${message(error)}`;
+        if(!this.state.error||this.state.error===this.connectionError)this.state.error=next;
+        this.connectionError=next;this.changed();
+    }
+    private clearConnectionError():void{
+        if(this.connectionError!==undefined&&this.state.error===this.connectionError)this.state.error="";
+        this.connectionError=undefined;
+    }
     setProjectPath(value: string): void { this.requestedProject = value; }
     receive(response: ToolResponse): void { try {
         const data = toolPayload(response);
@@ -234,7 +251,7 @@ export class WorkflowPanelController {
         return; this.connecting(); try {
         await this.refreshProjects();
         if (!this.closed) {
-            this.state.connection = "connected";
+            this.state.connection = "connected";this.clearConnectionError();
             await Promise.allSettled([this.refreshLibrary(), this.refreshRuns()]);
             this.stopTimer?.();
             this.stopTimer = this.schedule(() => { void this.refresh(); }, 2000);
@@ -330,8 +347,8 @@ export class WorkflowPanelController {
             if (!this.closed && generation === this.generation)
                 this.accept(data);
         }
-        if (!this.closed) {
-            this.state.connection = "connected";
+        if (!this.closed && (id || this.state.connection === "connected")) {
+            this.state.connection = "connected";if(id)this.clearConnectionError();
             this.changed();
         }
     }
@@ -343,22 +360,31 @@ export class WorkflowPanelController {
         this.pollInFlight = false;
     } }
     async selectScope(instanceId?: string): Promise<void> { this.generation++; this.scopeInstanceId = instanceId; await this.refresh(); }
-    async mutate(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> { if (this.state.connection !== "connected" || !this.state.project)
-        throw new Error("请先连接当前项目"); if (this.state.busy)
-        throw new Error("操作处理中"); this.state.busy = true; this.state.error = ""; const generation = this.generation; this.changed(); try {
-        const data = await this.request(name, args);
-        if (data.run && generation === this.generation)
-            this.accept(data);
-        return data;
-    }
-    catch (error) {
-        this.state.error = `操作未确认：${message(error)}。请刷新核对；不会自动重复发送。`;
-        throw error;
-    }
-    finally {
-        this.state.busy = false;
+    async mutate(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+        if(this.state.connection!=="connected"||!this.state.project)throw new Error("请先连接当前项目");
+        if(this.state.busy)throw new Error("操作处理中");
+        this.state.busy=true;this.state.error="";
+        const generation=this.generation,scope=this.scopeInstanceId,selectedRun=this.state.selectedRun;
         this.changed();
-    } }
+        try{
+            const data=await this.request(name,args);
+            if(data.run&&generation===this.generation){
+                const returned=parseRun(data.run);
+                if(scope&&returned.id===selectedRun&&(data.projection as GraphProjection|undefined)?.scopeInstanceId!==scope){
+                    // The mutation is already accepted. Read its scoped snapshot without resending it.
+                    try{
+                        const scoped=await this.request("workflow_get_run",{id:returned.id,scopeInstanceId:scope});
+                        if(!this.closed&&generation===this.generation)this.accept(scoped);
+                    }catch(error){
+                        if(!this.closed&&generation===this.generation)this.disconnected(new Error(`操作已受理，所选范围暂无法同步：${message(error)}。保留当前范围，刷新后核对；不会重复发送操作。`));
+                    }
+                }else this.accept(data);
+            }
+            return data;
+        }catch(error){
+            this.state.error=`操作未确认：${message(error)}。请刷新核对；不会自动重复发送。`;throw error;
+        }finally{this.state.busy=false;this.changed();}
+    }
     async createPreview(args?: Record<string, unknown>): Promise<void> { const input = this.input, project = this.state.project; if (!input || !project)
         return; const selected = this.state.template, source = "sourceDefinition" in input ? input.sourceDefinition : selected ? { id: selected.id, revision: selected.revision } : undefined; await this.mutate("workflow_preview", { projectPath: project.path, definition: input.definition, args: args ?? input.args ?? {}, grants: input.grants ?? {}, limits: input.limits ?? {}, ...(source ? { sourceDefinition: source } : {}) }); await this.refreshRuns(); }
     async perform(action: "start" | "pause" | "resume" | "stop", extra: Record<string, unknown> = {}): Promise<void> { if (action === "start" && (!this.state.run || this.state.run.status === "completed"))
@@ -384,9 +410,14 @@ export class NodeProcessReader {
     private readonly call: ToolCaller;
     private readonly receive: (target: ProcessTarget, process: NodeProcess) => void;
     private readonly reject: (error: unknown) => void;
-    constructor(call: ToolCaller, receive: (target: ProcessTarget, process: NodeProcess) => void, reject: (error: unknown) => void) { this.call = call; this.receive = receive; this.reject = reject; }
-    select(target?: ProcessTarget): void { this.generation++; this.target = target; this.active = undefined; this.queued = false; if (target)
-        void this.refresh(); }
+    private readonly selected: ((target:ProcessTarget)=>void)|undefined;
+    constructor(call: ToolCaller, receive: (target: ProcessTarget, process: NodeProcess) => void, reject: (error: unknown) => void, selected?:(target:ProcessTarget)=>void) { this.call = call; this.receive = receive; this.reject = reject;this.selected=selected; }
+    select(target?: ProcessTarget): void {
+        const previous=this.target;
+        const changed=!!target&&(!previous||target.runId!==previous.runId||target.instanceId!==previous.instanceId||target.attemptId!==previous.attemptId||target.detail!==previous.detail);
+        this.generation++;this.target=target;this.active=undefined;this.queued=false;
+        if(target){if(changed)this.selected?.(target);void this.refresh();}
+    }
     async refresh(): Promise<void> {
         const target = this.target;
         if (!target)
@@ -445,8 +476,9 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const show = (selector: string, visible: boolean): void => { element(selector).hidden = !visible; };
     const parameters = element<HTMLDialogElement>("#wf-parameters-dialog"), settings = element<HTMLDialogElement>("#wf-settings-dialog"), history = element<HTMLDialogElement>("#wf-history-dialog"), recovery = element<HTMLDialogElement>("#wf-recovery-dialog"), deletion = element<HTMLDialogElement>("#wf-delete-dialog"), waitDialog = element<HTMLDialogElement>("#wf-wait-dialog"), applyDialog = element<HTMLDialogElement>("#wf-apply-dialog");
     const lifecycle = new Map<HTMLDialogElement, PanelDialogLifecycle>([parameters, settings, history, recovery, deletion, waitDialog, applyDialog].map(dialog => [dialog, new PanelDialogLifecycle(dialog)]));
-    let parameterOwner = "", parameterSignature = "", parameterStale = false, settingsRevision = -1, settingsStale = false, selectedNodeId: string | undefined, selectedInstanceId: string | undefined, selectedAttemptId: string | undefined, processDetail: "brief" | "developer" = "brief", processOwner = "", processBusy = false, zoom = 1, scopeInstanceId: string | undefined;
+    let parameterOwner = "", parameterSignature = "", parameterStale = false, settingsRevision = -1, settingsStale = false, selectedNodeId: string | undefined, selectedInstanceId: string | undefined, selectedAttemptId: string | undefined, processDetail: "brief" | "developer" = "brief", processOwner = "", processBusy = false, scopeInstanceId: string | undefined;
     const collapsed = new Set<string>();
+    let mounted=true,canvasRequest=0,canvasErrorEpoch=0;
     let instanceLimit=50,attemptHistory:InstanceAttempt[]=[],attemptNextOffset:number|undefined,attemptTotal=0;
     let recoveryValue: RecoveryPreview | undefined, recoveryTarget: string | undefined, deleteValue: DeletionPreview | undefined, deleteTarget: {
         kind: "run" | "definition";
@@ -479,18 +511,39 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
         setText("#wf-process-developer", JSON.stringify(process.logs ?? process.events ?? process, null, 2));
     }
     else
-        setHtml("#wf-process-body", renderNodeProcess(process)); }, error => { processBusy = false; setText("#wf-process-loading", `读取失败：${message(error)}`); show("#wf-process-refresh", true); });
+        setHtml("#wf-process-body", renderNodeProcess(process)); }, error => { processBusy = false; setText("#wf-process-loading", `读取失败：${message(error)}`); show("#wf-process-refresh", true); }, target=>{
+        const instance=controller.state.run?.instances.find(instance=>instance.id===target.instanceId);
+        const subject=instance?instanceDisplayLabel(instance):target.instanceId;
+        processBusy=true;setHtml("#wf-process-body","");setText("#wf-process-developer","");
+        setText("#wf-process-loading",`正在读取 ${subject} · ${target.attemptId?`尝试 ${target.attemptId.slice(-8)}`:"当前尝试"} · ${target.detail==="developer"?"开发日志":"简要过程"}…`);
+    });
     const controller = new WorkflowPanelController(callTool, () => render());
+    const canvas = new WorkflowGraphCanvas(element("#wf-panel-overview"), {
+        onSelectNode: (id:string) => selectGraphNode(id),
+        onToggleCollapse: (id:string) => { if(collapsed.has(id))collapsed.delete(id);else collapsed.add(id);render(); },
+        onZoom: (scale:number) => { if(mounted)setText("#wf-zoom-value",`${scale*100<1?(scale*100).toFixed(1):Math.round(scale*100)}%`); },
+        onError: (error:string) => { if(!mounted)return;canvasErrorEpoch++;setText("#wf-graph-status",error);show("#wf-graph-status",!!error); },
+    });
+    function selectGraphNode(id:string):void{
+        if(!mounted)return;selectedNodeId=id;instanceLimit=50;
+        const projected=controller.state.projection?.nodes.find(node=>node.id===id);
+        const instances=controller.state.run?.instances.filter(instance=>projected?[...projected.instanceIds,...projected.scopeInstanceIds??[],...projected.availableScopeInstanceIds??[]].includes(instance.id):instance.nodeId===id)??[];
+        selectProcess(projected?.currentInstanceId??(instances.length===1?instances[0]!.id:undefined));render();
+    }
     function activeInstance(): NodeInstance | undefined { return controller.state.run?.instances.find(instance => instance.id === selectedInstanceId); }
     function instanceLabel(instance:NodeInstance):string{return instanceDisplayLabel(instance);}
-    function selectProcess(instanceId?: string): void { const run = controller.state.run; selectedInstanceId = instanceId; selectedAttemptId = undefined;attemptHistory=[];attemptNextOffset=undefined;attemptTotal=0; processOwner = run?.id ?? ""; if (!run || !instanceId) {
+    function selectProcess(instanceId?: string): void { const run = controller.state.run;
+        const changed=selectedInstanceId!==instanceId||selectedAttemptId!==undefined||processOwner!==(run?.id??"");
+        selectedInstanceId=instanceId;selectedAttemptId=undefined;processOwner=run?.id??"";
+        if(changed){attemptHistory=[];attemptNextOffset=undefined;attemptTotal=0;setHtml("#wf-process-body","");setText("#wf-process-developer","");}
+        if (!run || !instanceId) {
         processBusy = false;
         processReader.select();
         setHtml("#wf-process-body",controller.state.projection?.nodes.find(node=>node.id===selectedNodeId)?.inScope===false?'<p class="wf-muted">当前范围外。切回整个运行查看该节点的记录。</p>':'<p class="wf-muted">请选择一个执行实例查看记录；尚未激活的节点没有执行日志。</p>');
         setText("#wf-process-loading", "");
         renderSidebar();
         return;
-    } processBusy = true; setText("#wf-process-loading", "正在读取节点过程…"); setText("#wf-process-developer", ""); processReader.select({ runId: run.id, instanceId, detail: processDetail }); renderSidebar(); }
+    } processBusy = true; processReader.select({ runId: run.id, instanceId, detail: processDetail }); renderSidebar(); }
     function renderSidebar(): void {
         const run = controller.state.run;
         if (!selectedNodeId) {
@@ -524,6 +577,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
             tab.setAttribute("aria-selected", String(tab.dataset.processView === processDetail));
     }
     function render(): void {
+        if(!mounted)return;
         const state = controller.state, run = state.run, input = controller.input, connected = state.connection === "connected" && !!state.project;
         scopeInstanceId=state.projection?.scopeInstanceId;
         if(element("#wf-scope-select")!==root.ownerDocument.activeElement)scopeOptions();
@@ -537,6 +591,8 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
         const options = `<option value="">选择工作流</option>${state.runs.length ? `<optgroup label="当前项目运行">${state.runs.map(item => `<option value="run:${escapeHtml(item.id)}">${escapeHtml(item.definition?.name ?? item.name ?? item.id)} · ${escapeHtml(statusLabels[item.status] ?? item.status)}</option>`).join("")}</optgroup>` : ""}${state.templates.length ? `<optgroup label="工作流库">${state.templates.map(item => `<option value="definition:${escapeHtml(item.id)}">${escapeHtml(item.name)} · 库中定义</option>`).join("")}</optgroup>` : ""}`;
         if (select !== root.ownerDocument.activeElement) { if (select.innerHTML !== options) select.innerHTML = options; if(select.value!==selected) select.value=selected; }
         select.disabled = !connected || state.busy;
+        element<HTMLButtonElement>("#wf-locate-selected").disabled=!selectedNodeId;
+        element<HTMLButtonElement>("#wf-locate-current").disabled=!state.projection?.nodes.some(node=>node.inScope&&["running","waiting","ready"].includes(node.status));
         setText("#wf-execution-status", run ? statusLabels[run.status] ?? run.status : input ? "尚未创建运行" : "待选择");
         setText("#wf-start-label", run?.status === "completed" ? "再次运行" : "启动");
         const preparing=run?.status==="preparing"?run.preparation?.find(stage=>stage.status==="running"):undefined;
@@ -569,24 +625,15 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
             show("#wf-settings-error", true);
             element<HTMLButtonElement>("#wf-save-settings").disabled = true;
         }
-        const graph = element("#wf-panel-overview"), focus = root.ownerDocument.activeElement as HTMLElement | null, focused = focus?.closest<HTMLButtonElement>("[data-node]")?.dataset.node;
-        const markup = renderWorkflowGraph(state.projection ?? run?.compiled.plan ?? state.template?.plan, state.projection, selectedNodeId, collapsed);
-        if (graph.innerHTML !== markup) {
-            graph.innerHTML = markup;
-            if (focused) {
-                for (const node of Array.from(graph.querySelectorAll<HTMLButtonElement>("[data-node]")))
-                    if (node.dataset.node === focused) {
-                        node.focus({ preventScroll: true });
-                        break;
-                    }
-            }
-        }
         if (processOwner && processOwner !== run?.id) {
-            selectedNodeId = undefined;
-            selectedInstanceId = undefined;
-            selectedAttemptId = undefined;
-            processReader.select();
+            selectedNodeId = undefined; selectedInstanceId = undefined; selectedAttemptId = undefined; processReader.select();
         }
+        const request=++canvasRequest,errorEpoch=canvasErrorEpoch;
+        void canvas.update(panelCanvasInput(state,selectedNodeId,collapsed)).then(()=>{
+            if(mounted&&request===canvasRequest&&errorEpoch===canvasErrorEpoch){setText("#wf-graph-status","");show("#wf-graph-status",false);}
+        }).catch((error:unknown)=>{
+            if(!mounted||request!==canvasRequest)return;setText("#wf-graph-status",`图形暂时无法显示：${message(error)}`);show("#wf-graph-status",true);
+        });
         renderSidebar();
     }
     function scopeOptions(): void {
@@ -612,23 +659,6 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
                 close(dialog);
             return;
         }
-        if (button.dataset.collapse) {
-            const id = button.dataset.collapse;
-            if (collapsed.has(id))
-                collapsed.delete(id);
-            else
-                collapsed.add(id);
-            render();
-            return;
-        }
-        if (button.dataset.node) {
-            selectedNodeId = button.dataset.node;instanceLimit=50;
-            const projected = controller.state.projection?.nodes.find(node => node.id === selectedNodeId);
-            const instances = controller.state.run?.instances.filter(instance => projected ? [...projected.instanceIds, ...projected.scopeInstanceIds ?? [], ...projected.availableScopeInstanceIds ?? []].includes(instance.id) : instance.nodeId === selectedNodeId) ?? [];
-            selectProcess(projected?.currentInstanceId ?? (instances.length === 1 ? instances[0]!.id : undefined));
-            render();
-            return;
-        }
         if (button.dataset.historyRun) {
             void perform(async () => { await controller.selectRun(button.dataset.historyRun!); close(history); });
             return;
@@ -644,8 +674,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
             renderSidebar();
             return;
         }
-        const handlers: Record<string, () => void> = { "wf-refresh": () => void perform(async () => { await controller.refreshProjects(); await Promise.all([controller.refreshRuns(), controller.refreshLibrary(), controller.refresh()]); }), "wf-reconnect": () => void controller.connected(), "wf-parameters-toggle": () => openParameters(), "wf-settings-toggle": () => void openSettings(), "wf-history-toggle": () => void openHistory(),"wf-history-more":()=>void perform(async()=>{await controller.moreRuns();if(history.open)renderHistoryList();}),"wf-instances-more":()=>{instanceLimit+=50;renderSidebar();},"wf-attempts-more":()=>{const run=controller.state.run;if(run&&selectedInstanceId&&attemptNextOffset!==undefined)processReader.select({runId:run.id,instanceId:selectedInstanceId,...(selectedAttemptId?{attemptId:selectedAttemptId}:{}),detail:processDetail,attemptOffset:attemptNextOffset});}, "wf-more-toggle": () => { const menu = element("#wf-more-menu"); menu.hidden = !menu.hidden; button.setAttribute("aria-expanded", String(!menu.hidden)); }, "wf-save-definition": () => void saveDefinition(), "wf-delete-toggle": () => void openDeletion(), "wf-delete-confirm": () => void confirmDeletion(), "wf-recovery-confirm": () => void confirmRecovery(), "wf-retry-node": () => void recoveryPreview(selectedInstanceId), "wf-process-close": () => { selectedNodeId = undefined; processReader.select(); render(); }, "wf-process-refresh": () => void processReader.refresh(), "wf-wait-toggle": () => openWait(), "wf-apply-toggle": () => void applyChanges(), "wf-apply-confirm": () => void confirmApply(), "wf-zoom-in": () => setZoom(zoom + .1), "wf-zoom-out": () => setZoom(zoom - .1), "wf-zoom-reset": () => setZoom(1), "wf-zoom-fit": () => { const plane = root.querySelector<HTMLElement>(".wf-graph-plane"), viewport = element("#wf-graph-scroll"); if (plane)
-                setZoom(Math.min(1, (viewport.clientWidth - 40) / plane.offsetWidth)); }, "wf-scope-refresh": () => scopeOptions() };
+        const handlers: Record<string, () => void> = { "wf-refresh": () => void perform(async () => { await controller.refreshProjects(); await Promise.all([controller.refreshRuns(), controller.refreshLibrary(), controller.refresh()]); }), "wf-reconnect": () => void controller.connected(), "wf-parameters-toggle": () => openParameters(), "wf-settings-toggle": () => void openSettings(), "wf-history-toggle": () => void openHistory(),"wf-history-more":()=>void perform(async()=>{await controller.moreRuns();if(history.open)renderHistoryList();}),"wf-instances-more":()=>{instanceLimit+=50;renderSidebar();},"wf-attempts-more":()=>{const run=controller.state.run;if(run&&selectedInstanceId&&attemptNextOffset!==undefined)processReader.select({runId:run.id,instanceId:selectedInstanceId,...(selectedAttemptId?{attemptId:selectedAttemptId}:{}),detail:processDetail,attemptOffset:attemptNextOffset});}, "wf-more-toggle": () => { const menu = element("#wf-more-menu"); menu.hidden = !menu.hidden; button.setAttribute("aria-expanded", String(!menu.hidden)); }, "wf-save-definition": () => void saveDefinition(), "wf-delete-toggle": () => void openDeletion(), "wf-delete-confirm": () => void confirmDeletion(), "wf-recovery-confirm": () => void confirmRecovery(), "wf-retry-node": () => void recoveryPreview(selectedInstanceId), "wf-process-close": () => { selectedNodeId = undefined; processReader.select(); render(); }, "wf-process-refresh": () => void processReader.refresh(), "wf-wait-toggle": () => openWait(), "wf-apply-toggle": () => void applyChanges(), "wf-apply-confirm": () => void confirmApply(), "wf-locate-selected":()=>canvas.focusSelected(),"wf-locate-current":()=>canvas.focusCurrent(),"wf-zoom-in": () => canvas.zoomBy(.1), "wf-zoom-out": () => canvas.zoomBy(-.1), "wf-zoom-reset": () => canvas.resetZoom(), "wf-zoom-fit": () => canvas.fit(), "wf-scope-refresh": () => scopeOptions() };
         handlers[button.id]?.();
         if (button.id !== "wf-more-toggle")
             show("#wf-more-menu", false);
@@ -666,7 +695,6 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     } });
     element<HTMLSelectElement>("#wf-scope-select").addEventListener("focus", scopeOptions);
     element<HTMLSelectElement>("#wf-scope-select").addEventListener("change", event => { scopeInstanceId = (event.target as HTMLSelectElement).value || undefined; void controller.selectScope(scopeInstanceId); });
-    function setZoom(value: number): void { zoom = Math.min(1.8, Math.max(.3, value)); element("#wf-panel-overview").style.setProperty("zoom", String(zoom)); setText("#wf-zoom-value", `${Math.round(zoom * 100)}%`); }
     function openParameters(): void { const input = controller.input; if (!input)
         return; parameterOwner = owner(); parameterSignature = panelInputSignature(input); parameterStale = false; setHtml("#wf-parameter-fields", renderParameterFields(input.definition.parameters ?? [], input.args)); show("#wf-parameter-error", false); setText("#wf-parameter-status", controller.state.run ? "修改参数会创建独立新运行；当前运行保持原参数。" : "保存参数会创建当前项目的运行预览，点击启动后执行。"); open(parameters); render(); }
     element<HTMLFormElement>("#wf-parameters-form").addEventListener("submit", event => { event.preventDefault(); if (parameterStale)
@@ -812,7 +840,7 @@ export function mountPanel(root: HTMLElement, callTool: ToolCaller): WorkflowPan
     const processTimer = setInterval(() => { if (selectedInstanceId && controller.state.connection === "connected" && !processBusy)
         void processReader.refresh(); }, 2500);
     const originalTeardown = controller.teardown.bind(controller);
-    controller.teardown = async () => { clearInterval(processTimer); processReader.select(); await originalTeardown(); };
+    controller.teardown = async () => { mounted=false;canvasRequest++;clearInterval(processTimer);processReader.select();canvas.dispose();await originalTeardown(); };
     render();
     return controller;
 }

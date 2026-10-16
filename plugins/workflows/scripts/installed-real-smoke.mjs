@@ -18,7 +18,7 @@ const started = Date.now();
 const call = async (name, args = {}) => { const response = await client.callTool({ name, arguments: args }); assert.notEqual(response.isError, true, JSON.stringify(response.content)); return response.structuredContent; };
 try {
   await client.connect(transport);
-  assert.equal((await call("workflow_get_capabilities")).version, "0.10.0");
+  assert.equal((await call("workflow_get_capabilities")).version, JSON.parse(await readFile(path.join(plugin, "plugin.json"), "utf8")).version);
   const schema = { type: "object", properties: { observed: { type: "integer" } }, required: ["observed"], additionalProperties: false };
   const reader = id => ({ id, type: "agent", task: "Use a native file or shell tool to read facts.txt in this directory. Report the integer actually observed as observed. Do not modify files, use network, or answer from assumptions.", mode: "read", model: "gpt-6-luna", reasoningEffort: "max", schema, accept: { type: "object", properties: { observed: { const: 42 } }, required: ["observed"] } });
   const definition = { schemaVersion: 1, name: "installed-native-proof", description: "Disposable compiled MCP runtime verification using real workers", steps: [

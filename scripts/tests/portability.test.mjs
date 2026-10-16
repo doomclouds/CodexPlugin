@@ -182,6 +182,22 @@ test("literal imports and URL assets are checked, while quoted code-generation t
   await put("src/index.js", 'const run = () => require("../../outside.js"); export { run };\n');
   assert.ok((await check()).issues.some(issue => issue.code === "file-reference-escapes-plugin"));
 });
+test("HTML parsing distinguishes JavaScript comparisons from actual resource attributes", async t => {
+  const { put, check } = await fixture(t);
+  await put("runtime/panel.html", '<!doctype html><script>function scan(a,b){if(a<b){const link=document.createElement("a");link.href=b;link.download="file";}}</script>');
+  assert.deepEqual((await check()).issues, []);
+  await put("runtime/panel.html", '<script>const markup = \'<img src="missing.png">\';</script>');
+  assert.ok((await check()).issues.some(issue => issue.code === "missing-file-reference"));
+  await put("runtime/panel.html", '<script>import "./missing.js";</script>');
+  assert.ok((await check()).issues.some(issue => issue.code === "missing-file-reference"));
+});
+test("HTML raw-text scanning preserves template, SVG and malformed-tag resource checks", async t => {
+  const { put, check } = await fixture(t);
+  for (const markup of ['<template><img src="missing.png"></template>', '<svg><image href="missing.png"/></svg>', '<img src="missing.png" @click="handler">', '<script src="missing.js"></script>']) {
+    await put("runtime/panel.html", markup);
+    assert.ok((await check()).issues.some(issue => issue.code === "missing-file-reference"), markup);
+  }
+});
 
 test("global skill dependencies are rejected, including symbolic environment paths", async t => {
   const { put, check } = await fixture(t);

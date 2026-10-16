@@ -168,3 +168,19 @@ test("JSON byte budgets cover total serialized parameters, outputs, UTF-8 and es
   assert.equal(evaluateExpression({ op: "length", args: [{ ref: "steps.first.output" }] }, largeEnvironment), 300000);
   assert.throws(() => evaluateExpression({ op: "concat", args: [{ ref: "steps.first.output" }, { ref: "steps.second.output" }] }, largeEnvironment), /limit/);
 });
+
+test("branch display labels compile into edge metadata without changing control topology", () => {
+  const labelled = definition([
+    { id: "choose", type: "choice", cases: [{ id: "internalCase", label: "存在更新", when: true, steps: [] }], default: [] },
+    { id: "checks", type: "parallel", policy: "fail-fast", branches: [{ id: "internalCode", label: "代码检查", steps: [transform("code")] }, { id: "internalDocs", steps: [transform("docs")] }] },
+  ]);
+  const compiled = compileDefinition(labelled);
+  assert.equal(compiled.plan.edges.find(edge => edge.kind === "case")?.label, "存在更新");
+  assert.equal(compiled.plan.edges.find(edge => edge.kind === "branch" && edge.branchId === "internalCode")?.label, "代码检查");
+  assert.equal(compiled.plan.edges.find(edge => edge.kind === "branch" && edge.branchId === "internalDocs")?.label, undefined);
+  assert.ok(compiled.plan.edges.filter(edge => ["join", "default", "sequence"].includes(edge.kind)).every(edge => edge.label === undefined));
+  const plain = JSON.parse(JSON.stringify(labelled), (key, value: unknown) => key === "label" ? undefined : value);
+  const withoutDisplay = (plan: typeof compiled.plan) => plan.edges.map(({ label: _label, ...edge }) => edge);
+  assert.deepEqual(withoutDisplay(compiled.plan), withoutDisplay(compileDefinition(plain).plan));
+  assert.equal(compileDefinition(compiled.definition).hash, compiled.hash);
+});

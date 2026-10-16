@@ -38996,7 +38996,7 @@ import { readFileSync } from "node:fs";
 // src/catalog.ts
 function getCapabilities() {
   return {
-    version: "0.10.0",
+    version: "0.11.0",
     format: "structured-v1",
     schemaVersion: 1,
     definition: { singleSource: true, legacyScripts: false, migration: false, nodeTypes: ["agent", "command", "transform", "wait", "subflow", "expand", "choice", "parallel", "map", "repeat", "try"], expressions: "pure-json", evaluation: "no-eval", immutableRunDefinition: true, exactSubflowRevisions: true },
@@ -39005,7 +39005,7 @@ function getCapabilities() {
     control: { pause: "settle-active-activities", stop: "interrupt-and-await-exit", retry: "explicit-instance-and-dependent-invalidation", loopInstances: true, parallelPolicy: ["fail-fast", "all-settled"], boundedLoops: true },
     projection: { authority: "backend-compiled-plan-and-instance-events", scopedInstances: true, branchEvidence: true, dynamicExpansion: "committed-before-execution", logs: "bounded-per-instance-and-attempt" },
     library: { immutableRevisions: true, crossProjectReuse: "new-run-in-target-project", defaultTemplates: false, deletion: "definitions-all-revisions-and-associated-runs-or-one-run", originalProjectDeleted: false },
-    ui: { transport: "mcp-app", entrypoints: ["thread"], project: "fixed-caller-project", scriptEditor: false, theme: "host" },
+    ui: { transport: "mcp-app", entrypoints: ["thread"], project: "fixed-caller-project", scriptEditor: false, theme: "host", rendering: { canvas: "x6", layout: "elk-layered", layoutExecution: "browser-worker", stateUpdates: "incremental", miniMap: true, executionEditing: false } },
     runtimeLifecycle: { transport: "stdio", scope: "host-connection", globalSingleton: false, parentExitCleanup: true, processId: process.pid, parentProcessId: process.ppid }
   };
 }
@@ -40053,8 +40053,8 @@ function compileDefinition(input2) {
   const definition2 = validateDefinition(input2);
   const plan = { version: 1, nodes: [], edges: [] };
   let edgeSequence = 0;
-  function edge(from, to, kind, branchId) {
-    plan.edges.push({ id: `edge:${++edgeSequence}`, from, to, kind, ...branchId === void 0 ? {} : { branchId } });
+  function edge(from, to, kind, branchId, label) {
+    plan.edges.push({ id: `edge:${++edgeSequence}`, from, to, kind, ...branchId === void 0 ? {} : { branchId }, ...label === void 0 ? {} : { label } });
   }
   function sequence(steps, context) {
     let entry;
@@ -40067,15 +40067,15 @@ function compileDefinition(input2) {
       if (!["choice", "parallel", "map", "repeat", "try", "subflow", "expand"].includes(node2.type)) continue;
       const joinId = `$join:${node2.id}`;
       plan.nodes.push({ id: joinId, type: "join", label: "\u6C47\u5408", parentId: node2.id });
-      const branch2 = (steps2, kind, branchId, from = node2.id, to = joinId) => {
+      const branch2 = (steps2, kind, branchId, from = node2.id, to = joinId, label) => {
         const nested = sequence(steps2, { parentId: node2.id, branchId });
-        edge(from, nested.entry ?? to, kind, branchId);
+        edge(from, nested.entry ?? to, kind, branchId, label);
         if (nested.exit) edge(nested.exit, to, kind === "body" ? "repeat" : "join", branchId);
       };
       if (node2.type === "choice") {
-        for (const item of node2.cases) branch2(item.steps, "case", item.id);
+        for (const item of node2.cases) branch2(item.steps, "case", item.id, node2.id, joinId, item.label);
         branch2(node2.default, "default", "default");
-      } else if (node2.type === "parallel") for (const item of node2.branches) branch2(item.steps, "branch", item.id);
+      } else if (node2.type === "parallel") for (const item of node2.branches) branch2(item.steps, "branch", item.id, node2.id, joinId, item.label);
       else if (node2.type === "map" || node2.type === "repeat") {
         branch2(node2.steps, "body", "body", node2.id, node2.id);
         edge(node2.id, joinId, "exit");
@@ -40120,7 +40120,7 @@ function errorResult(error62) {
   return { content: [{ type: "text", text: (error62 instanceof Error ? error62.message : String(error62)).slice(0, 8e3) }], isError: true };
 }
 function createServer(engine2, options = {}) {
-  const server2 = new McpServer({ name: "workflows", version: "0.10.0", icons });
+  const server2 = new McpServer({ name: "workflows", version: "0.11.0", icons });
   const html = readFileSync(new URL("../runtime/panel.html", import.meta.url), "utf8");
   const projects = options.projects ?? new CodexProjectsProvider();
   const protocol = server2.server, original = protocol.setRequestHandler, set2 = original.bind(protocol);
@@ -40131,7 +40131,7 @@ function createServer(engine2, options = {}) {
       return { ...catalog, tools: catalog.tools.map((tool2) => tool2.name === "workflow_open_panel" ? { ...tool2, icons } : tool2) };
     });
   };
-  K3(server2, "workflow_open_panel", { title: "Workflows", description: "Open the project workflow panel. Execution is available directly through tools; no UI scripting is required.", inputSchema: {}, annotations: readOnly, _meta: { ui: { resourceUri: panelUri }, "openai/ui": { entrypoints: [{ type: "thread" }] } } }, async () => result({ version: "0.10.0", format: "structured-v1" }));
+  K3(server2, "workflow_open_panel", { title: "Workflows", description: "Open the project workflow panel. Execution is available directly through tools; no UI scripting is required.", inputSchema: {}, annotations: readOnly, _meta: { ui: { resourceUri: panelUri }, "openai/ui": { entrypoints: [{ type: "thread" }] } } }, async () => result({ version: "0.11.0", format: "structured-v1" }));
   protocol.setRequestHandler = original;
   N3(server2, "Workflows", panelUri, { mimeType: p, icons }, async () => ({ contents: [{ uri: panelUri, mimeType: p, text: html, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] } }, "openai/ui": { availableDisplayModes: ["fullscreen"] } } }] }));
   function tool(name, description, shape, handler, writes = false, destructive = false) {
@@ -41333,7 +41333,7 @@ var CodexAdapter = class {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.10.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.11.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const config2 = object7(await session.request("config/read", { cwd })).config;
       return await this.modelEnvironment(session, config2, cwd);
@@ -41497,7 +41497,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex command startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.10.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.11.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       clearTimeout(startupTimer);
       startupTimer = void 0;
@@ -41831,7 +41831,7 @@ var CodexAdapter = class {
     if (signal.aborted) abort();
     startupTimer = setTimeout(() => session.fail(timeoutError("Codex worker startup timed out.")), this.options.startupTimeoutMs);
     try {
-      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.10.0" }, capabilities: { experimentalApi: true } });
+      await session.request("initialize", { clientInfo: { name: "codex_workflows", title: "Codex Workflows", version: "0.11.0" }, capabilities: { experimentalApi: true } });
       session.send({ method: "initialized", params: {} });
       const effective = object7(object7(await session.request("config/read", { cwd: request.cwd })).config);
       if (request.model !== void 0 || request.reasoningEffort !== void 0) {

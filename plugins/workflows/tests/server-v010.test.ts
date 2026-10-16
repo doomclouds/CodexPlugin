@@ -30,12 +30,12 @@ test("MCP catalogue advertises only the structured protocol and fullscreen proje
     assert.equal(catalogue.tools.find(tool => tool.name === "workflow_delete")?.annotations?.destructiveHint, true);
     assert.ok(names.includes("workflow_pause")); assert.ok(names.includes("workflow_retry_node")); assert.ok(names.includes("workflow_resolve_wait")); assert.ok(names.includes("workflow_resolve_unknown"));
     assert.ok(!names.includes("workflow_update")); assert.ok(!names.includes("workflow_panel_lease"));
-    const capabilities = await f.data("workflow_get_capabilities"); assert.equal(capabilities.version, "0.10.0");
+    const capabilities = await f.data("workflow_get_capabilities"); assert.equal(capabilities.version, "0.11.0");
     const panel = await f.client.readResource({ uri: "ui://workflows/panel.html" });
     assert.deepEqual(panel.contents[0]?._meta?.["openai/ui"], { availableDisplayModes: ["fullscreen"] });
     const text = "text" in panel.contents[0]! ? panel.contents[0].text : "";
     assert.match(String(text), /wf-instance-select/); assert.match(String(text), /wf-parameters-dialog/);
-    assert.match(String(text), /0\.10\.0/);
+    assert.match(String(text), /0\.11\.0/);
 });
 test("strict tool schemas reject JavaScript and old execution arguments", async t => {
     const f = await fixture(t);

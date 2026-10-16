@@ -28,7 +28,7 @@ export type DefinitionNode = AgentNode | CommandNode | TransformNode | WaitNode 
 export interface WorkflowDefinition { schemaVersion: 1; name: string; description: string; parameters?: DefinitionParameter[]; steps: DefinitionNode[]; }
 export interface ExpressionEnvironment { args: JsonValue; steps: Record<string, { output?: JsonValue; status: string }>; item?: JsonValue; key?: JsonValue; iteration?: number; error?: JsonValue; state?: JsonValue; }
 export interface DefinitionPlanNode { id: string; type: DefinitionNode["type"] | "join"; label: string; parentId?: string; branchId?: string; }
-export interface DefinitionPlanEdge { id: string; from: string; to: string; kind: "sequence" | "case" | "default" | "branch" | "body" | "repeat" | "catch" | "finally" | "join" | "exit"; branchId?: string; }
+export interface DefinitionPlanEdge { id: string; from: string; to: string; kind: "sequence" | "case" | "default" | "branch" | "body" | "repeat" | "catch" | "finally" | "join" | "exit"; branchId?: string; label?: string; }
 export interface DefinitionPlan { version: 1; nodes: DefinitionPlanNode[]; edges: DefinitionPlanEdge[]; }
 export interface CompiledDefinition { definition: WorkflowDefinition; hash: string; plan: DefinitionPlan; }
 export interface DefinitionWalkContext { parentId?: string; branchId?: string; }
@@ -427,8 +427,8 @@ export function compileDefinition(input: unknown): CompiledDefinition {
   const definition = validateDefinition(input);
   const plan: DefinitionPlan = { version: 1, nodes: [], edges: [] };
   let edgeSequence = 0;
-  function edge(from: string, to: string, kind: DefinitionPlanEdge["kind"], branchId?: string): void {
-    plan.edges.push({ id: `edge:${++edgeSequence}`, from, to, kind, ...(branchId === undefined ? {} : { branchId }) });
+  function edge(from: string, to: string, kind: DefinitionPlanEdge["kind"], branchId?: string, label?: string): void {
+    plan.edges.push({ id: `edge:${++edgeSequence}`, from, to, kind, ...(branchId === undefined ? {} : { branchId }), ...(label === undefined ? {} : { label }) });
   }
   function sequence(steps: DefinitionNode[], context: DefinitionWalkContext): { entry?: string; exit?: string } {
     let entry: string | undefined; let previous: string | undefined;
@@ -440,13 +440,13 @@ export function compileDefinition(input: unknown): CompiledDefinition {
       if (!["choice", "parallel", "map", "repeat", "try", "subflow", "expand"].includes(node.type)) continue;
       const joinId = `$join:${node.id}`;
       plan.nodes.push({ id: joinId, type: "join", label: "汇合", parentId: node.id });
-      const branch = (steps: DefinitionNode[], kind: DefinitionPlanEdge["kind"], branchId: string, from = node.id, to = joinId): void => {
+      const branch = (steps: DefinitionNode[], kind: DefinitionPlanEdge["kind"], branchId: string, from = node.id, to = joinId, label?: string): void => {
         const nested = sequence(steps, { parentId: node.id, branchId });
-        edge(from, nested.entry ?? to, kind, branchId);
+        edge(from, nested.entry ?? to, kind, branchId, label);
         if (nested.exit) edge(nested.exit, to, kind === "body" ? "repeat" : "join", branchId);
       };
-      if (node.type === "choice") { for (const item of node.cases) branch(item.steps, "case", item.id); branch(node.default, "default", "default"); }
-      else if (node.type === "parallel") for (const item of node.branches) branch(item.steps, "branch", item.id);
+      if (node.type === "choice") { for (const item of node.cases) branch(item.steps, "case", item.id, node.id, joinId, item.label); branch(node.default, "default", "default"); }
+      else if (node.type === "parallel") for (const item of node.branches) branch(item.steps, "branch", item.id, node.id, joinId, item.label);
       else if (node.type === "map" || node.type === "repeat") { branch(node.steps, "body", "body", node.id, node.id); edge(node.id, joinId, "exit"); }
       else if (node.type === "try") {
         const final = node.finally ? sequence(node.finally, { parentId: node.id, branchId: "finally" }) : {};
