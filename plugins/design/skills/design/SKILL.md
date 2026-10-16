@@ -34,7 +34,7 @@ description: 使用本地 Design 插件创建和编辑真实 HTML、React、TSX�
 
 ## 设计系统、组件与素材
 
-只读取用户明确选择的源目录和资产。`design_code_import_directory` 新建源码项目；它不会执行工程、安装依赖或改原目录。
+只读取用户明确选择的源目录和资产。`design_code_import_directory` 新建源码项目并建立私有目录基线；不会执行工程、安装依赖或改原目录。当前项目需要连接已有目录时用 `design_code_connect_directory`，日常回读不重新导入项目。
 
 复用真实 React 组件时，用 `design_code_import_components` 显式指定根目录、组件入口/导出名、需要的 CSS、已有类型声明和用法。先看返回诊断和生成的项目内使用说明，再把实际组件和样式接入页面。**打包或登记成功仍需接入页面、编译、浏览器运行与视觉检查，才能称为接入成功。** 不猜 props、不以静态占位替代真实组件行为，也不承诺任意依赖或框架兼容。
 
@@ -52,7 +52,9 @@ description: 使用本地 Design 插件创建和编辑真实 HTML、React、TSX�
 
 代码工程用 `design_code_export` 输出自包含 HTML、源码 ZIP 或本机 Chromium 生成的 PNG/PDF。ZIP 保留原始源码、可运行原型和项目描述。下载能力不可用时，用 `design_code_save_export` 保存真实文件，以工具返回结果为准。
 
-用户明确指定目标目录后，`design_code_write_directory` 导出源码并检查同步清单、revision 与外部变化。发生冲突或部分写入时先核对实际文件，不覆盖未导入改动，也不盲目重试。重新导入目录会新建项目；合并到已有项目需读差异后按当前 hash/revision 更新。源码目录不等于已部署服务，源码 ZIP 也不意味着任意框架可以脱离其运行条件直接启动。
+连接目录先用 `design_code_compare_source` 读取实际两端 hash；按当前 revision 和看到的 `expectedDirectoryHashes` 显式拉取或写回所选文件。双方同文件变化必须停止，读取两端内容后再明确解决；不能只换 hash 重发。部分写入先用 `design_code_recheck_source` 重查已写/待处理项，不自动重试。私有目录与基线不进可分发项目；不会自动监听或执行原工程。
+
+用户明确指定其他目标目录后，`design_code_write_directory` 仍检查独立清单、revision 与外部变化，不覆盖无关文件。目录写入逐文件完成，外部编辑器不共享 Design 锁；不能声称全目录原子。项目撤销不会撤销原目录已落盘修改。源码目录不等于已部署服务，源码 ZIP 也不意味着任意框架可以脱离其运行条件直接启动。具体参数和恢复流程见 [代码项目参考](references/code-project.md)。
 
 ## 当前边界
 

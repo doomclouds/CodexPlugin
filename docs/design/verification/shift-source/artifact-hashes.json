@@ -1,0 +1,30 @@
+{
+  "projectId": "code_6f8bb512522c4341b566d893803de83a",
+  "revision": 11,
+  "artifacts": [
+    {
+      "kind": "desktop",
+      "bytes": 191895,
+      "sha256": "67606d18412c55b0a847b6c42e311ef271e32e714ec8be51a9b6a5a3048a9db0",
+      "width": 1440,
+      "height": 1102
+    },
+    {
+      "kind": "mobile",
+      "bytes": 76084,
+      "sha256": "1e0d63984ddc7e21767711ef40e35e02d6db898ee0fe7d15b64d80a76a596b4b",
+      "width": 390,
+      "height": 1161
+    },
+    {
+      "kind": "delivery",
+      "bytes": 408309,
+      "sha256": "98e91547eeda4182bcf3cb67bf12a9e79382e397cf6a00c1bbbf7324b67e7cb0"
+    },
+    {
+      "kind": "document",
+      "bytes": 643167,
+      "sha256": "2f50361903b63abba29e9679d717ee8b3fb1c4d983ee06434edba4f2ccda9e99"
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import type { CodeFile, CodePage, CodeProject, CodeProjectUpdate } from "../src/code-project.ts";
+import type { CodeFile, CodePage, CodeProject, CodeProjectUpdate, SourceStatus, SourceComparison } from "../src/code-project.ts";
 import { injectCodePageRuntimeLocation, resolveCodePage, resolveCodePageViewport } from "../src/code-pages.ts";
 import "./code-editor.css";
 
@@ -24,6 +24,9 @@ interface GenerationVerification { compiled: boolean; rendered: boolean; modelRe
 interface ProposalDraft { id: string; projectId: string; baseRevision: number; originJobId: string; status: "unverified"; requiresReview: true; stage: string; verification: GenerationVerification; createdAt: string; updatedAt: string; expiresAt: string; expired: boolean; resumable: boolean; captureCount: number; reviewPageIds: string[]; originStatus: string; lastError?: string }
 interface DraftDetails { draft: ProposalDraft; files: FileSummary[]; captures: { pageId: string; viewportId: string; width: number; height: number; sha256: string }[] }
 interface GenerationJob { id: string; projectId: string; baseRevision: number; status: "running" | "completed" | "failed" | "cancelled"; model?: string; changes?: CodeProjectUpdate; log: string[]; error?: string; verification: GenerationVerification; budgetMs?: number; reviewPageIds?: string[]; draft?: ProposalDraft }
+interface SourceSide { path: string; encoding: string; sha256: string; bytes: number; content?: string; binary?: boolean }
+interface SourceFileDifference { projectId: string; revision: number; file: string; projectFile: SourceSide | null; directoryFile: SourceSide | null; difference: SourceComparison["files"][number] }
+interface SourceDifferenceNotice { projectId: string; file: string; invalidated: boolean; reading: boolean; error?: string; detail?: string }
 
 const svgPaths: Record<string, string> = {
   plus: "M10 3v14M3 10h14", close: "M5 5l10 10M15 5L5 15", arrow: "M4 10h12M10 4l6 6-6 6", cursor: "M4 3l13 8-6 1-3 6z", play: "M6 3l11 7-11 7z", code: "M7 5l-5 5 5 5M13 5l5 5-5 5M12 2L8 18", file: "M4 2h8l4 4v12H4zM12 2v5h4", component: "M10 2l8 8-8 8-8-8zM6 6l8 8M14 6l-8 8", undo: "M7 4L3 8l4 4M3 8h9a5 5 0 010 10", redo: "M13 4l4 4-4 4M17 8H8a5 5 0 000 10", refresh: "M17 7a7 7 0 00-12-3L2 7M2 2v5h5M3 13a7 7 0 0012 3l3-3M18 18v-5h-5", download: "M10 2v11M6 9l4 4 4-4M3 14v4h14v-4", spark: "M10 2l2.5 5.5L18 10l-5.5 2.5L10 18l-2.5-5.5L2 10l5.5-2.5z", comment: "M3 3h14v11H9l-6 4z", check: "M3 10l5 5L17 5", fit: "M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4", minus: "M3 10h14", copy: "M7 7h10v11H7zM13 7V2H3v11h4", panelLeft: "M2 3h16v14H2zM7 3v14", panelRight: "M2 3h16v14H2zM13 3v14", desktop: "M2 3h16v11H2zM10 14v4M6 18h8", mobile: "M6 1h8v18H6zM9 16h2", image: "M3 3h14v14H3zM3 14l5-5 4 4 2-2 3 3M13 6h.01", save: "M3 2h12l3 3v13H3zM6 2v6h8V2M6 12h9v6", upload: "M10 14V3M6 7l4-4 4 4M3 13v5h14v-5", settings: "M3 5h14M3 10h14M3 15h14M7 3v4M13 8v4M8 13v4", trash: "M3 5h14M8 2h4l1 3M5 5l1 13h8l1-13M8 8v7M12 8v7",
@@ -80,6 +83,18 @@ export function mountCodeEditor(root: HTMLElement, bridge: CodeEditorBridge) {
   const jobs = new Map<string, GenerationJob>();
   const proposalDrafts = new Map<string, ProposalDraft[]>();
   const draftDetails = new Map<string, DraftDetails>();
+  const sourceStatuses = new Map<string, SourceStatus>();
+  const sourceComparisons = new Map<string, SourceComparison>();
+  const sourceSelections = new Map<string, Set<string>>();
+  const sourceBusy = new Set<string>();
+  let sourceDirectoryInput = "";
+  let sourceImportName = "导入的工程";
+  let sourceImportEntry = "";
+  let sourceImportStarting = false;
+  let sourceFileDifference: SourceFileDifference | undefined;
+  let sourceDifferenceNotice: SourceDifferenceNotice | undefined;
+  let sourceDifferenceSerial = 0;
+  let sourceError = "";
   const draftsLoaded = new Set<string>();
   const draftsLoading = new Set<string>();
   const appliedJobs = new Set<string>();
@@ -165,7 +180,9 @@ export function mountCodeEditor(root: HTMLElement, bridge: CodeEditorBridge) {
     if (changed) {
       drafts.clear(); selection = undefined; activePageId = next.defaultPageId; activeFile = resolveCodePage(next).entry; viewportId = "all"; activeViewport = "";
       aiStatus = ""; aiError = false; fallbackPrompt = "";
+      sourceDirectoryInput = ""; sourceError = ""; sourceFileDifference = undefined; sourceDifferenceNotice = undefined; sourceDifferenceSerial++;
     }
+    if (revisionChanged) { sourceComparisons.delete(next.id); sourceSelections.delete(next.id); }
     if (revisionChanged || force) { previewCache.clear(); preview = undefined; canvasSignature = ""; pendingLocation = undefined; }
     project = next;
     if (!next.pages.some(page => page.id === activePageId)) { activePageId = next.defaultPageId; selection = undefined; }
@@ -409,6 +426,7 @@ export function mountCodeEditor(root: HTMLElement, bridge: CodeEditorBridge) {
   }
   function renderFilePanel() {
     const panel = root.querySelector<HTMLElement>("[data-left-panel]"); if (!panel) return;
+    if (leftTab === "source") { panel.classList.remove("flush"); panel.innerHTML = sourceMarkup(); return; }
     if (!project) { panel.innerHTML = '<div class="dc-empty">项目的真实源文件和组件会显示在这里。</div>'; return; }
     panel.classList.toggle("flush", leftTab === "files");
     if (leftTab === "files") {
@@ -422,6 +440,96 @@ export function mountCodeEditor(root: HTMLElement, bridge: CodeEditorBridge) {
       panel.innerHTML = `<div class="dc-section"><div class="dc-section-title">真实组件</div>${project.designSystem.components.map(component => `<article class="dc-component">${icon("component")}<div><strong>${escape(component.name)}</strong><p>${escape(component.path)}${component.exportName ? ` · ${escape(component.exportName)}` : ""}</p>${component.usage ? `<p>${escape(component.usage)}</p>` : ""}</div><button data-file="${escape(component.path)}" title="打开组件源码">${icon("code")}</button></article>`).join("") || '<p class="dc-hint">组件来自项目源文件。让当前聊天建立或扩展组件库，组件代码会保留在交付包中。</p>'}</div><div class="dc-section"><div class="dc-section-title">设计令牌</div>${Object.entries(project.designSystem.tokens).map(([key, value]) => `<div class="dc-token-row"><span class="dc-swatch" data-swatch="${escape(value)}"></span><code>${escape(key)}</code><span title="${escape(value)}">${escape(value)}</span></div>`).join("") || '<p class="dc-hint">尚未登记设计令牌。CSS 和组件仍以项目源码为准。</p>'}</div>${project.designSystem.notes ? `<div class="dc-section"><div class="dc-section-title">系统说明</div><p class="dc-hint">${escape(project.designSystem.notes)}</p></div>` : ""}`;
       for (const node of Array.from(panel.querySelectorAll<HTMLElement>("[data-swatch]"))) if (CSS.supports("color", node.dataset.swatch!)) node.style.backgroundColor = node.dataset.swatch!;
     }
+  }
+  function sourceMarkup() {
+    const projectId = project?.id; const link = projectId ? sourceStatuses.get(projectId) : undefined; const comparison = projectId ? sourceComparisons.get(projectId) : undefined;
+    const busy = projectId ? sourceBusy.has(projectId) : false; const selected = projectId ? sourceSelections.get(projectId) ?? new Set<string>() : new Set<string>();
+    const stale = comparison && comparison.revision !== project?.revision; const operation = link?.operation; const needsRecheck = operation && ["writing", "partial"].includes(operation.phase);
+    const changed = comparison?.files.filter(file => file.status !== "synced") ?? [];
+    const pathInput = `<label class="dc-field">本地源码目录<input data-source-directory value="${escape(sourceDirectoryInput)}" placeholder="输入明确选择的绝对目录" autocomplete="off"/></label>`;
+    if (!project) return `<div class="dc-section-title">导入本地工程</div><p class="dc-hint">只读导入 HTML / React 源码，建立私有基线。不会安装依赖、执行脚本或改原目录。</p>${pathInput}<label class="dc-field">项目名称<input data-source-import-name value="${escape(sourceImportName)}"/></label><label class="dc-field">入口（可选）<input data-source-import-entry value="${escape(sourceImportEntry)}" placeholder="index.html 或 src/main.tsx"/></label><button class="primary" data-action="source-import"${sourceImportStarting ? " disabled" : ""}>${sourceImportStarting ? "正在只读导入…" : "只读导入工程"}</button>${sourceError ? `<p role="alert" class="dc-source-error">${escape(sourceError)}</p>` : ""}`;
+    if (!link) return `<div class="dc-section-title">源码目录</div><p class="dc-hint">先读取当前项目的私有连接信息。</p><button data-action="source-status">读取连接信息</button>${sourceError ? `<p class="dc-source-error" role="alert">${escape(sourceError)}</p>` : ""}<button data-action="source-import-view">导入本地工程</button>`;
+    return `<div class="dc-section-title">源码目录</div>${link?.connected ? `<code class="dc-source-location">${escape(link.directory)}</code><p class="dc-hint">基线保存在本机项目记录。仅点击检查或同步时读取目录，不自动监听。</p><div class="dc-actions-wrap"><button data-action="source-compare"${busy ? " disabled" : ""}>检查变化</button>${operation ? `<button data-action="source-recheck"${busy ? " disabled" : ""}>重查写入记录</button>` : ""}</div>` : `<p class="dc-hint">连接明确选择的工程，只有字节一致的文件作为共同基线；其他差异需审阅。</p>${pathInput}<button data-action="source-connect"${busy ? " disabled" : ""}>只读连接目录</button>`}
+      ${operation ? `<details class="dc-source-operation"${needsRecheck ? " open" : ""}><summary>${needsRecheck ? "写入未完成 · 必须重查" : operation.phase === "completed" ? "上次写入已完成" : "写入现场已重查"}</summary><p>修订 ${operation.revision} · ${operation.steps.filter(step => step.done).length}/${operation.steps.length} 项已核对</p>${operation.error ? `<p>${escape(operation.error)}</p>` : ""}${operation.steps.map(step => `<code>${step.done ? "已完成" : "待处理"} · ${escape(step.path)}</code>`).join("")}<p>重查只读现场，不会自动重试写入。</p></details>` : ""}
+      ${sourceError ? `<p class="dc-source-error" role="alert">${escape(sourceError)}</p>` : ""}${comparison ? `<p class="dc-hint">比较修订 ${comparison.revision} · ${escape(new Date(comparison.checkedAt).toLocaleTimeString("zh-CN"))}${stale ? " · 已过期，请重新检查" : ""}<br>${changed.length} 项变化，${comparison.files.length - changed.length} 项一致</p>${changed.map(file => `<div class="dc-source-change${file.status === "conflict" ? " conflict" : ""}"><label><input type="checkbox" data-source-select="${escape(file.path)}"${selected.has(file.path) ? " checked" : ""}${busy || stale || file.status === "conflict" ? " disabled" : ""}/><span><code>${escape(file.path)}</code><small>${({ project: "仅项目变化 · 可写回目录", directory: "仅目录变化 · 可拉取", conflict: "双方变化或路径不可用 · 不会覆盖", synced: "一致" })[file.status]}</small></span></label>${file.issue ? `<p>${escape(file.issue)}</p>` : `<button data-source-diff="${escape(file.path)}">查看对照</button>`}</div>`).join("")}${changed.length ? `<div class="dc-actions-wrap"><button data-action="source-pull"${busy || stale || needsRecheck || !selected.size ? " disabled" : ""}>拉取所选</button><button class="primary" data-action="source-push"${busy || stale || needsRecheck || !selected.size ? " disabled" : ""}>写回所选</button></div>` : '<p class="dc-hint">受管文件与基线一致。</p>'}` : ""}
+      ${(comparison?.ignored ?? link?.ignored)?.length ? `<details class="dc-source-operation"><summary>未纳入源码（最多显示 200 项）</summary>${(comparison?.ignored ?? link?.ignored ?? []).map(item => `<p><code>${escape(item.path)}</code><br>${escape(item.reason)}</p>`).join("")}</details>` : ""}<p class="dc-hint">删除仍须保持页面、组件及评论引用有效；复杂改动交给当前聊天协调源码。检测到外部新保存时会中止旧操作；写入期间避免同时编辑相同文件。</p><button data-action="source-import-view">导入另一个工程</button>`;
+  }
+  async function readSourceStatus(projectId = project?.id) {
+    if (!projectId) return;
+    try { const result = await call("design_code_source_status", { projectId }); if (result.projectId === projectId) sourceStatuses.set(projectId, result as unknown as SourceStatus); }
+    catch (error) { if (project?.id === projectId) sourceError = message(error); }
+    if (project?.id === projectId && leftTab === "source") renderFilePanel();
+  }
+  async function sourceAction(kind: "compare" | "recheck" | "connect" | "pull" | "push") {
+    if (!project) return; const projectId = project.id; if (sourceBusy.has(projectId)) return;
+    if (["connect", "pull", "push"].includes(kind) && hasDirty()) { notify("请先保存或协调源码草稿，再同步目录。", true); return; }
+    const comparison = sourceComparisons.get(projectId); const paths = [...(sourceSelections.get(projectId) ?? [])];
+    if ((kind === "pull" || kind === "push") && (!comparison || comparison.revision !== project.revision || !paths.length)) { notify("请重新检查差异并选择文件。", true); return; }
+    sourceBusy.add(projectId); sourceError = ""; renderFilePanel();
+    try {
+      const args = kind === "connect" ? { projectId, expectedRevision: project.revision, directory: sourceDirectoryInput.trim() } : kind === "pull" || kind === "push" ? { projectId, expectedRevision: project.revision, paths, expectedDirectoryHashes: Object.fromEntries(comparison!.files.filter(file => paths.includes(file.path)).map(file => [file.path, file.directoryHash])) } : { projectId };
+      const result = await call(`design_code_${kind === "compare" ? "compare_source" : kind === "recheck" ? "recheck_source" : kind === "connect" ? "connect_directory" : `${kind}_source`}`, args);
+      if (kind === "pull") { const next = await hydrate(result); if (next) accept(next); }
+      if (Array.isArray(result.files) && result.projectId === projectId) sourceComparisons.set(projectId, result as unknown as SourceComparison);
+      else if (result.connected !== undefined) sourceStatuses.set(projectId, result as unknown as SourceStatus);
+      if (kind === "push" || kind === "connect" || kind === "pull") { sourceSelections.delete(projectId); const fresh = await call("design_code_compare_source", { projectId }); if (fresh.projectId === projectId) sourceComparisons.set(projectId, fresh as unknown as SourceComparison); }
+      await readSourceStatus(projectId);
+    } catch (error) {
+      const details = error && typeof error === "object" && "details" in error ? error.details as Record<string, unknown> | undefined : undefined;
+      if (project?.id === projectId) sourceError = `${message(error)}${details?.partial ? `\n目录：${details.directory ?? ""}\n已写：${Array.isArray(details.filesWritten) ? details.filesWritten.join("、") || "无" : "见记录"}\n待处理：${Array.isArray(details.pendingFiles) ? details.pendingFiles.join("、") : "请重查"}` : ""}`;
+      await readSourceStatus(projectId);
+    } finally { sourceBusy.delete(projectId); if (project?.id === projectId) renderFilePanel(); }
+  }
+  async function openSourceDifference(file: string) {
+    if (!project) return; const projectId = project.id; const serial = ++sourceDifferenceSerial; const initialModal = modal;
+    const replacing = modal === "source-difference" && sourceFileDifference?.projectId === projectId && sourceFileDifference.file === file;
+    sourceDifferenceNotice = { projectId, file, invalidated: true, reading: true };
+    if (replacing) render();
+    try {
+      const result = await call("design_code_read_source_difference", { projectId, file });
+      if (disposed || serial !== sourceDifferenceSerial || project?.id !== projectId || result.projectId !== projectId || result.file !== file) return;
+      if (replacing && modal !== "source-difference") return;
+      if (!replacing && modal !== initialModal) return;
+      sourceFileDifference = result as unknown as SourceFileDifference;
+      sourceDifferenceNotice = { projectId, file, invalidated: result.revision !== project.revision, reading: false, ...(result.revision !== project.revision ? { error: "项目修订已更新，请刷新项目后重新读取两端。" } : {}) };
+      modal = "source-difference"; render();
+    } catch (error) {
+      if (disposed || serial !== sourceDifferenceSerial || project?.id !== projectId) return;
+      sourceDifferenceNotice = { projectId, file, invalidated: true, reading: false, error: "未能读取两端最新内容。请检查连接后重新读取，旧快照仍不可应用。", detail: message(error) };
+      if (modal === "source-difference" && sourceFileDifference?.projectId === projectId && sourceFileDifference.file === file) render();
+      else notify("未能读取源码对照，请检查连接后重试。", true);
+    }
+  }
+  async function resolveSourceDifference(choice: "project" | "directory") {
+    const difference = sourceFileDifference; if (!project || !difference || difference.projectId !== project.id || difference.revision !== project.revision) { notify("对照已过期，请重新读取。", true); return; }
+    if (sourceDifferenceNotice?.projectId === difference.projectId && sourceDifferenceNotice.file === difference.file && (sourceDifferenceNotice.invalidated || sourceDifferenceNotice.reading)) return;
+    if (["writing", "partial"].includes(sourceStatuses.get(difference.projectId)?.operation?.phase ?? "")) { notify("写入记录尚未核对，请先关闭对照并重查写入记录。", true); return; }
+    if (hasDirty()) { notify("请先保存或协调源码草稿，再解决目录冲突。", true); return; }
+    const projectId = project.id; if (sourceBusy.has(projectId)) return; sourceBusy.add(projectId); render();
+    try {
+      const result = await call("design_code_resolve_source", { projectId, expectedRevision: difference.revision, file: difference.file, expectedProjectHash: difference.difference.projectHash, expectedDirectoryHash: difference.difference.directoryHash, choice });
+      if (result.project) { const next = await hydrate(result); if (next) accept(next); }
+      if (project?.id === projectId && modal === "source-difference" && sourceFileDifference === difference) { modal = ""; sourceFileDifference = undefined; sourceDifferenceNotice = undefined; sourceError = ""; render(); }
+      const fresh = await call("design_code_compare_source", { projectId }); sourceComparisons.set(projectId, fresh as unknown as SourceComparison); await readSourceStatus(projectId);
+    } catch (error) {
+      if (project?.id === projectId && modal === "source-difference" && sourceFileDifference === difference) {
+        const detail = message(error); const changed = /conflict|hash|revision|changed|stale/i.test(detail);
+        const partial = error && typeof error === "object" && "details" in error && error.details && typeof error.details === "object" && "partial" in error.details && error.details.partial === true;
+        sourceDifferenceNotice = { projectId, file: difference.file, invalidated: true, reading: false, error: partial ? "写入已停止，可能已有文件落盘。请先关闭对照，在源码目录中重查写入记录，再核对两端实际内容。" : changed ? "检测到两端内容或项目修订变化，操作已停止。请重新读取两端，核对实际结果后再选择版本。" : "本次操作未完成。请重新读取两端并核对后继续，旧快照已停用。", detail };
+      }
+      await readSourceStatus(projectId);
+    }
+    finally { sourceBusy.delete(projectId); if (project?.id === projectId) { if (modal === "source-difference" && sourceFileDifference === difference) render(); else renderFilePanel(); } }
+  }
+  async function importSourceDirectory() {
+    if (sourceImportStarting) return;
+    if (hasDirty()) { notify("请先保存或协调源码草稿，再导入工程。", true); return; }
+    sourceImportStarting = true; render();
+    try {
+      const serial = loadSerial; const result = await call("design_code_import_directory", { name: sourceImportName.trim() || "导入的工程", directory: sourceDirectoryInput.trim(), ...(sourceImportEntry.trim() ? { entry: sourceImportEntry.trim() } : {}) });
+      if (disposed || serial !== loadSerial) return; const next = await hydrate(result, true); if (next) { modal = ""; leftTab = "source"; accept(next, true); await readSourceStatus(next.id); }
+    } catch (error) { sourceError = message(error); notify(sourceError, true); renderFilePanel(); }
+    finally { sourceImportStarting = false; if (!disposed) render(); }
   }
   function stageHeader() {
     const defaultPageId = project?.defaultPageId;
@@ -439,7 +547,7 @@ export function mountCodeEditor(root: HTMLElement, bridge: CodeEditorBridge) {
     if (signature === canvasSignature && stage.childElementCount) { transform(); return; }
     canvasSignature = signature; frames = [];
     if (!project) {
-      stage.innerHTML = `<div class="dc-welcome"><div class="dc-welcome-art" aria-hidden="true"></div><h1>让设计真正运行起来</h1><p>从 HTML 或 React 原型开始。效果、交互与源代码在同一个项目中持续迭代。</p><button class="primary" data-action="new">${icon("plus")}创建第一个原型</button></div>`; return;
+      stage.innerHTML = `<div class="dc-welcome"><div class="dc-welcome-art" aria-hidden="true"></div><h1>让设计真正运行起来</h1><p>从 HTML 或 React 原型开始。效果、交互与源代码在同一个项目中持续迭代。</p><button class="primary" data-action="new">${icon("plus")}创建第一个原型</button><button data-action="source-import-view">导入本地工程</button></div>`; return;
     }
     stage.innerHTML = `<div class="dc-world"></div><div class="dc-loading"${compiling ? "" : " hidden"}>正在编译真实源代码…</div>${preview?.diagnostics.length ? `<div class="dc-diagnostic-bar${preview.diagnostics.some(item => item.level === "error") ? " error" : ""}" role="status">${preview.diagnostics.slice(0, 6).map(item => `<p>${escape(item.file ? `${item.file}${item.line ? `:${item.line}` : ""} · ` : "")}${escape(item.message)}</p>`).join("")}</div>` : ""}<div class="dc-canvas-toolbar" role="toolbar" aria-label="原型模式"><button data-mode="select" class="${mode === "select" ? "active" : ""}" title="选择元素并定位源码">${icon("cursor")}选择</button><button data-mode="preview" class="${mode === "preview" ? "active" : ""}" title="运行真实原型交互">${icon("play")}交互</button><div class="dc-divider"></div><button data-action="ai" title="让当前聊天修改设计">${icon("spark")}AI 设计</button></div><div class="dc-zoom"><button data-action="zoom-out" aria-label="缩小">${icon("minus")}</button><button class="value" data-action="fit" title="适合视图">${Math.round(scale * 100)}%</button><button data-action="zoom-in" aria-label="放大">${icon("plus")}</button></div>`;
     const world = stage.querySelector<HTMLElement>(".dc-world")!;
@@ -589,8 +697,15 @@ export function mountCodeEditor(root: HTMLElement, bridge: CodeEditorBridge) {
     let content = "";
     if (modal === "new") content = `<h2>创建可运行原型</h2><p>项目保留真实源文件。你可以直接编辑代码，也可以由当前聊天持续生成和修改。</p><label class="dc-field">项目名称<input data-new-name value="${escape(newName)}" maxlength="200"/></label><div class="dc-template-grid"><button class="${template === "react" ? "active" : ""}" data-template="react"><strong>React 组件项目</strong><small>真实 JSX 组件、样式与交互逻辑，适合产品原型。</small></button><button class="${template === "html" ? "active" : ""}" data-template="html"><strong>HTML 项目</strong><small>HTML、CSS 和 JavaScript，适合页面与轻量交互。</small></button></div><div class="dc-modal-actions"><button data-action="close-modal">取消</button><button class="primary" data-action="create-project">创建项目</button></div>`;
     if (modal === "file") content = `<h2>添加源文件</h2><p>路径相对项目根目录。已有文件不会被覆盖。</p><label class="dc-field">文件路径<input data-new-file-path value="${escape(newFilePath)}" placeholder="src/components/Card.tsx"/></label><div class="dc-modal-actions"><button data-action="close-modal">取消</button><button class="primary" data-action="create-file">添加文件</button></div>`;
+    if (modal === "source-import") content = `<h2>只读导入本地工程</h2><p>建立独立项目和私有目录基线，不改源目录、不安装依赖或执行脚本。导入报告会显示未纳入的文件。</p><label class="dc-field">本地源码目录<input data-source-directory value="${escape(sourceDirectoryInput)}" placeholder="输入明确选择的绝对目录"/></label><label class="dc-field">项目名称<input data-source-import-name value="${escape(sourceImportName)}"/></label><label class="dc-field">入口（可选）<input data-source-import-entry value="${escape(sourceImportEntry)}" placeholder="index.html 或 src/main.tsx"/></label><div class="dc-modal-actions"><button data-action="close-modal">取消</button><button class="primary" data-action="source-import"${sourceImportStarting ? " disabled" : ""}>${sourceImportStarting ? "正在只读导入…" : "只读导入工程"}</button></div>`;
+    if (modal === "source-difference" && sourceFileDifference) {
+      const difference = sourceFileDifference; const notice = sourceDifferenceNotice?.projectId === difference.projectId && sourceDifferenceNotice.file === difference.file ? sourceDifferenceNotice : undefined;
+      const stale = !project || difference.projectId !== project.id || difference.revision !== project.revision; const busy = sourceBusy.has(difference.projectId); const needsRecheck = ["writing", "partial"].includes(sourceStatuses.get(difference.projectId)?.operation?.phase ?? ""); const blocked = stale || busy || needsRecheck || !!difference.difference.issue || !!notice?.invalidated || !!notice?.reading;
+      const side = (title: string, file: SourceSide | null) => `<section><strong>${title}</strong><p>${file ? `${file.bytes} 字节 · ${escape(file.sha256)}` : "此端不存在（选择此端会删除另一端文件）"}</p>${file?.content !== undefined ? `<textarea readonly aria-label="${title}源码">${escape(file.content)}</textarea>` : `<p>${file ? "二进制资产：按实际字节和 hash 比较，不转抄内容。" : "文件不存在"}</p>`}</section>`;
+      content = `<h2>源码对照</h2><code>${escape(difference.file)}</code><p>比较修订 ${difference.revision}${stale ? " · 已过期，请刷新项目后重新读取" : notice?.invalidated ? " · 旧快照已停用" : ""}。以下是读取时的两端内容；共同基线仅保存 hash。双方变更不会自动合并。选择版本将明确替换另一端，执行时还会重新核对两端 hash。</p>${needsRecheck && !notice?.error ? '<p class="dc-source-error" role="alert">写入记录尚未核对。请先关闭对照，在源码目录中重查写入记录；重新读取两端不会自动继续写入。</p>' : ""}${notice?.error ? `<div class="dc-source-error" role="alert"><strong>${escape(notice.error)}</strong>${notice.detail ? `<details><summary>技术详情</summary><p>${escape(notice.detail)}</p></details>` : ""}</div>` : ""}${notice?.reading ? '<p class="dc-hint" role="status">正在读取两端最新内容…</p>' : busy ? '<p class="dc-hint" role="status">正在核对并应用所选版本…</p>' : ""}<div class="dc-source-diff">${side("项目版本", difference.projectFile)}${side("目录版本", difference.directoryFile)}</div><div class="dc-modal-actions"><button data-action="close-modal">关闭</button><button data-action="source-refresh-difference"${busy || notice?.reading ? " disabled" : ""}>重新读取两端</button><button data-action="source-resolve-directory"${blocked ? " disabled" : ""}>采用目录版本 → 项目</button><button class="primary" data-action="source-resolve-project"${blocked ? " disabled" : ""}>采用项目版本 → 目录</button></div>`;
+    }
     if (modal === "export") content = `<h2>导出可运行设计</h2><p>导出读取已保存的修订 ${project?.revision ?? ""}。ZIP 保留全部源文件，HTML 保留真实页面导航；图片和 PDF 渲染所选页面与尺寸。</p><label class="dc-field">起始/渲染页面<select data-export-page>${project?.pages.map(page => `<option value="${escape(page.id)}"${page.id === exportPageId ? " selected" : ""}>${escape(page.name)}</option>`).join("")}</select></label><label class="dc-field">预览尺寸<select data-export-viewport>${project?.viewports.filter(viewport => !viewport.pageId || viewport.pageId === exportPageId).map(item => `<option value="${escape(item.id)}"${item.id === exportViewportId ? " selected" : ""}>${escape(item.name)} · ${item.width} × ${item.height}</option>`).join("")}</select></label><div class="dc-export-grid">${[["html", "HTML", "可运行的多页原型"], ["zip", "ZIP", "完整代码与素材"], ["png", "PNG", "指定页面的截图"], ["pdf", "PDF", "设计审阅文件"]].map(([format, title, detail]) => `<button data-export="${format}"><strong>${title}</strong><small>${detail}</small></button>`).join("")}</div><div class="dc-modal-actions"><button data-action="close-modal">完成</button></div>`;
-    return `<div class="dc-modal-backdrop"><section class="dc-modal" role="dialog" aria-modal="true" aria-label="${modal === "new" ? "创建代码原型" : modal === "file" ? "添加源文件" : "导出代码原型"}">${content}</section></div>`;
+    return `<div class="dc-modal-backdrop"><section class="dc-modal${modal === "source-difference" ? " dc-modal-wide" : ""}" role="dialog" aria-modal="true" aria-label="${modal === "new" ? "创建代码原型" : modal === "file" ? "添加源文件" : modal === "source-import" ? "导入本地工程" : modal === "source-difference" ? "源码对照" : "导出代码原型"}">${content}</section></div>`;
   }
   function render() {
     if (disposed) return;
@@ -605,7 +720,7 @@ export function mountCodeEditor(root: HTMLElement, bridge: CodeEditorBridge) {
       else restoreFocus(focus);
       return;
     }
-    root.innerHTML = `<div class="dc-app"><header class="dc-header"></header><main class="dc-body${leftOpen ? " show-left" : ""}${rightOpen ? " show-right" : ""}"><aside class="dc-sidebar" aria-label="项目源文件"><nav class="dc-tabs"><button data-left-tab="files" class="${leftTab === "files" ? "active" : ""}">文件</button><button data-left-tab="system" class="${leftTab === "system" ? "active" : ""}">设计系统</button></nav><div class="dc-scroll flush" data-left-panel></div><div class="dc-source-meta">源码是可持续编辑的交付内容。<br><code>${escape(currentPage()?.entry ?? "尚未打开项目")}</code></div></aside><section class="dc-stage" aria-label="可运行原型工作区"><div class="dc-stage-top"></div><div class="dc-canvas" data-stage-content></div></section><aside class="dc-inspector" aria-label="源码定位与设计助手"><nav class="dc-tabs"><button data-right-tab="inspect" class="${rightTab === "inspect" ? "active" : ""}">元素</button><button data-right-tab="ai" class="${rightTab === "ai" ? "active" : ""}">${icon("spark")}AI</button><button data-right-tab="comments" class="${rightTab === "comments" ? "active" : ""}">评论${project?.comments.filter(comment => comment.status === "open").length ? ` · ${project.comments.filter(comment => comment.status === "open").length}` : ""}</button></nav><div class="dc-scroll" data-right-panel></div><div class="dc-comment-composer" hidden></div></aside>${modalMarkup()}</main><footer class="dc-footer"><span data-connection></span><span class="keyboard" data-mode-label>${mode === "select" ? "点击原型元素以定位源码" : "原型交互正在运行"}</span><span class="keyboard">空格拖动画布 · ⌘ / Ctrl + S 保存源码</span><span class="right" data-revision></span></footer></div>`;
+    root.innerHTML = `<div class="dc-app"><header class="dc-header"></header><main class="dc-body${leftOpen ? " show-left" : ""}${rightOpen ? " show-right" : ""}"><aside class="dc-sidebar" aria-label="项目源文件"><nav class="dc-tabs"><button data-left-tab="files" class="${leftTab === "files" ? "active" : ""}">文件</button><button data-left-tab="system" class="${leftTab === "system" ? "active" : ""}">设计系统</button><button data-left-tab="source" class="${leftTab === "source" ? "active" : ""}">源码目录</button></nav><div class="dc-scroll flush" data-left-panel></div><div class="dc-source-meta">源码是可持续编辑的交付内容。<br><code>${escape(currentPage()?.entry ?? "尚未打开项目")}</code></div></aside><section class="dc-stage" aria-label="可运行原型工作区"><div class="dc-stage-top"></div><div class="dc-canvas" data-stage-content></div></section><aside class="dc-inspector" aria-label="源码定位与设计助手"><nav class="dc-tabs"><button data-right-tab="inspect" class="${rightTab === "inspect" ? "active" : ""}">元素</button><button data-right-tab="ai" class="${rightTab === "ai" ? "active" : ""}">${icon("spark")}AI</button><button data-right-tab="comments" class="${rightTab === "comments" ? "active" : ""}">评论${project?.comments.filter(comment => comment.status === "open").length ? ` · ${project.comments.filter(comment => comment.status === "open").length}` : ""}</button></nav><div class="dc-scroll" data-right-panel></div><div class="dc-comment-composer" hidden></div></aside>${modalMarkup()}</main><footer class="dc-footer"><span data-connection></span><span class="keyboard" data-mode-label>${mode === "select" ? "点击原型元素以定位源码" : "原型交互正在运行"}</span><span class="keyboard">空格拖动画布 · ⌘ / Ctrl + S 保存源码</span><span class="right" data-revision></span></footer></div>`;
     renderHeader(); renderFilePanel(); renderCanvas(); renderInspector(); renderProjectNotice(); renderStatus(); renderToast();
     if (modal) root.querySelector<HTMLElement>(".dc-modal input,.dc-modal select,.dc-modal button")?.focus({ preventScroll: true });
     else restoreFocus(focus);
@@ -827,21 +942,33 @@ export function mountCodeEditor(root: HTMLElement, bridge: CodeEditorBridge) {
       case "refresh-generation": await refreshGeneration(); break;
       case "cancel-generation": await cancelGeneration(); break;
       case "apply-generation": await applyGeneration(); break;
+      case "source-import-view": modal = "source-import"; sourceDirectoryInput = ""; sourceImportEntry = ""; render(); break;
+      case "source-import": await importSourceDirectory(); break;
+      case "source-status": await readSourceStatus(); break;
+      case "source-connect": await sourceAction("connect"); break;
+      case "source-compare": await sourceAction("compare"); break;
+      case "source-recheck": await sourceAction("recheck"); break;
+      case "source-pull": await sourceAction("pull"); break;
+      case "source-push": await sourceAction("push"); break;
+      case "source-resolve-project": await resolveSourceDifference("project"); break;
+      case "source-resolve-directory": await resolveSourceDifference("directory"); break;
+      case "source-refresh-difference": if (sourceFileDifference) await openSourceDifference(sourceFileDifference.file); break;
       case "list-drafts": await listProposalDrafts(); break;
       case "copy-prompt": try { await navigator.clipboard.writeText(fallbackPrompt); notify("提示词已复制，请粘贴到当前聊天。 "); } catch { const input = root.querySelector<HTMLTextAreaElement>(".dc-fallback textarea"); input?.focus(); input?.select(); notify("请按 ⌘C / Ctrl+C 复制已选择的提示词。"); } break;
     }
   }
   function onClick(event: MouseEvent) {
-    const target = (event.target as HTMLElement).closest<HTMLElement>("[data-action],[data-file],[data-left-tab],[data-right-tab],[data-view],[data-mode],[data-template],[data-comment-resolve],[data-comment-anchor],[data-export],[data-draft-view],[data-draft-resume]");
+    const target = (event.target as HTMLElement).closest<HTMLElement>("[data-action],[data-file],[data-left-tab],[data-right-tab],[data-view],[data-mode],[data-template],[data-comment-resolve],[data-comment-anchor],[data-export],[data-draft-view],[data-draft-resume],[data-source-diff]");
     if (!target || !root.contains(target) || (target as HTMLButtonElement).disabled) return;
     if (target.dataset.action) { void action(target.dataset.action); return; }
     if (target.dataset.file) { openSource(target.dataset.file); return; }
-    if (target.dataset.leftTab) { leftTab = target.dataset.leftTab; renderFilePanel(); root.querySelectorAll<HTMLElement>("[data-left-tab]").forEach(button => button.classList.toggle("active", button.dataset.leftTab === leftTab)); return; }
+    if (target.dataset.leftTab) { leftTab = target.dataset.leftTab; renderFilePanel(); if (leftTab === "source" && project) void readSourceStatus(); root.querySelectorAll<HTMLElement>("[data-left-tab]").forEach(button => button.classList.toggle("active", button.dataset.leftTab === leftTab)); return; }
     if (target.dataset.rightTab) { rightTab = target.dataset.rightTab; renderInspector(); return; }
     if (target.dataset.view) { view = target.dataset.view; renderCanvas(); if (view === "design") requestAnimationFrame(() => fitCanvas()); return; }
     if (target.dataset.mode) { setMode(target.dataset.mode as "select" | "preview"); return; }
     if (target.dataset.template) { template = target.dataset.template as "html" | "react"; render(); return; }
     if (target.dataset.export) { void exportProject(target.dataset.export); return; }
+    if (target.dataset.sourceDiff) { void openSourceDifference(target.dataset.sourceDiff); return; }
     if (target.dataset.draftView) { void viewProposalDraft(target.dataset.draftView); return; }
     if (target.dataset.draftResume) { void resumeProposalDraft(target.dataset.draftResume); return; }
     if (target.dataset.commentResolve && project) { const commentId = target.dataset.commentResolve; void update(current => ({ comments: current.comments.map(comment => comment.id === commentId ? { ...comment, status: comment.status === "open" ? "resolved" : "open" } : comment) })); return; }
@@ -856,11 +983,15 @@ export function mountCodeEditor(root: HTMLElement, bridge: CodeEditorBridge) {
     if (input.dataset.selectionStyle) selectionStyles[input.dataset.selectionStyle] = input.value;
     if (input.hasAttribute("data-ai-prompt")) aiPrompt = input.value;
     if (input.hasAttribute("data-comment-draft")) commentDraft = input.value;
+    if (input.hasAttribute("data-source-directory")) sourceDirectoryInput = input.value;
+    if (input.hasAttribute("data-source-import-name")) sourceImportName = input.value;
+    if (input.hasAttribute("data-source-import-entry")) sourceImportEntry = input.value;
     if (input.hasAttribute("data-new-name")) newName = input.value;
     if (input.hasAttribute("data-new-file-path")) newFilePath = input.value;
   }
   function onChange(event: Event) {
     const input = event.target as HTMLSelectElement | HTMLInputElement;
+    if (input.dataset.sourceSelect && project) { const selected = sourceSelections.get(project.id) ?? new Set<string>(); if ((input as HTMLInputElement).checked) selected.add(input.dataset.sourceSelect); else selected.delete(input.dataset.sourceSelect); sourceSelections.set(project.id, selected); renderFilePanel(); }
     if (input.dataset.setting === "project") { if (input.value === "__new__") { modal = "new"; render(); } else if (input.value) void loadProject(input.value); }
     if (input.dataset.setting === "viewport") { viewportId = input.value; if (viewportId !== "all") activeViewport = viewportId; renderCanvas(); requestAnimationFrame(() => fitCanvas()); }
     if (input.dataset.setting === "page") void selectPage(input.value);
@@ -927,6 +1058,11 @@ export function mountCodeEditor(root: HTMLElement, bridge: CodeEditorBridge) {
   function receive(result: unknown) {
     if (!result || typeof result !== "object") return;
     const wrapper = result as Record<string, unknown>; const data = wrapper.structuredContent && typeof wrapper.structuredContent === "object" ? wrapper.structuredContent as Record<string, unknown> : wrapper;
+    if (typeof data.projectId === "string" && typeof data.connected === "boolean") {
+      sourceStatuses.set(data.projectId, data as unknown as SourceStatus);
+      if (Array.isArray(data.files) && data.files.every(file => file && typeof file === "object" && "status" in file)) sourceComparisons.set(data.projectId, data as unknown as SourceComparison);
+      if (project?.id === data.projectId && leftTab === "source") renderFilePanel();
+    }
     if (data.job && typeof data.job === "object" && "verification" in data.job) {
       try { const job = readGenerationJob(data.job); jobs.set(job.projectId, job); if (job.projectId === project?.id) renderInspector(); scheduleGenerationPoll(); } catch { /* Other tool results do not define a code-generation job. */ }
     }

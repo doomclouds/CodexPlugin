@@ -4,6 +4,7 @@ import { builtinModules } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "acorn";
+import { parse as parseTypedJavaScript } from "@babel/parser";
 import { parseFragment } from "parse5";
 
 // This checks concrete Markdown/HTML references, JSON inheritance, and literal JS imports.
@@ -202,66 +203,50 @@ function personalPaths(text, roots) {
   return matches;
 }
 
-function literalImports(text, typed = false) {
-  if (!typed) {
-    const links = [], literals = [];
-    let ast;
-    try { ast = parse(text, { ecmaVersion: "latest", sourceType: "module", allowReturnOutsideFunction: true }); }
-    catch { return { links, literals, parsed: false }; }
-    const add = (node, kind = "import") => { if (node?.type === "Literal" && typeof node.value === "string") links.push({ destination: node.value, offset: node.start, kind }); };
-    const visit = node => {
-      if (!node || typeof node !== "object") return;
-      if (node.type === "Literal" && typeof node.value === "string") literals.push({ value: node.value, offset: node.start });
-      if (["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type)) add(node.source);
-      if (node.type === "ImportExpression") add(node.source);
-      if (node.type === "CallExpression" && (node.callee?.type === "Identifier" && node.callee.name === "require" || node.callee?.type === "MemberExpression" && node.callee.object?.name === "require" && node.callee.property?.name === "resolve")) add(node.arguments?.[0]);
-      if (node.type === "NewExpression" && node.callee?.name === "URL" && node.arguments?.[1]?.type === "MemberExpression" && node.arguments[1].object?.type === "MetaProperty" && node.arguments[1].object.meta?.name === "import" && node.arguments[1].property?.name === "url") add(node.arguments[0], "url");
-      for (const value of Object.values(node)) {
-        if (Array.isArray(value)) { for (const child of value) if (child?.type) visit(child); }
-        else if (value?.type) visit(value);
-      }
-    };
-    visit(ast);
-    return { links, literals, parsed: true };
-  }
-  // This bounded lexer skips comments and string contents, including vendor code-generation strings.
-  // It does not evaluate interpolated templates, computed import arguments, or arbitrary JavaScript.
-  const tokens = [];
-  for (let index = 0; index < text.length;) {
-    const offset = index, char = text[index];
-    if (/\s/.test(char)) { index++; continue; }
-    if (text.startsWith("//", index)) { index = text.indexOf("\n", index + 2); if (index < 0) break; continue; }
-    if (text.startsWith("/*", index)) { const end = text.indexOf("*/", index + 2); if (end < 0) break; index = end + 2; continue; }
-    if (['"', "'", "`"].includes(char)) {
-      const start = ++index;
-      while (index < text.length && text[index] !== char) { if (text[index] === "\\") index++; index++; }
-      const raw = text.slice(start, index++);
-      tokens.push({ type: char === "`" && raw.includes("${") ? "computed" : "string", value: decodeQuoted(raw), offset });
-    } else if (/[a-z_$]/i.test(char)) {
-      index++;
-      while (/[a-z0-9_$]/i.test(text[index] ?? "") && index < text.length) index++;
-      tokens.push({ type: "identifier", value: text.slice(offset, index), offset });
-    } else { tokens.push({ type: "punctuation", value: char, offset }); index++; }
-  }
-  const links = [];
-  const add = (token, kind = "import") => { if (token?.type === "string") links.push({ destination: token.value, offset: token.offset, kind }); };
-  for (let index = 0; index < tokens.length; index++) {
-    const token = tokens[index];
-    if (token.type !== "identifier") continue;
-    if (token.value === "require" || token.value === "import") {
-      const open = tokens[index + 1]?.value === "." && tokens[index + 2]?.value === "resolve" ? index + 3 : index + 1;
-      if (tokens[open]?.value === "(") { add(tokens[open + 1]); continue; }
+function literalImports(text, language = false) {
+  const links = [], literals = [];
+  const typed = [".ts", ".tsx"].includes(language);
+  const jsx = [".jsx", ".tsx"].includes(language);
+  let ast;
+  try {
+    ast = typed || jsx
+      ? parseTypedJavaScript(text, { sourceType: "unambiguous", plugins: [...(typed ? ["typescript"] : []), ...(jsx ? ["jsx"] : [])], createImportExpressions: true, allowReturnOutsideFunction: true })
+      : parse(text, { ecmaVersion: "latest", sourceType: "module", allowReturnOutsideFunction: true });
+  } catch { return { links, literals, parsed: false }; }
+  const transparent = new Set(["TSAsExpression", "TSSatisfiesExpression", "TSNonNullExpression", "TSTypeAssertion", "TSInstantiationExpression", "ParenthesizedExpression", "ChainExpression"]);
+  const unwrap = node => { while (node && transparent.has(node.type)) node = node.expression; return node; };
+  const stringValue = node => {
+    node = unwrap(node);
+    if (["Literal", "StringLiteral"].includes(node?.type) && typeof node.value === "string") return node.value;
+    if (node?.type === "TemplateLiteral" && node.expressions.length === 0) return node.quasis[0]?.value.cooked;
+    return undefined;
+  };
+  const add = (node, kind = "import") => { node = unwrap(node); const value = stringValue(node); if (typeof value === "string") links.push({ destination: value, offset: node.start, kind }); };
+  const propertyName = node => node?.computed ? stringValue(node.property) : unwrap(node?.property)?.name;
+  const visit = node => {
+    if (!node || typeof node !== "object") return;
+    if (["Literal", "StringLiteral"].includes(node.type) && typeof node.value === "string") literals.push({ value: node.value, offset: node.start });
+    if (node.type === "DirectiveLiteral") {
+      const value = typeof node.extra?.expressionValue === "string" ? node.extra.expressionValue : node.value;
+      if (typeof value === "string") literals.push({ value, offset: node.start });
     }
-    if (["import", "export"].includes(token.value) && tokens[index + 1]?.value !== ".") {
-      if (token.value === "import" && tokens[index + 1]?.type === "string") { add(tokens[index + 1]); continue; }
-      for (let cursor = index + 1; cursor < Math.min(tokens.length, index + 200); cursor++) {
-        if ([";", "="].includes(tokens[cursor].value)) break;
-        if (tokens[cursor].value === "from") { add(tokens[cursor + 1]); break; }
-      }
+    if (node.type === "TemplateElement" && typeof node.value.cooked === "string") literals.push({ value: node.value.cooked, offset: node.start });
+    if (["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type)) add(node.source);
+    if (node.type === "ImportExpression") add(node.source);
+    if (node.type === "TSImportType") add(node.argument);
+    if (node.type === "TSImportEqualsDeclaration" && node.moduleReference?.type === "TSExternalModuleReference") add(node.moduleReference.expression);
+    const callee = unwrap(node.callee), base = unwrap(node.arguments?.[1]), baseObject = unwrap(base?.object);
+    if (["CallExpression", "OptionalCallExpression"].includes(node.type) && (callee?.type === "Identifier" && callee.name === "require" || ["MemberExpression", "OptionalMemberExpression"].includes(callee?.type) && unwrap(callee.object)?.name === "require" && propertyName(callee) === "resolve")) add(node.arguments?.[0]);
+    if (node.type === "NewExpression" && callee?.name === "URL" && ["MemberExpression", "OptionalMemberExpression"].includes(base?.type) && baseObject?.type === "MetaProperty" && baseObject.meta?.name === "import" && propertyName(base) === "url") add(node.arguments[0], "url");
+    // Walk actual expression children, including nested template interpolations.
+    // Template text, JSX labels, comments and generated source are never reparsed as imports.
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) { for (const child of value) if (child?.type) visit(child); }
+      else if (value?.type) visit(value);
     }
-    if (token.value === "new" && tokens[index + 1]?.value === "URL" && tokens[index + 2]?.value === "(" && tokens[index + 4]?.value === "," && tokens.slice(index + 5, index + 10).map(value => value.value).join("") === "import.meta.url") add(tokens[index + 3], "url");
-  }
-  return { links, literals: quotedTokens(text), parsed: true };
+  };
+  visit(ast);
+  return { links, literals, parsed: true };
 }
 
 export function formatPortabilityIssue(issue) {
@@ -358,7 +343,7 @@ export async function checkPluginPortability(pluginRoot, options = {}) {
     const text = data.toString("utf8");
     const binary = data.includes(0) && !textExtensions.has(extension);
     for (const finding of personalPaths(text, localRoots)) add(filename, text, finding.offset, binary ? `binary-${finding.code}` : finding.code);
-    const imports = codeExtensions.has(extension) ? literalImports(text, [".ts", ".tsx"].includes(extension)) : undefined;
+    const imports = codeExtensions.has(extension) ? literalImports(text, extension) : undefined;
     if (imports && !imports.parsed) add(filename, text, 0, "unparsed-javascript-references");
     if (!binary && (codeExtensions.has(extension) || [".json", ".jsonc", ".map", ".html", ".htm"].includes(extension))) {
       for (const token of imports?.literals ?? quotedTokens(text)) {
@@ -375,7 +360,7 @@ export async function checkPluginPortability(pluginRoot, options = {}) {
     } else if ([".html", ".htm", ".svg"].includes(extension)) {
       for (const link of htmlReferences(text)) await checkReference(filename, text, link, scope);
     }
-    for (const link of imports?.links ?? []) await checkReference(filename, text, link, undefined, link.kind !== "url");
+    for (const link of imports?.links ?? []) await checkReference(filename, text, link, scope, link.kind !== "url");
     if ([".json", ".map"].includes(extension)) {
       let json;
       try { json = JSON.parse(text); } catch { add(filename, text, 0, extension === ".map" ? "invalid-source-map" : "invalid-json"); continue; }

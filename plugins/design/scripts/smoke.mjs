@@ -17,7 +17,7 @@ async function connect(){
 async function call(name,args={}){const r=await client.callTool({name,arguments:args});assert.notEqual(r.isError,true,JSON.stringify(r.content));return r.structuredContent;}
 try{
  for(const file of ['runtime','skills','plugin.json','mcp.json','package.json','README.md'])await cp(path.join(root,file),path.join(isolated,file),{recursive:true});
- await connect();assert.equal(client.getServerVersion().version,'0.3.0');
+ await connect();assert.equal(client.getServerVersion().version,'0.4.0');
  const names=(await client.listTools()).tools.map(t=>t.name);assert.ok(names.includes('design_code_update'));assert.ok(names.includes('design_code_request_generation'));
  for(const obsolete of ['design_apply_changes','design_get_schema','design_create_project','design_replace_document','design_request_generation','design_export'])assert.ok(!names.includes(obsolete),`Obsolete tool still published: ${obsolete}`);
  const panel=(await client.readResource({uri:'ui://design/studio.html'})).contents[0];assert.match(panel.text,/design-editor/);assert.ok(!panel.text.includes('{{SCRIPT}}'));assert.ok(!panel.text.includes('图层设计'));
@@ -40,6 +40,6 @@ try{
  const undone=await call('design_code_undo',{projectId:code.project.id,expectedRevision:4});assert.equal(undone.project.pages.length,1);assert.equal(undone.project.revision,5);
  const unsupported=path.join(isolated,'data','code','code_unsupported.json');const old=JSON.stringify({current:{schemaVersion:1,id:'code_unsupported',name:'Unsupported development data'},past:[],future:[]});await writeFile(unsupported,old);
  const rejected=await client.callTool({name:'design_code_get',arguments:{projectId:'code_unsupported'}});assert.equal(rejected.isError,true);assert.equal(rejected.structuredContent.error.code,'UNSUPPORTED_FORMAT');assert.equal(await readFile(unsupported,'utf8'),old);
- console.log(JSON.stringify({passed:true,version:'0.3.0',isolatedPackage:true,tools:names.length,modelTurns:0,sourceOnly:true,noSceneCompatibility:true,realReactCompilation:true,realPageEntries:true,persistence:true,stableSourceComments:true,conflicts:true,unsupportedFilePreserved:true,hostModeDoesNotSpawn:true}));
+ console.log(JSON.stringify({passed:true,version:'0.4.0',isolatedPackage:true,tools:names.length,modelTurns:0,sourceOnly:true,noSceneCompatibility:true,realReactCompilation:true,realPageEntries:true,persistence:true,stableSourceComments:true,conflicts:true,unsupportedFilePreserved:true,hostModeDoesNotSpawn:true}));
 }catch(error){if(errors)console.error(errors);throw error;}
 finally{await client?.close();await rm(isolated,{recursive:true,force:true});}

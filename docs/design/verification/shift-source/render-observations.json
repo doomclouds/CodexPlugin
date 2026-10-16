@@ -1,0 +1,86 @@
+{
+  "renderedRevision": 3,
+  "observations": [
+    {
+      "projectId": "code_6f8bb512522c4341b566d893803de83a",
+      "pageId": "page_main",
+      "revision": 3,
+      "width": 1440,
+      "height": 1102,
+      "metrics": {
+        "title": "SHIFT · 构建任务工作台",
+        "textLength": 999,
+        "headings": [
+          "构建任务",
+          "运行队列",
+          "导出含长标题与多页图表的设计审阅文件"
+        ],
+        "controls": 19,
+        "horizontalOverflow": false,
+        "overflowCandidates": [
+          {
+            "tag": "SPAN",
+            "text": "按更新时间排序"
+          },
+          {
+            "tag": "SPAN",
+            "text": "详情"
+          }
+        ]
+      },
+      "errors": [],
+      "blockedRequests": 0
+    },
+    {
+      "projectId": "code_6f8bb512522c4341b566d893803de83a",
+      "pageId": "page_main",
+      "revision": 3,
+      "width": 390,
+      "height": 1161,
+      "metrics": {
+        "title": "SHIFT · 构建任务工作台",
+        "textLength": 424,
+        "headings": [
+          "构建任务",
+          "运行队列"
+        ],
+        "controls": 15,
+        "horizontalOverflow": false,
+        "overflowCandidates": [
+          {
+            "tag": "SPAN",
+            "text": "按更新时间排序"
+          }
+        ]
+      },
+      "errors": [],
+      "blockedRequests": 0
+    },
+    {
+      "projectId": "code_6f8bb512522c4341b566d893803de83a",
+      "pageId": "page_main",
+      "revision": 3,
+      "width": 768,
+      "height": 1108,
+      "metrics": {
+        "title": "SHIFT · 构建任务工作台",
+        "textLength": 701,
+        "headings": [
+          "构建任务",
+          "运行队列"
+        ],
+        "controls": 18,
+        "horizontalOverflow": false,
+        "overflowCandidates": [
+          {
+            "tag": "SPAN",
+            "text": "按更新时间排序"
+          }
+        ]
+      },
+      "errors": [],
+      "blockedRequests": 0
+    }
+  ],
+  "finalSourceRevision": 11
+}

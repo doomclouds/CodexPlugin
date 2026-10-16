@@ -97,6 +97,17 @@ function jsxRecords(file: CodeFile): { ast: AnyNode; records: ElementRecord[] } 
   });
   uniqueMarkers(records); return {ast,records};
 }
+function confirmedLiteralText(record:ElementRecord):string|undefined{
+  if(!record.source.editableText)return undefined;
+  if(record.language==='html')return(record.node.childNodes??[]).filter((child:AnyNode)=>child.nodeName==='#text').map((child:AnyNode)=>child.value??'').join('');
+  return record.node.children.map((child:AnyNode)=>{
+    if(child.type==='JSXExpressionContainer')return child.expression.value;
+    // JSX removes indentation around source newlines while preserving explicit string literals.
+    const lines=String(child.value).split(/\r\n|\n|\r/);let lastNonEmpty=0;
+    for(let index=0;index<lines.length;index++)if(/[^ \t]/.test(lines[index]!))lastNonEmpty=index;
+    return lines.map((line,index)=>{let text=line.replace(/\t/g,' ');if(index!==0)text=text.replace(/^ +/,'');if(index!==lines.length-1)text=text.replace(/ +$/,'');return text+(text&&index!==lastNonEmpty?' ':'');}).join('');
+  }).join('');
+}
 function insertionPoint(content: string, openingEnd: number): number {
   let index = openingEnd-1;
   while (index>0 && /\s/.test(content[index-1]!)) index--;
@@ -148,13 +159,20 @@ const reactShims: Record<string,string> = {
   'react/jsx-runtime': `const r=globalThis.__DesignJSXRuntime;export const {Fragment,jsx,jsxs}=r;`,
   'react/jsx-dev-runtime': `const r=globalThis.__DesignJSXDevRuntime;export const {Fragment,jsxDEV}=r;`,
 };
-function bridge(project: CodeProject, page:CodePage, select: boolean, sources: SourceElement[]): string {
+function bridge(project: CodeProject, page:CodePage, select: boolean, sources: SourceElement[], literalTexts:Record<string,string>): string {
   const sourceFiles = Object.fromEntries(sources.map(source=>[source.id,source.file]));
   const literalSources = Object.fromEntries(sources.map(source=>[source.id,source.editableText]));
   return String.raw`(function(){
-const projectId=${JSON.stringify(project.id)},revision=${JSON.stringify(project.revision)},page=${JSON.stringify(page)},pages=${JSON.stringify(getCodePages(project))},sourceFiles=${JSON.stringify(sourceFiles)},literalSources=${JSON.stringify(literalSources)};
+const projectId=${JSON.stringify(project.id)},revision=${JSON.stringify(project.revision)},page=${JSON.stringify(page)},pages=${JSON.stringify(getCodePages(project))},sourceFiles=${JSON.stringify(sourceFiles)},literalSources=${JSON.stringify(literalSources)},literalTexts=${JSON.stringify(literalTexts)};
 const pageId=page.id;let mode=${JSON.stringify(select?'select':'preview')};
 const post=x=>parent.postMessage(Object.assign({projectId,revision,pageId},x),'*');
+const selectElement=(el,target=el)=>{
+  const sourceId=el.getAttribute('data-design-source');if(!sourceFiles[sourceId])return;
+  const s=getComputedStyle(el),computedStyles={};for(const k of ['color','backgroundColor','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','padding','borderRadius','width','height'])computedStyles[k]=s[k];
+  const normalize=text=>text.replace(/\r\n?/g,'\n');
+  const runtimeLiteralText=literalSources[sourceId]===true&&typeof literalTexts[sourceId]==='string'&&[...el.childNodes].every(n=>n.nodeType===3||n.nodeType===8)&&normalize(el.textContent||'')===normalize(literalTexts[sourceId]);
+  post({type:'design:selection',sourceId,file:sourceFiles[sourceId],text:el.textContent,computedStyles,runtimeLiteralText,ancestorMapped:el!==target});
+};
 const scroll=hash=>{if(hash){try{document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({block:'start'});}catch{}}};
 let initialLocation;try{initialLocation=JSON.parse(document.getElementById('design-page-context')?.textContent||'null')}catch{}
 const validInitial=initialLocation?.projectId===projectId&&initialLocation?.revision===revision&&initialLocation?.pageId===pageId;
@@ -174,14 +192,12 @@ addEventListener('message',e=>{
   if(e.source!==parent||!e.data||e.data.projectId!==undefined&&e.data.projectId!==projectId||e.data.revision!==undefined&&e.data.revision!==revision||e.data.pageId!==undefined&&e.data.pageId!==pageId)return;
   if(e.data.type==='design:mode'&&['select','preview'].includes(e.data.mode))mode=e.data.mode;
   if(e.data.type==='design:location'){globalThis.designLocation={pageId,pathname:page.route,search:e.data.search||'',hash:e.data.hash||''};scroll(e.data.hash);dispatchEvent(new CustomEvent('design:location',{detail:globalThis.designLocation}));}
-  if(e.data.type==='design:focus'&&sourceFiles[e.data.sourceId]){const el=[...document.querySelectorAll('[data-design-source]')].find(x=>x.getAttribute('data-design-source')===e.data.sourceId);if(el){el.scrollIntoView({block:'center',inline:'nearest'});el.animate&&el.animate([{outline:'3px solid #ea6644',outlineOffset:'3px'},{outline:'3px solid transparent',outlineOffset:'8px'}],{duration:1300});}}
+  if(e.data.type==='design:focus'&&sourceFiles[e.data.sourceId]){const el=[...document.querySelectorAll('[data-design-source]')].find(x=>x.getAttribute('data-design-source')===e.data.sourceId);if(el){el.scrollIntoView({block:'center',inline:'nearest'});el.animate&&el.animate([{outline:'3px solid #ea6644',outlineOffset:'3px'},{outline:'3px solid transparent',outlineOffset:'8px'}],{duration:1300});selectElement(el);}}
 });
 addEventListener('click',e=>{
   if(mode!=='select')return;
   e.preventDefault();e.stopImmediatePropagation();const el=e.target.closest&&e.target.closest('[data-design-source]');if(!el)return;
-  const sourceId=el.getAttribute('data-design-source');if(!sourceFiles[sourceId])return;
-  const s=getComputedStyle(el),computedStyles={};for(const k of ['color','backgroundColor','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','padding','borderRadius','width','height'])computedStyles[k]=s[k];
-  post({type:'design:selection',sourceId,file:sourceFiles[sourceId],text:el.textContent,computedStyles,runtimeLiteralText:literalSources[sourceId]&&[...el.childNodes].every(n=>n.nodeType===3||n.nodeType===8),ancestorMapped:el!==e.target});
+  selectElement(el,e.target);
 },true);
 addEventListener('click',e=>{if(mode==='select'||e.defaultPrevented)return;const link=e.target.closest&&e.target.closest('a[href]');if(!link)return;e.preventDefault();const target=linkTarget(link.getAttribute('href'));if(target)navigate(target.targetPageId,target);});
 addEventListener('error',e=>post({type:'design:runtime-error',message:String(e.message||'Runtime error').slice(0,1000),line:e.lineno}));
@@ -192,6 +208,7 @@ addEventListener('unhandledrejection',e=>post({type:'design:runtime-error',messa
 
 export async function compileCodeProject(project: CodeProject, options: { instrument?: boolean;pageId?:string;viewportId?:string } = {}): Promise<CodePreview> {
   const diagnostics: PreviewDiagnostic[] = []; const sources: SourceElement[] = []; const instrument = options.instrument !== false;
+  const literalTexts:Record<string,string>={};const collect=(records:ElementRecord[]):void=>{for(const record of records){sources.push(record.source);const text=confirmedLiteralText(record);if(text!==undefined)literalTexts[record.source.id]=text;}};
   const result: CodePreview = {projectId:project.id,revision:project.revision,pageId:options.pageId??project.defaultPageId,pages:[],html:'',diagnostics,sources};
   try {
     const page=options.viewportId?resolveCodePageViewport(project,options).page:resolveCodePage(project,options.pageId);result.pageId=page.id;result.pages=getCodePages(project);
@@ -223,7 +240,7 @@ export async function compileCodeProject(project: CodeProject, options: { instru
         if(extension==='.css')return{contents:rewriteCssUrls(file.content,file.path),loader:'css'};
         const loader=extension==='.tsx'?'tsx':extension==='.ts'?'ts':extension==='.jsx'?'jsx':extension==='.json'?'json':'js';
         if(['tsx','jsx'].includes(loader)){
-          const collected=jsxRecords(file);sources.push(...collected.records.map(record=>record.source));
+          const collected=jsxRecords(file);collect(collected.records);
           return{contents:instrumentJs(file,collected.records,instrument,assetReference),loader:loader as ESBuild.Loader};
         }
         return{contents:file.content,loader:loader as ESBuild.Loader};
@@ -231,7 +248,7 @@ export async function compileCodeProject(project: CodeProject, options: { instru
     }};
     if(/\.html?$/i.test(entry.path)){
       if(entry.encoding!=='utf8')throw new Error('HTML entry must use UTF-8 encoding.');
-      const collected=htmlRecords(entry);sources.push(...collected.records.map(record=>record.source));const edits:Edit[]=[];let index=0;
+      const collected=htmlRecords(entry);collect(collected.records);const edits:Edit[]=[];let index=0;
       visit(collected.tree,node=>{
         const location=node.sourceCodeLocation;if(!node.tagName||!location?.startTag)return;
         const attrs=new Map<string,string>((node.attrs??[]).map((attr:AnyNode)=>[attr.name,attr.value]));
@@ -289,7 +306,7 @@ export async function compileCodeProject(project: CodeProject, options: { instru
     }
     const vendor=needReact?await readFile(fileURLToPath(new URL('../runtime/react-vendor.js',import.meta.url)),'utf8'):'';
     const csp="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
-    const head=`<meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer">${codePageRuntimeContext(project,page)}<script>${scriptSafe(bridge(project,page,instrument,sources))}</script><style>${styles.join('\n').replace(/<\/style/gi,'<\\/style')}</style>`;
+    const head=`<meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer">${codePageRuntimeContext(project,page)}<script>${scriptSafe(bridge(project,page,instrument,sources,literalTexts))}</script><style>${styles.join('\n').replace(/<\/style/gi,'<\\/style')}</style>`;
     const runtime=`${vendor?`<script>${scriptSafe(vendor)}</script>`:''}${deferredClassic.join('')}${scripts.map(script=>`<script>${scriptSafe(script)}</script>`).join('')}`;
     // Content is executed only by the caller's sandbox iframe. The backend only parses and compiles it.
     html=/<head(?:\s[^>]*)?>/i.test(html)?html.replace(/<head(?:\s[^>]*)?>/i,match=>match+head):head+html;

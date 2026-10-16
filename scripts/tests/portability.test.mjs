@@ -116,6 +116,21 @@ test("recursive Markdown references cannot escape the current skill even into th
   assert.ok(result.issues.some(issue => issue.file === "skills/one/references/runtime.md" && issue.code === "file-reference-escapes-skill"));
 });
 
+test("transitive JavaScript and TypeScript imports stay inside their own skill without restricting ordinary plugin imports", async t => {
+  const { put, check } = await fixture(t);
+  await put("skills/demo/SKILL.md", "[Helper](scripts/run.js)\n[Typed helper](scripts/run.ts)\n");
+  await put("skills/demo/references/helper.js", "export const value = 1;\n");
+  await put("runtime/shared.js", "export const shared = 2;\n");
+  await put("src/plugin.ts", 'import { shared } from "../runtime/shared.js"; export { shared };\n');
+  for (const extension of ["js", "ts"]) await put(`skills/demo/scripts/run.${extension}`, 'import { value } from "../references/helper.js"; export { value };\n');
+  assert.deepEqual((await check()).issues, []);
+  for (const extension of ["js", "ts"]) await put(`skills/demo/scripts/run.${extension}`, 'import { shared } from "../../../runtime/shared.js"; export { shared };\n');
+  assert.deepEqual((await check()).issues.map(issue => [issue.file, issue.code]), [
+    ["skills/demo/scripts/run.js", "file-reference-escapes-skill"],
+    ["skills/demo/scripts/run.ts", "file-reference-escapes-skill"],
+  ]);
+});
+
 test("plugin README cannot reference parent engineering files", async t => {
   const { outer, put, check } = await fixture(t);
   await writeFile(path.join(outer, "engineering.md"), "Private engineering fixture\n");
@@ -181,6 +196,94 @@ test("literal imports and URL assets are checked, while quoted code-generation t
   assert.deepEqual((await check()).issues, []);
   await put("src/index.js", 'const run = () => require("../../outside.js"); export { run };\n');
   assert.ok((await check()).issues.some(issue => issue.code === "file-reference-escapes-plugin"));
+});
+
+test("TypeScript nested templates do not turn UI labels and generated code into literal imports", async t => {
+  const { put, check } = await fixture(t);
+  await put("src/panel.ts", String.raw`
+type Mode = "source-import" | "source";
+export function markup(enabled: boolean): string {
+  const input = \`<input placeholder="index.html or src/main.tsx">\`;
+  return \`<section>\${enabled ? \`\${input}<button data-action="source-import"\${enabled ? " disabled" : ""}>\${enabled ? "import" : "source-import"}</button>\` : \`<textarea placeholder="import('generated-package')">\${"export from"}</textarea>\`}</section>\`;
+}
+const generated: string = \`require("generated-package"); \${true ? \`import("still-generated");\` : ""}\`;
+`.replaceAll("\\`", "`").replaceAll("\\${", "${"));
+  assert.deepEqual((await check()).issues, []);
+});
+
+test("actual imports in nested TypeScript template expressions remain checked with their source locations", async t => {
+  const { put, check } = await fixture(t);
+  await put("src/panel.ts", [
+    "const label: string = 'source-import';",
+    "export const panel = `outer ${true ? `nested ${",
+    "  import('./missing-module.js')",
+    "}` : ''}`;",
+  ].join("\n"));
+  const issues = (await check()).issues;
+  assert.ok(issues.some(issue => issue.file === "src/panel.ts" && issue.line === 3 && issue.code === "missing-file-reference"));
+  assert.equal(issues.some(issue => issue.code === "undeclared-package-reference"), false);
+});
+
+test("TSX and JSX syntax distinguishes labels from actual expression imports", async t => {
+  const { put, check } = await fixture(t);
+  await put("src/view.tsx", 'const label: string = "source-import"; export const view = <button title={"import(\\\"generated-package\\\")"}>{label}</button>;\n');
+  await put("src/plain.jsx", 'export const text = <div>import("generated-package")</div>;\n');
+  assert.deepEqual((await check()).issues, []);
+  await put("src/view.tsx", 'export const view = <button onClick={() => import("missing-real-package")}>source-import</button>;\n');
+  const issues = (await check()).issues;
+  assert.ok(issues.some(issue => issue.file === "src/view.tsx" && issue.code === "undeclared-package-reference"));
+  assert.equal(issues.some(issue => issue.code === "unparsed-javascript-references"), false);
+});
+
+test("TypeScript type imports, require imports and static template resources retain strict file and package checks", async t => {
+  const { put, check } = await fixture(t);
+  await put("src/types.ts", [
+    'import type { Missing } from "./missing-types.js";',
+    'type Shape = import("missing-type-package").Shape;',
+    'import dependency = require("missing-require-package");',
+    'export { Missing } from "./missing-export.js";',
+    'const asset: URL = new URL("./missing.wasm", import.meta.url);',
+    'const lazy = import(`./missing-template.js`);',
+  ].join("\n"));
+  const issues = (await check()).issues;
+  assert.deepEqual(issues.map(issue => [issue.line, issue.code]), [
+    [1, "missing-file-reference"], [2, "undeclared-package-reference"], [3, "undeclared-package-reference"],
+    [4, "missing-file-reference"], [5, "missing-file-reference"], [6, "missing-file-reference"],
+  ]);
+});
+
+test("invalid TypeScript fails closed and escaped personal paths in template text remain rejected", async t => {
+  const { put, check } = await fixture(t);
+  await put("src/broken.ts", "const broken: = 1;");
+  assert.ok((await check()).issues.some(issue => issue.file === "src/broken.ts" && issue.code === "unparsed-javascript-references"));
+  await put("src/broken.ts", String.raw`const directory: string = \`\x2fhome\x2ffixture-person\x2fproject\${true ? \`/child\` : ""}\`;`.replaceAll("\\`", "`").replaceAll("\\${", "${"));
+  assert.ok((await check()).issues.some(issue => issue.file === "src/broken.ts" && issue.code === "quoted-personal-home-path"));
+});
+
+test("escaped personal paths in Babel directive prologues are checked using their decoded values", async t => {
+  const { put, check } = await fixture(t);
+  await put("src/directive.ts", String.raw`"\x2fhome\x2ffixture-person\x2fprivate-project"; export const ok = 1;`);
+  const issues = (await check()).issues;
+  assert.ok(issues.some(issue => issue.file === "src/directive.ts" && issue.line === 1 && issue.code === "quoted-personal-home-path"));
+  assert.equal(issues.map(formatPortabilityIssue).join("\n").includes("fixture-person"), false);
+});
+
+test("erased TypeScript wrappers cannot hide actual imports, require calls or URL assets", async t => {
+  const { put, check } = await fixture(t);
+  await put("src/wrapped.ts", [
+    'const nested: string = `outer ${true ? `nested ${import(("missing-real-package" as string)!)}` : ""}`;',
+    'require(("missing-require-package" satisfies string)!);',
+    'new URL((<string>"./missing-assertion.wasm"), import.meta.url);',
+    'new URL("./missing-base.wasm" as string, (import.meta.url as string)!);',
+    'new (URL as typeof URL)("./missing-object.wasm", (import.meta as ImportMeta).url);',
+    '(require as typeof require).resolve(("missing-resolve-package" as const));',
+    '(require as typeof require)("missing-callee-package" as string);',
+    'const generated: string = `import("generated-package" as string);`;',
+  ].join("\n"));
+  assert.deepEqual((await check()).issues.map(issue => [issue.line, issue.code]), [
+    [1, "undeclared-package-reference"], [2, "undeclared-package-reference"], [3, "missing-file-reference"],
+    [4, "missing-file-reference"], [5, "missing-file-reference"], [6, "undeclared-package-reference"], [7, "undeclared-package-reference"],
+  ]);
 });
 test("HTML parsing distinguishes JavaScript comparisons from actual resource attributes", async t => {
   const { put, check } = await fixture(t);

@@ -144,3 +144,15 @@ chunk-k9bc38yt.js: $Bs
 这些未知不会被模板流程补齐。本轮不新增 Motion 工具、占位时间轴或“渲染成功”模拟结果。
 
 本轮原始恢复资料、精确 AST 范围清单与解析辅助文件在临时分析目录 `claude-motion-contracts-2.1.296`；REA Evidence 导出位于本机 `/tmp/claude-motion-rea-evidence-2026-10-17.json`。它们不收入发布插件，也不作为阅读或使用插件的前提。该目录在新增精确材料后会改变容器摘要，不能把各次分析的容器哈希当作同一次快照；二进制样本身份始终使用开头的完整 SHA-256。
+
+## 7. 专用播放器的有限复核与停止边界
+
+**[本地字节观察，2026-10-17 补充]** 在核对已有 Motion 与数据层研究后，本轮只对已知符号做精确定位：Bun 表登记的 2,366 个 `.js` 载荷，共 46,032,357 字节，分别检查 UTF-8 与 UTF-16LE 表示的 `__animation`、`kit.scenes`、`durationInFrames`、`motion_type`。前三个明文字面量没有命中；`motion_type` 仅命中既有类型路由和输出 schema。另对表中两个 `.mjs` 资源（`runner-scaffold-q2rf9gg9.mjs`、`build-report-lite-jwtbvm49.mjs`，共 60,471 字节）检查前三个字面量，也没有命中。
+
+这只说明上述载荷没有这些确切明文，**不排除动态构造、混淆、压缩资源、其他标识符或远端文件**；尤其不能由 `durationInFrames` 未出现断言不使用某种引擎。没有做全量 native 字符串清单，也没有执行载荷。
+
+**[新片段观察]** 沿已知类型指导装配链精确恢复 `chunk-e40t8aht.js`（二进制偏移 229244392、长度 2369，SHA-256 `c57d0a1eb0b8a77fbc84dadfbf1a501055ef1bbbc49b115fb66ee866ae211b32`）。其唯一导出 `afterQuickstartSavedLine` 按已保存的参考资料/设计系统路径生成提示文案；这一个函数不提供 Motion player 的 load、seek、frame 或场景 schema，不能把“已经保存参考资料”的提示当作播放器已经随包恢复。
+
+REA 对这个明确单文件实际分析：1 个 JS 解析成功、0 失败、2369 字节，未截断；依赖仍未知，整体 partial/unknown。父 Evidence 为 `ev_a06f506293845e1e0d23830425b63a053767a02c35c8fea71966967cc5f9fe6d`；导出/返回视图两页共 53/53 条，Evidence 分别为 `ev_326174e95438c34b6b8adca5c8225976c49d9facf0525229ae160bceb536ac56`、`ev_c8bfbc4909d9ec0817d0b57b661186da3bad9f9296de7effdb0aa51304d77bc2`。静态返回形状仍有 ambiguous，不作运行成功结论。
+
+**[本轮收口]** 没有得到新的真实 Motion 播放器、实例类型 Skill 或完整场景 schema。现有直接证据仍止于云端类型文件边界及公开作者客户端；在没有公开工程、已提供的真实产物或相应读取授权时停止重复探测，不猜项目 ID、不调用私有接口、不拿 stub 补齐未知。

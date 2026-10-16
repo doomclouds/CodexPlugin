@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 const root=fileURLToPath(new URL('../',import.meta.url));
-const client=new Client({name:'design-development-preview',version:'0.3.0'});
+const client=new Client({name:'design-development-preview',version:'0.4.0'});
 await client.connect(new StdioClientTransport({command:process.execPath,args:[path.join(root,'runtime/index.js')],env:Object.fromEntries(Object.entries(process.env).filter(([,v])=>v!==undefined))}));
 const token=randomBytes(24).toString('hex');
 const html=(await readFile(path.join(root,'runtime/panel.html'),'utf8')).replace('<head>',`<head><script>globalThis.__DESIGN_PREVIEW_TOKEN__=${JSON.stringify(token)}</script>`);

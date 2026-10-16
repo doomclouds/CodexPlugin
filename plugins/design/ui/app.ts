@@ -10,7 +10,7 @@ function unpack(value:unknown):Record<string,unknown>{
   if(!value||typeof value!=='object')throw new Error('MCP 服务返回了无效结果。');
   const result=value as Record<string,unknown>;
   const content=Array.isArray(result.content)?result.content as {type?:string;text?:string}[]:[];
-  if(result.isError)throw new Error(content.filter(block=>block.type==='text').map(block=>block.text).join('\n')||'MCP 工具调用失败。');
+  if(result.isError){const details=result.structuredContent&&typeof result.structuredContent==='object'?(result.structuredContent as Record<string,unknown>).error:undefined;throw Object.assign(new Error(content.filter(block=>block.type==='text').map(block=>block.text).join('\n')||'MCP 工具调用失败。'),{details});}
   if(result.structuredContent&&typeof result.structuredContent==='object')return result.structuredContent as Record<string,unknown>;
   for(const block of content)if(block.type==='text'&&block.text){try{const data:unknown=JSON.parse(block.text);if(data&&typeof data==='object')return data as Record<string,unknown>;}catch{}}
   return result;

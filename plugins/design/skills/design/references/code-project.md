@@ -74,11 +74,28 @@
 
 `design_code_import_asset` 接受明确选择的本地 `file`、目标项目相对 `targetPath`、项目 revision 和目标文件 `expectedHash`，直接导入资产字节。图片和字体无需经过模型文本上下文转抄。来源和分发许可仍需确认；远端链接不是已随交付包含的资源。
 
-`design_code_import_directory` 读取明确的本地目录并**创建新项目**，可指定入口。它跳过保留目录，不跟随目录符号链接，不安装依赖、执行脚本或修改原目录。
+`design_code_import_directory` 读取明确的本地目录并**创建新项目**，可指定入口。它跳过保留目录、不跟随符号链接，不安装依赖或执行脚本。导入同时建立私有源码连接与原始字节 hash 基线，**不写原目录或 manifest**。受管源码和未纳入文件的说明可在编辑器“源码目录”查看。
 
-`design_code_write_directory` 接受目标目录和当前 revision，导出实际源文件及 `.design-code-export.json` 清单。它拒绝覆盖无关文件、已变化文件或更新版本目录；写入中发现变化会报告冲突，部分写入会带明确错误状态。先核对实际结果再继续。
+| 工具 | 参数与作用 |
+| --- | --- |
+| `design_code_source_status` | `projectId`；读取私有连接位置与最近写入记录，不扫描目录 |
+| `design_code_connect_directory` | `projectId`、`expectedRevision`、用户明确选择的绝对 `directory`；为尚未连接的项目建立只读连接。仅相同文件形成基线；不同内容保留冲突，空目录可作为首次写回目标 |
+| `design_code_compare_source` | `projectId`；实际读取两端 hash，返回当前 `revision`、`files` 和 `checkedAt`。每项含 `path/projectHash/directoryHash/baseProjectHash/baseDirectoryHash/status`，状态为 `synced/project/directory/conflict` |
+| `design_code_pull_source` | `projectId`、`expectedRevision`、所选 `paths`、`expectedDirectoryHashes`；只允许目录单端变化，原子更新同一项目的源码、历史和私有基线 |
+| `design_code_push_source` | 同上；只允许项目单端变化，写回连接目录；每步核对目录身份、文件 hash，持久记录进度，未改文件不重写 |
+| `design_code_read_source_difference` | `projectId`、`file`；读取项目与目录当前文本和 hash，二进制只返回元数据；共同基线只保存 hash，不提供虚构的三方原文 |
+| `design_code_resolve_source` | `projectId`、`expectedRevision`、`file`、`expectedProjectHash`、`expectedDirectoryHash`、`choice: project/directory`；**明确审阅后选一端覆盖另一端**，执行时仍核对两端。不是自动合并 |
+| `design_code_recheck_source` | `projectId`；对中断写入按实际 hash 重查已完成与待处理项，不自动写入或重试 |
 
-目录回读不自动合并进已有项目。需要保留同一项目时，读取外部差异，取得项目当前 hash/revision 后用 `design_code_update` 合并。原始 TSX 或其他源码仍需要相应运行条件；可直接打开的离线交付使用编译后的 HTML。
+`expectedDirectoryHashes` 是所选路径到比较中 `directoryHash` 的映射；不存在的文件为 `null`。先读比较，再携带看到的值；发现旧修订、外部再次保存或双方同文件变更时停止，不替换新 hash 盲目重发。新增、删除、图片和字体使用真实字节；删除仍需保持页面、组件、评论引用有效。复杂引用调整由当前聊天协调后再检查，不默默删掉元数据。
+
+源码连接的绝对目录、基线和写入日志只保存在本地私有记录，不属于可导出的 CodeProject。重新导入仍是新项目；日常回读应通过连接工具保留同一项目身份、页面和评论。不存在自动监听，也不因扫描而启动模型。
+
+`design_code_write_directory` 指向当前连接目录时复用安全写回；指向**其他目录**仍使用独立 `.design-code-export.json` 保护，不能覆盖无关或外部已改文件，不把私有连接转移过去。原始 TSX 仍需相应运行条件；直接打开的离线交付使用编译后的 HTML。
+
+持久日志和 `design_code_recheck_source` **仅用于已连接目录的写回**。其他目录的清单导出若部分失败，会报告实际已写路径，但没有同一恢复日志；需先审查实际文件与旧清单，不盲目重试，也不删除清单绕过保护。
+
+目录写入是逐文件操作，不是全目录事务。出现 `EXPORT_PARTIAL` 时保留 `operationId/directory/filesWritten/pendingFiles/savedRevision`，先用状态工具和 `design_code_recheck_source` 读取现场，再选择剩余安全变化继续。中断后的用户保存仍是外部修改，不能用旧日志覆盖。项目撤销只恢复插件内源码，不自动撤销磁盘目录。目录锁仅协调 Design 进程；对不遵守该锁的外部编辑器，写前复核与实际落盘之间仍存在文件系统并发窗口，不能承诺全局原子或无限制自动恢复。
 
 ## 四种验证证据
 

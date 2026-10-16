@@ -53682,7 +53682,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // src/version.ts
-var VERSION = "0.3.0";
+var VERSION = "0.4.0";
 
 // src/codex-session.ts
 var object3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -54233,7 +54233,9 @@ function createCodeTemplate(name, template) {
   project.designSystem.components = [{ name: "ActionButton", path: "src/App.tsx", exportName: "ActionButton", usage: "<ActionButton onClick={handler}>\u5F00\u59CB\u521B\u4F5C</ActionButton>" }];
   return validateCodeProject(project);
 }
-var recordSchema = external_exports.object({ version: external_exports.literal(1), current: codeProjectSchema, snapshots: external_exports.array(codeProjectSchema).min(1).max(CODE_PROJECT_LIMITS.history), undo: external_exports.array(external_exports.number().int().positive()).max(50), redo: external_exports.array(external_exports.number().int().positive()).max(50), history: external_exports.array(external_exports.object({ revision: external_exports.number().int().positive(), createdAt: external_exports.string().datetime({ offset: true }), operation: external_exports.enum(["create", "import", "update", "undo", "redo", "restore"]), restoredFrom: external_exports.number().int().positive().optional() }).strict()).min(1).max(50) }).strict();
+var nullableHash = external_exports.string().regex(/^[a-f0-9]{64}$/).nullable();
+var sourceLinkSchema = external_exports.object({ id: idSchema, directory: external_exports.string().min(1).max(4096), device: external_exports.string(), inode: external_exports.string(), connectedAt: external_exports.string().datetime(), baseline: external_exports.record(pathSchema, external_exports.object({ projectHash: nullableHash, directoryHash: nullableHash }).strict()).refine((value) => Object.keys(value).length <= 1e3), ignored: external_exports.array(external_exports.object({ path: external_exports.string().max(512), reason: external_exports.string().max(200) }).strict()).max(200), operation: external_exports.object({ id: idSchema, revision: external_exports.number().int().positive(), phase: external_exports.enum(["writing", "partial", "rechecked", "completed"]), createdAt: external_exports.string().datetime(), steps: external_exports.array(external_exports.object({ path: pathSchema, fromHash: nullableHash, toHash: nullableHash, projectHash: nullableHash, done: external_exports.boolean() }).strict()).max(500), error: external_exports.string().max(4e3).optional() }).strict().optional() }).strict();
+var recordSchema = external_exports.object({ version: external_exports.literal(1), current: codeProjectSchema, snapshots: external_exports.array(codeProjectSchema).min(1).max(CODE_PROJECT_LIMITS.history), undo: external_exports.array(external_exports.number().int().positive()).max(50), redo: external_exports.array(external_exports.number().int().positive()).max(50), history: external_exports.array(external_exports.object({ revision: external_exports.number().int().positive(), createdAt: external_exports.string().datetime({ offset: true }), operation: external_exports.enum(["create", "import", "update", "undo", "redo", "restore"]), restoredFrom: external_exports.number().int().positive().optional() }).strict()).min(1).max(50), sourceLink: sourceLinkSchema.optional() }).strict();
 var changeSchema = external_exports.object({ path: pathSchema, content: external_exports.string().max(12 * 1024 * 1024).optional(), encoding: external_exports.enum(["utf8", "base64"]).optional(), expectedHash: external_exports.string().regex(/^[a-f0-9]{64}$/).nullable() }).strict();
 var updateSchema = external_exports.object({ files: external_exports.array(changeSchema).max(500).optional(), pages: external_exports.array(codePageSchema).min(1).max(CODE_PAGE_LIMIT).optional(), defaultPageId: idSchema.optional(), name: nameSchema.optional(), designSystem: external_exports.unknown().optional(), comments: external_exports.unknown().optional(), viewports: external_exports.unknown().optional() }).strict();
 var CodeProjectStore = class {
@@ -54314,43 +54316,8 @@ var CodeProjectStore = class {
     return this.change(id, expectedRevision, "restore", (record2) => this.snapshot(record2, revision), true, revision);
   }
   async importDirectory(input2) {
-    const directory = await sourceDirectory(input2.directory);
-    const files = [];
-    let total = 0;
-    let visited = 0;
-    const walk2 = async (folder, prefix) => {
-      if (prefix.split("/").length > 24) throw new DesignError("VALIDATION", "Source directory nesting exceeds its budget");
-      for (const entry2 of await readdir(folder, { withFileTypes: true })) {
-        if (++visited > 2e4) throw new DesignError("VALIDATION", "Source directory entry budget exceeded");
-        if (blockedSegments.has(entry2.name.toLowerCase()) || entry2.name === exportManifestName || entry2.name.startsWith(".design-code-")) continue;
-        const name = prefix ? `${prefix}/${entry2.name}` : entry2.name;
-        const filename = join2(folder, entry2.name);
-        const info = await lstat2(filename);
-        if (info.isSymbolicLink()) continue;
-        if (info.isDirectory()) {
-          await walk2(filename, name);
-          continue;
-        }
-        if (!info.isFile()) continue;
-        const extension = extname(name).toLowerCase();
-        if (!textExtensions.has(extension) && !assetExtensions.has(extension)) continue;
-        validateCodePath(name);
-        if (files.length >= CODE_PROJECT_LIMITS.files) throw new DesignError("VALIDATION", "Imported project exceeds 500 files");
-        const binary = assetExtensions.has(extension);
-        const bytes = await readContainedFile(directory, name, binary ? CODE_PROJECT_LIMITS.assetBytes : CODE_PROJECT_LIMITS.textBytes);
-        total += bytes.length;
-        if (total > CODE_PROJECT_LIMITS.projectBytes) throw new DesignError("VALIDATION", "Imported source exceeds 32 MiB");
-        let content;
-        try {
-          content = binary ? bytes.toString("base64") : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-        } catch {
-          throw new DesignError("VALIDATION", `Source file is not valid UTF-8: ${name}`);
-        }
-        files.push({ path: name, content, encoding: binary ? "base64" : "utf8" });
-      }
-    };
-    await walk2(directory, "");
-    files.sort((a, b) => a.path.localeCompare(b.path));
+    const scanned = await scanSourceDirectory(input2.directory);
+    const files = scanned.files;
     const candidates = ["index.html", "src/main.tsx", "src/main.jsx", "src/main.ts", "src/main.js", "src/index.tsx", "src/App.tsx"];
     const entry = input2.entry ?? candidates.find((candidate) => files.some((file2) => file2.path === candidate)) ?? files.find((file2) => [".html", ".htm", ".tsx", ".jsx", ".js", ".mjs", ".ts"].includes(extname(file2.path).toLowerCase()))?.path;
     if (!entry) throw new DesignError("VALIDATION", "No supported HTML or browser source entry was found");
@@ -54360,11 +54327,20 @@ var CodeProjectStore = class {
       project.pages.push({ id: "page_" + sha(Buffer.from(file2.path)).slice(0, 20), name: file2.path, entry: file2.path, route: "/" + file2.path });
     }
     project.designSystem.notes = "\u4ECE\u660E\u786E\u76EE\u5F55\u53EA\u8BFB\u5BFC\u5165\uFF1BHTML \u5165\u53E3\u4F1A\u540C\u65F6\u767B\u8BB0\u76EE\u5F55\u4E2D\u7684\u5176\u4ED6 HTML \u9875\u9762\uFF0CReact \u5165\u53E3\u4EC5\u767B\u8BB0\u660E\u786E\u9009\u62E9\u7684\u5165\u53E3\u3002\u672A\u5B89\u88C5\u4F9D\u8D56\u3001\u6267\u884C\u6E90\u4EE3\u7801\u6216\u8FD0\u884C\u6784\u5EFA\u3002\u9884\u89C8\u7F16\u8BD1\u5668\u4F1A\u62A5\u544A\u7F3A\u5931\u4F9D\u8D56\u4E0E\u4E0D\u652F\u6301\u7684\u5165\u53E3\u3002";
-    return this.insert(validateCodeProject(project), "import");
+    return this.insert(validateCodeProject(project), "import", makeSourceLink(project, scanned));
   }
   async exportDirectory(id, directory, options) {
     const project = await this.get(id);
     if (project.revision !== options.expectedRevision) throw new DesignError("REVISION_CONFLICT", "Read the current code revision before exporting");
+    const linked = (await this.read(id)).sourceLink;
+    if (linked && await sourceDirectory(directory, true) === linked.directory) {
+      const comparison = await this.compareSource(id);
+      if (comparison.revision !== options.expectedRevision) throw new DesignError("REVISION_CONFLICT", "The project changed before its connected-directory export");
+      if (comparison.files.some((file2) => file2.status === "directory" || file2.status === "conflict")) throw new DesignError("REVISION_CONFLICT", "The connected directory has external changes. Compare and pull or explicitly resolve them before writing.");
+      const paths = comparison.files.filter((file2) => file2.status === "project").map((file2) => file2.path);
+      if (paths.length) await this.pushSource(id, options.expectedRevision, paths, void 0, Object.fromEntries(comparison.files.map((file2) => [file2.path, file2.directoryHash])));
+      return { directory: linked.directory, revision: project.revision, files: project.files.map((file2) => file2.path) };
+    }
     const canonical2 = await sourceDirectory(directory, true);
     let release;
     try {
@@ -54441,7 +54417,167 @@ var CodeProjectStore = class {
       if (release) await release();
     }
   }
-  async insert(project, operation) {
+  async sourceStatus(id) {
+    const record2 = await this.read(id);
+    return sourceStatus(record2);
+  }
+  async connectSource(id, expectedRevision, directory) {
+    return this.lock(id, async () => {
+      const record2 = await this.read(id);
+      assertRevision(record2, expectedRevision);
+      if (record2.sourceLink) throw new DesignError("VALIDATION", "This project already has a source directory. Create a separate project to connect another directory.");
+      const scanned = await scanSourceDirectory(directory);
+      record2.sourceLink = makeSourceLink(record2.current, scanned);
+      await this.write(record2);
+      return sourceStatus(record2);
+    });
+  }
+  async compareSource(id) {
+    const record2 = await this.read(id);
+    const scanned = await scanLinked(record2);
+    return compareSource(record2, scanned);
+  }
+  async readSourceDifference(id, path5) {
+    validateCodePath(path5);
+    const record2 = await this.read(id);
+    const scanned = await scanLinked(record2);
+    const difference = compareSource(record2, scanned).files.find((file2) => file2.path === path5);
+    if (!difference) throw new DesignError("NOT_FOUND", "Source path is not part of this comparison");
+    const describe3 = (file2) => file2 ? { path: path5, encoding: file2.encoding, sha256: codeFileHash(file2), bytes: fileBytes(file2).length, ...file2.encoding === "utf8" ? { content: file2.content } : { binary: true } } : null;
+    return { projectId: id, revision: record2.current.revision, file: path5, projectFile: describe3(record2.current.files.find((file2) => file2.path === path5)), directoryFile: describe3(scanned.files.find((file2) => file2.path === path5)), difference };
+  }
+  async pullSource(id, expectedRevision, paths, resolution, expectedDirectoryHashes) {
+    return this.lock(id, async () => {
+      const record2 = await this.read(id);
+      assertRevision(record2, expectedRevision);
+      assertSourceIdle(record2);
+      const scanned = await scanLinked(record2);
+      const comparison = compareSource(record2, scanned);
+      const chosen = selectSourcePaths(comparison, paths, "directory", resolution);
+      assertComparedHashes(chosen, expectedDirectoryHashes);
+      const next = structuredClone(record2.current);
+      const files = new Map(next.files.map((file2) => [file2.path, file2]));
+      for (const state of chosen) {
+        const file2 = scanned.files.find((file3) => file3.path === state.path);
+        if (file2) files.set(state.path, file2);
+        else files.delete(state.path);
+      }
+      next.files = [...files.values()];
+      validateCodeProject(next);
+      for (const state of chosen) setSourceBaseline(record2.sourceLink, state.path, { projectHash: files.has(state.path) ? codeFileHash(files.get(state.path)) : null, directoryHash: state.directoryHash });
+      if (chosen.some((state) => state.projectHash !== state.directoryHash)) await this.commitCurrent(record2, next, "update");
+      else await this.write(record2);
+      return structuredClone(record2.current);
+    });
+  }
+  async pushSource(id, expectedRevision, paths, resolution, expectedDirectoryHashes) {
+    return this.lock(id, async () => {
+      const record2 = await this.read(id);
+      assertRevision(record2, expectedRevision);
+      assertSourceIdle(record2);
+      const link = record2.sourceLink;
+      if (!link) throw new DesignError("VALIDATION", "Connect a source directory first");
+      await assertLinkedIdentity(link);
+      const release = await import_proper_lockfile.default.lock(join2(link.directory, ".design-code-export"), { realpath: false, stale: 3e4, update: 1e4, retries: { retries: 20, minTimeout: 20, maxTimeout: 200 } });
+      try {
+        const scanned = await scanLinked(record2);
+        const comparison = compareSource(record2, scanned);
+        const chosen = selectSourcePaths(comparison, paths, "project", resolution);
+        assertComparedHashes(chosen, expectedDirectoryHashes);
+        const operation = { id: `sync_${randomUUID().replaceAll("-", "")}`, revision: record2.current.revision, phase: "writing", createdAt: (/* @__PURE__ */ new Date()).toISOString(), steps: chosen.map((state) => ({ path: state.path, fromHash: state.directoryHash, toHash: state.projectHash, projectHash: state.projectHash, done: false })) };
+        const projected = structuredClone(link);
+        projected.operation = structuredClone(operation);
+        const recordWithoutLinkBytes = Buffer.byteLength(JSON.stringify(record2)) - Buffer.byteLength(JSON.stringify(link));
+        const checkCapacity = () => {
+          if (!sourceLinkSchema.safeParse(projected).success || recordWithoutLinkBytes + Buffer.byteLength(JSON.stringify(projected)) + 32768 > CODE_PROJECT_LIMITS.storeBytes) throw new DesignError("VALIDATION", "A source journal step would exceed its private storage budget. No source files were written.");
+        };
+        checkCapacity();
+        for (const step of projected.operation.steps) {
+          setSourceBaseline(projected, step.path, { projectHash: step.projectHash, directoryHash: step.toHash });
+          step.done = true;
+          checkCapacity();
+        }
+        link.operation = operation;
+        await this.write(record2);
+        const filesWritten = [];
+        const stage = join2(link.directory, `.design-code-sync-${operation.id}`);
+        try {
+          await mkdir(stage, { mode: 448 });
+          for (const step of operation.steps) {
+            await assertLinkedIdentity(link);
+            if (await sourceHash(link.directory, step.path) !== step.fromHash) throw new DesignError("REVISION_CONFLICT", `Source changed after comparison: ${step.path}`);
+            if (step.toHash === step.fromHash) {
+              step.done = true;
+              setSourceBaseline(link, step.path, { projectHash: step.projectHash, directoryHash: step.toHash });
+              continue;
+            }
+            if (step.toHash === null) await unlink(join2(link.directory, step.path));
+            else {
+              const file2 = record2.current.files.find((file3) => file3.path === step.path);
+              const staged = join2(stage, step.path);
+              await mkdir(dirname(staged), { recursive: true, mode: 448 });
+              const oldMode = await lstat2(join2(link.directory, step.path)).then((info) => info.mode & 511).catch((error62) => {
+                if (missing(error62)) return 384;
+                throw error62;
+              });
+              const handle = await open2(staged, "wx", oldMode);
+              try {
+                await handle.writeFile(fileBytes(file2));
+                await handle.chmod(oldMode);
+                await handle.sync();
+              } finally {
+                await handle.close();
+              }
+              const target = await prepareContainedTarget(link.directory, step.path);
+              if (await sourceHash(link.directory, step.path) !== step.fromHash) throw new DesignError("REVISION_CONFLICT", `Source changed while preparing write: ${step.path}`);
+              await rename(staged, target);
+            }
+            filesWritten.push(step.path);
+            if (await sourceHash(link.directory, step.path) !== step.toHash) throw new DesignError("REVISION_CONFLICT", `Source changed during write: ${step.path}`);
+            step.done = true;
+            setSourceBaseline(link, step.path, { projectHash: step.projectHash, directoryHash: step.toHash });
+          }
+          operation.phase = "completed";
+          await this.write(record2);
+          return sourceStatus(record2);
+        } catch (error62) {
+          operation.phase = "partial";
+          operation.error = (error62 instanceof Error ? error62.message : "Source write failed").slice(0, 4e3);
+          await this.write(record2).catch(() => {
+          });
+          throw Object.assign(new Error(`Source directory write stopped. Recheck the saved operation before retrying: ${operation.error}`), { code: "EXPORT_PARTIAL", partial: true, savedRevision: record2.current.revision, directory: link.directory, filesWritten, pendingFiles: operation.steps.filter((step) => !step.done).map((step) => step.path), operationId: operation.id });
+        } finally {
+          await rm2(stage, { recursive: true, force: true });
+        }
+      } finally {
+        await release();
+      }
+    });
+  }
+  async recheckSource(id) {
+    return this.lock(id, async () => {
+      const record2 = await this.read(id);
+      const scanned = await scanLinked(record2);
+      const operation = record2.sourceLink.operation;
+      if (operation && operation.phase !== "completed") {
+        for (const step of operation.steps) {
+          const hash3 = await sourceHash(record2.sourceLink.directory, step.path);
+          step.done = hash3 === step.toHash;
+          if (step.done) setSourceBaseline(record2.sourceLink, step.path, { projectHash: step.projectHash, directoryHash: step.toHash });
+        }
+        operation.phase = "rechecked";
+        await this.write(record2);
+        const stage = join2(record2.sourceLink.directory, `.design-code-sync-${operation.id}`);
+        const info = await lstat2(stage).catch((error62) => {
+          if (missing(error62)) return void 0;
+          throw error62;
+        });
+        if (info?.isDirectory() && !info.isSymbolicLink()) await rm2(stage, { recursive: true, force: true });
+      }
+      return compareSource(record2, scanned);
+    });
+  }
+  async insert(project, operation, sourceLink) {
     return this.lock(project.id, async () => {
       try {
         await lstat2(this.filename(project.id));
@@ -54449,7 +54585,7 @@ var CodeProjectStore = class {
       } catch (error62) {
         if (!missing(error62)) throw error62;
       }
-      await this.write({ version: 1, current: project, snapshots: [project], undo: [], redo: [], history: [{ revision: 1, createdAt: project.createdAt, operation }] });
+      await this.write({ version: 1, current: project, snapshots: [project], undo: [], redo: [], history: [{ revision: 1, createdAt: project.createdAt, operation }], ...sourceLink ? { sourceLink } : {} });
       return structuredClone(project);
     });
   }
@@ -54463,23 +54599,25 @@ var CodeProjectStore = class {
     return this.lock(id, async () => {
       const record2 = await this.read(id);
       if (record2.current.revision !== expectedRevision) throw new DesignError("REVISION_CONFLICT", `Expected code revision ${expectedRevision}, current ${record2.current.revision}`);
-      const next = build(record2);
-      if (addUndo) {
-        record2.undo.push(record2.current.revision);
-        record2.redo = [];
-      }
-      record2.current = validateCodeProject({ ...next, id, createdAt: record2.current.createdAt, updatedAt: (/* @__PURE__ */ new Date()).toISOString(), revision: expectedRevision + 1 });
-      record2.snapshots.push(record2.current);
-      record2.history.push({ revision: record2.current.revision, createdAt: record2.current.updatedAt, operation, ...restoredFrom === void 0 ? {} : { restoredFrom } });
-      record2.snapshots = record2.snapshots.slice(-50);
-      while (record2.snapshots.length > 1 && Buffer.byteLength(JSON.stringify(record2)) > CODE_PROJECT_LIMITS.storeBytes) record2.snapshots.shift();
-      const revisions = new Set(record2.snapshots.map((item) => item.revision));
-      record2.undo = record2.undo.filter((revision) => revisions.has(revision)).slice(-50);
-      record2.redo = record2.redo.filter((revision) => revisions.has(revision)).slice(-50);
-      record2.history = record2.history.filter((item) => revisions.has(item.revision)).slice(-50);
-      await this.write(record2);
+      await this.commitCurrent(record2, build(record2), operation, addUndo, restoredFrom);
       return structuredClone(record2.current);
     });
+  }
+  async commitCurrent(record2, next, operation, addUndo = true, restoredFrom) {
+    if (addUndo) {
+      record2.undo.push(record2.current.revision);
+      record2.redo = [];
+    }
+    record2.current = validateCodeProject({ ...next, id: record2.current.id, createdAt: record2.current.createdAt, updatedAt: (/* @__PURE__ */ new Date()).toISOString(), revision: record2.current.revision + 1 });
+    record2.snapshots.push(record2.current);
+    record2.history.push({ revision: record2.current.revision, createdAt: record2.current.updatedAt, operation, ...restoredFrom === void 0 ? {} : { restoredFrom } });
+    record2.snapshots = record2.snapshots.slice(-50);
+    while (record2.snapshots.length > 1 && Buffer.byteLength(JSON.stringify(record2)) > CODE_PROJECT_LIMITS.storeBytes) record2.snapshots.shift();
+    const revisions = new Set(record2.snapshots.map((item) => item.revision));
+    record2.undo = record2.undo.filter((revision) => revisions.has(revision)).slice(-50);
+    record2.redo = record2.redo.filter((revision) => revisions.has(revision)).slice(-50);
+    record2.history = record2.history.filter((item) => revisions.has(item.revision)).slice(-50);
+    await this.write(record2);
   }
   filename(id) {
     if (!/^code_[A-Za-z0-9_-]{1,70}$/.test(id)) throw new DesignError("VALIDATION", "Invalid code project ID");
@@ -54530,6 +54668,7 @@ var CodeProjectStore = class {
     }
   }
   async write(record2) {
+    if (record2.sourceLink && !sourceLinkSchema.safeParse(record2.sourceLink).success) throw new DesignError("VALIDATION", "The private source connection is invalid or exceeds its budget; the stored project was not replaced");
     const content = JSON.stringify(record2);
     if (Buffer.byteLength(content) > CODE_PROJECT_LIMITS.storeBytes) throw new DesignError("VALIDATION", "Code history size budget exceeded");
     const temporary = join2(this.dataDir, `.${record2.current.id}.${randomUUID()}.tmp`);
@@ -54590,6 +54729,8 @@ async function readContainedFile(directory, name, limit, manifest = false) {
     if (!opened.isFile() || opened.ino !== info.ino || opened.dev !== info.dev || opened.size > limit) throw new DesignError("REVISION_CONFLICT", "Source identity changed while reading");
     const bytes = await file2.readFile();
     if (bytes.length > limit) throw new DesignError("VALIDATION", "Source size budget exceeded");
+    const after = await file2.stat();
+    if (after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs || bytes.length !== opened.size) throw new DesignError("REVISION_CONFLICT", "Source changed while its bytes were read. Compare again before applying.");
     return bytes;
   } finally {
     await file2.close();
@@ -54605,6 +54746,143 @@ async function prepareContainedTarget(directory, name) {
     if (!info.isDirectory() || info.isSymbolicLink()) throw new DesignError("VALIDATION", "Export parent must not be a symlink");
   }
   return join2(directory, name);
+}
+async function scanSourceDirectory(input2) {
+  const directory = await sourceDirectory(input2);
+  const root = await lstat2(directory);
+  const result3 = { directory, device: String(root.dev), inode: String(root.ino), files: [], hashes: {}, ignored: [], unsafePaths: /* @__PURE__ */ new Set() };
+  let total = 0;
+  let visited = 0;
+  const ignore = (path5, reason) => {
+    if (result3.ignored.length < 200) result3.ignored.push({ path: path5.slice(0, 512), reason });
+  };
+  const walk2 = async (folder, prefix) => {
+    if (prefix.split("/").length > 24) throw new DesignError("VALIDATION", "Source directory nesting exceeds its budget");
+    for (const entry of (await readdir(folder, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (++visited > 2e4) throw new DesignError("VALIDATION", "Source directory entry budget exceeded");
+      const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (blockedSegments.has(entry.name.toLowerCase()) || entry.name === exportManifestName || entry.name.startsWith(".design-code-")) {
+        ignore(name, "Reserved directory or Design synchronization metadata");
+        continue;
+      }
+      const filename = join2(folder, entry.name);
+      const info = await lstat2(filename);
+      if (info.isSymbolicLink()) {
+        result3.unsafePaths.add(name);
+        ignore(name, "Symbolic link was not followed");
+        continue;
+      }
+      if (info.isDirectory()) {
+        await walk2(filename, name);
+        continue;
+      }
+      if (!info.isFile()) {
+        result3.unsafePaths.add(name);
+        ignore(name, "Not a regular file");
+        continue;
+      }
+      const extension = extname(name).toLowerCase();
+      if (!textExtensions.has(extension) && !assetExtensions.has(extension)) {
+        ignore(name, "Unsupported source or asset extension; file stays outside Design");
+        continue;
+      }
+      validateCodePath(name);
+      if (result3.files.length >= CODE_PROJECT_LIMITS.files) throw new DesignError("VALIDATION", "Imported project exceeds 500 files");
+      const binary = assetExtensions.has(extension);
+      const bytes = await readContainedFile(directory, name, binary ? CODE_PROJECT_LIMITS.assetBytes : CODE_PROJECT_LIMITS.textBytes);
+      total += bytes.length;
+      if (total > CODE_PROJECT_LIMITS.projectBytes) throw new DesignError("VALIDATION", "Imported source exceeds 32 MiB");
+      let content;
+      try {
+        content = binary ? bytes.toString("base64") : new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+      } catch {
+        throw new DesignError("VALIDATION", `Source file is not valid UTF-8: ${name}`);
+      }
+      const file2 = { path: name, content, encoding: binary ? "base64" : "utf8" };
+      fileBytes(file2);
+      result3.files.push(file2);
+      result3.hashes[name] = sha(bytes);
+    }
+  };
+  await walk2(directory, "");
+  const finalRoot = await lstat2(directory);
+  if (!finalRoot.isDirectory() || finalRoot.isSymbolicLink() || finalRoot.dev !== root.dev || finalRoot.ino !== root.ino) throw new DesignError("REVISION_CONFLICT", "Source directory identity changed while scanning");
+  result3.files.sort((a, b) => a.path.localeCompare(b.path));
+  return result3;
+}
+function makeSourceLink(project, scanned) {
+  const baseline = {};
+  for (const file2 of project.files) {
+    const projectHash = codeFileHash(file2);
+    if (scanned.hashes[file2.path] === projectHash) baseline[file2.path] = { projectHash, directoryHash: projectHash };
+  }
+  return { id: `source_${randomUUID().replaceAll("-", "")}`, directory: scanned.directory, device: scanned.device, inode: scanned.inode, connectedAt: (/* @__PURE__ */ new Date()).toISOString(), baseline, ignored: scanned.ignored };
+}
+function sourceStatus(record2) {
+  const link = record2.sourceLink;
+  return { projectId: record2.current.id, revision: record2.current.revision, connected: !!link, ...link ? { linkId: link.id, directory: link.directory, connectedAt: link.connectedAt, ignored: link.ignored, ...link.operation ? { operation: structuredClone(link.operation) } : {} } : {} };
+}
+async function assertLinkedIdentity(link) {
+  const canonical2 = await sourceDirectory(link.directory);
+  const info = await lstat2(canonical2);
+  if (canonical2 !== link.directory || String(info.dev) !== link.device || String(info.ino) !== link.inode) throw new DesignError("REVISION_CONFLICT", "The connected directory identity changed. Its files were not written.");
+}
+async function scanLinked(record2) {
+  if (!record2.sourceLink) throw new DesignError("VALIDATION", "Connect a source directory first");
+  await assertLinkedIdentity(record2.sourceLink);
+  const scanned = await scanSourceDirectory(record2.sourceLink.directory);
+  await assertLinkedIdentity(record2.sourceLink);
+  return scanned;
+}
+function compareSource(record2, scanned) {
+  const link = record2.sourceLink;
+  const files = new Map(record2.current.files.map((file2) => [file2.path, codeFileHash(file2)]));
+  const paths = /* @__PURE__ */ new Set([...Object.keys(link.baseline), ...files.keys(), ...Object.keys(scanned.hashes)]);
+  const states = [...paths].sort().map((path5) => {
+    const base = link.baseline[path5] ?? { projectHash: null, directoryHash: null };
+    const projectHash = files.get(path5) ?? null;
+    const directoryHash = scanned.hashes[path5] ?? null;
+    const projectChanged = projectHash !== base.projectHash;
+    const directoryChanged = directoryHash !== base.directoryHash;
+    const issue2 = [...scanned.unsafePaths].some((unsafe) => path5 === unsafe || path5.startsWith(unsafe + "/")) ? "Source path is a symbolic link or is not a regular file" : void 0;
+    return { path: path5, projectHash, directoryHash, baseProjectHash: base.projectHash, baseDirectoryHash: base.directoryHash, ...issue2 ? { issue: issue2 } : {}, status: issue2 || projectChanged && directoryChanged ? "conflict" : projectChanged ? "project" : directoryChanged ? "directory" : "synced" };
+  });
+  return { ...sourceStatus(record2), ignored: scanned.ignored, files: states, checkedAt: (/* @__PURE__ */ new Date()).toISOString() };
+}
+function assertRevision(record2, expected) {
+  if (record2.current.revision !== expected) throw new DesignError("REVISION_CONFLICT", `Expected code revision ${expected}, current ${record2.current.revision}`);
+}
+function assertSourceIdle(record2) {
+  if (record2.sourceLink?.operation && ["writing", "partial"].includes(record2.sourceLink.operation.phase)) throw new DesignError("REVISION_CONFLICT", "A source write needs an explicit recheck before another pull or push");
+}
+function selectSourcePaths(comparison, paths, direction, resolution) {
+  if (!paths.length || paths.length > 500 || new Set(paths).size !== paths.length) throw new DesignError("VALIDATION", "Choose between 1 and 500 distinct source paths");
+  return paths.map((path5) => {
+    validateCodePath(path5);
+    const state = comparison.files.find((file2) => file2.path === path5);
+    if (!state) throw new DesignError("NOT_FOUND", `Unknown source path: ${path5}`);
+    if (state.issue) throw new DesignError("VALIDATION", `Unsafe source path ${path5}: ${state.issue}`);
+    if (resolution && resolution.path === path5) {
+      if (paths.length !== 1 || state.projectHash !== resolution.projectHash || state.directoryHash !== resolution.directoryHash) throw new DesignError("REVISION_CONFLICT", "The inspected conflict changed. Read both sources again before resolving.");
+    } else if (state.status !== direction) throw new DesignError("REVISION_CONFLICT", `Source ${path5} is ${state.status}; only a one-sided ${direction} change can be applied without explicit conflict resolution`);
+    return state;
+  });
+}
+function assertComparedHashes(states, expected) {
+  if (!expected) return;
+  for (const state of states) if (!Object.hasOwn(expected, state.path) || expected[state.path] !== state.directoryHash) throw new DesignError("REVISION_CONFLICT", `Source changed since the inspected comparison: ${state.path}. Compare again before applying.`);
+}
+async function sourceHash(directory, path5) {
+  try {
+    return sha(await readContainedFile(directory, path5, CODE_PROJECT_LIMITS.assetBytes));
+  } catch (error62) {
+    if (missing(error62)) return null;
+    throw error62;
+  }
+}
+function setSourceBaseline(link, path5, baseline) {
+  if (baseline.projectHash === null && baseline.directoryHash === null) delete link.baseline[path5];
+  else link.baseline[path5] = baseline;
 }
 
 // src/code-server.ts
@@ -62811,6 +63089,22 @@ function jsxRecords(file2) {
   uniqueMarkers(records);
   return { ast, records };
 }
+function confirmedLiteralText(record2) {
+  if (!record2.source.editableText) return void 0;
+  if (record2.language === "html") return (record2.node.childNodes ?? []).filter((child) => child.nodeName === "#text").map((child) => child.value ?? "").join("");
+  return record2.node.children.map((child) => {
+    if (child.type === "JSXExpressionContainer") return child.expression.value;
+    const lines = String(child.value).split(/\r\n|\n|\r/);
+    let lastNonEmpty = 0;
+    for (let index = 0; index < lines.length; index++) if (/[^ \t]/.test(lines[index])) lastNonEmpty = index;
+    return lines.map((line, index) => {
+      let text = line.replace(/\t/g, " ");
+      if (index !== 0) text = text.replace(/^ +/, "");
+      if (index !== lines.length - 1) text = text.replace(/ +$/, "");
+      return text + (text && index !== lastNonEmpty ? " " : "");
+    }).join("");
+  }).join("");
+}
 function insertionPoint(content, openingEnd) {
   let index = openingEnd - 1;
   while (index > 0 && /\s/.test(content[index - 1])) index--;
@@ -62872,13 +63166,20 @@ var reactShims = {
   "react/jsx-runtime": `const r=globalThis.__DesignJSXRuntime;export const {Fragment,jsx,jsxs}=r;`,
   "react/jsx-dev-runtime": `const r=globalThis.__DesignJSXDevRuntime;export const {Fragment,jsxDEV}=r;`
 };
-function bridge(project, page, select, sources) {
+function bridge(project, page, select, sources, literalTexts) {
   const sourceFiles = Object.fromEntries(sources.map((source2) => [source2.id, source2.file]));
   const literalSources = Object.fromEntries(sources.map((source2) => [source2.id, source2.editableText]));
   return String.raw`(function(){
-const projectId=${JSON.stringify(project.id)},revision=${JSON.stringify(project.revision)},page=${JSON.stringify(page)},pages=${JSON.stringify(getCodePages(project))},sourceFiles=${JSON.stringify(sourceFiles)},literalSources=${JSON.stringify(literalSources)};
+const projectId=${JSON.stringify(project.id)},revision=${JSON.stringify(project.revision)},page=${JSON.stringify(page)},pages=${JSON.stringify(getCodePages(project))},sourceFiles=${JSON.stringify(sourceFiles)},literalSources=${JSON.stringify(literalSources)},literalTexts=${JSON.stringify(literalTexts)};
 const pageId=page.id;let mode=${JSON.stringify(select ? "select" : "preview")};
 const post=x=>parent.postMessage(Object.assign({projectId,revision,pageId},x),'*');
+const selectElement=(el,target=el)=>{
+  const sourceId=el.getAttribute('data-design-source');if(!sourceFiles[sourceId])return;
+  const s=getComputedStyle(el),computedStyles={};for(const k of ['color','backgroundColor','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','padding','borderRadius','width','height'])computedStyles[k]=s[k];
+  const normalize=text=>text.replace(/\r\n?/g,'\n');
+  const runtimeLiteralText=literalSources[sourceId]===true&&typeof literalTexts[sourceId]==='string'&&[...el.childNodes].every(n=>n.nodeType===3||n.nodeType===8)&&normalize(el.textContent||'')===normalize(literalTexts[sourceId]);
+  post({type:'design:selection',sourceId,file:sourceFiles[sourceId],text:el.textContent,computedStyles,runtimeLiteralText,ancestorMapped:el!==target});
+};
 const scroll=hash=>{if(hash){try{document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({block:'start'});}catch{}}};
 let initialLocation;try{initialLocation=JSON.parse(document.getElementById('design-page-context')?.textContent||'null')}catch{}
 const validInitial=initialLocation?.projectId===projectId&&initialLocation?.revision===revision&&initialLocation?.pageId===pageId;
@@ -62898,14 +63199,12 @@ addEventListener('message',e=>{
   if(e.source!==parent||!e.data||e.data.projectId!==undefined&&e.data.projectId!==projectId||e.data.revision!==undefined&&e.data.revision!==revision||e.data.pageId!==undefined&&e.data.pageId!==pageId)return;
   if(e.data.type==='design:mode'&&['select','preview'].includes(e.data.mode))mode=e.data.mode;
   if(e.data.type==='design:location'){globalThis.designLocation={pageId,pathname:page.route,search:e.data.search||'',hash:e.data.hash||''};scroll(e.data.hash);dispatchEvent(new CustomEvent('design:location',{detail:globalThis.designLocation}));}
-  if(e.data.type==='design:focus'&&sourceFiles[e.data.sourceId]){const el=[...document.querySelectorAll('[data-design-source]')].find(x=>x.getAttribute('data-design-source')===e.data.sourceId);if(el){el.scrollIntoView({block:'center',inline:'nearest'});el.animate&&el.animate([{outline:'3px solid #ea6644',outlineOffset:'3px'},{outline:'3px solid transparent',outlineOffset:'8px'}],{duration:1300});}}
+  if(e.data.type==='design:focus'&&sourceFiles[e.data.sourceId]){const el=[...document.querySelectorAll('[data-design-source]')].find(x=>x.getAttribute('data-design-source')===e.data.sourceId);if(el){el.scrollIntoView({block:'center',inline:'nearest'});el.animate&&el.animate([{outline:'3px solid #ea6644',outlineOffset:'3px'},{outline:'3px solid transparent',outlineOffset:'8px'}],{duration:1300});selectElement(el);}}
 });
 addEventListener('click',e=>{
   if(mode!=='select')return;
   e.preventDefault();e.stopImmediatePropagation();const el=e.target.closest&&e.target.closest('[data-design-source]');if(!el)return;
-  const sourceId=el.getAttribute('data-design-source');if(!sourceFiles[sourceId])return;
-  const s=getComputedStyle(el),computedStyles={};for(const k of ['color','backgroundColor','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','padding','borderRadius','width','height'])computedStyles[k]=s[k];
-  post({type:'design:selection',sourceId,file:sourceFiles[sourceId],text:el.textContent,computedStyles,runtimeLiteralText:literalSources[sourceId]&&[...el.childNodes].every(n=>n.nodeType===3||n.nodeType===8),ancestorMapped:el!==e.target});
+  selectElement(el,e.target);
 },true);
 addEventListener('click',e=>{if(mode==='select'||e.defaultPrevented)return;const link=e.target.closest&&e.target.closest('a[href]');if(!link)return;e.preventDefault();const target=linkTarget(link.getAttribute('href'));if(target)navigate(target.targetPageId,target);});
 addEventListener('error',e=>post({type:'design:runtime-error',message:String(e.message||'Runtime error').slice(0,1000),line:e.lineno}));
@@ -62916,6 +63215,14 @@ async function compileCodeProject(project, options = {}) {
   const diagnostics = [];
   const sources = [];
   const instrument = options.instrument !== false;
+  const literalTexts = {};
+  const collect = (records) => {
+    for (const record2 of records) {
+      sources.push(record2.source);
+      const text = confirmedLiteralText(record2);
+      if (text !== void 0) literalTexts[record2.source.id] = text;
+    }
+  };
   const result3 = { projectId: project.id, revision: project.revision, pageId: options.pageId ?? project.defaultPageId, pages: [], html: "", diagnostics, sources };
   try {
     const page = options.viewportId ? resolveCodePageViewport(project, options).page : resolveCodePage(project, options.pageId);
@@ -62969,7 +63276,7 @@ async function compileCodeProject(project, options = {}) {
         const loader = extension === ".tsx" ? "tsx" : extension === ".ts" ? "ts" : extension === ".jsx" ? "jsx" : extension === ".json" ? "json" : "js";
         if (["tsx", "jsx"].includes(loader)) {
           const collected = jsxRecords(file2);
-          sources.push(...collected.records.map((record2) => record2.source));
+          collect(collected.records);
           return { contents: instrumentJs(file2, collected.records, instrument, assetReference), loader };
         }
         return { contents: file2.content, loader };
@@ -62978,7 +63285,7 @@ async function compileCodeProject(project, options = {}) {
     if (/\.html?$/i.test(entry.path)) {
       if (entry.encoding !== "utf8") throw new Error("HTML entry must use UTF-8 encoding.");
       const collected = htmlRecords(entry);
-      sources.push(...collected.records.map((record2) => record2.source));
+      collect(collected.records);
       const edits = [];
       let index = 0;
       visit2(collected.tree, (node2) => {
@@ -63094,7 +63401,7 @@ async function compileCodeProject(project, options = {}) {
     }
     const vendor = needReact ? await readFile2(fileURLToPath(new URL("../runtime/react-vendor.js", import.meta.url)), "utf8") : "";
     const csp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
-    const head = `<meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer">${codePageRuntimeContext(project, page)}<script>${scriptSafe(bridge(project, page, instrument, sources))}</script><style>${styles.join("\n").replace(/<\/style/gi, "<\\/style")}</style>`;
+    const head = `<meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer">${codePageRuntimeContext(project, page)}<script>${scriptSafe(bridge(project, page, instrument, sources, literalTexts))}</script><style>${styles.join("\n").replace(/<\/style/gi, "<\\/style")}</style>`;
     const runtime = `${vendor ? `<script>${scriptSafe(vendor)}</script>` : ""}${deferredClassic.join("")}${scripts.map((script) => `<script>${scriptSafe(script)}</script>`).join("")}`;
     html = /<head(?:\s[^>]*)?>/i.test(html) ? html.replace(/<head(?:\s[^>]*)?>/i, (match) => match + head) : head + html;
     result3.html = /<\/body\s*>/i.test(html) ? html.replace(/<\/body\s*>/i, () => runtime + "</body>") : html + runtime;
@@ -64277,7 +64584,7 @@ function result(value) {
 }
 function failure2(error62) {
   const e = error62;
-  return { isError: true, content: [{ type: "text", text: e.message ?? "Code design operation failed." }], structuredContent: { error: { code: e.code ?? "CODE_DESIGN_ERROR", message: e.message ?? "Code design operation failed.", ...e.partial ? { partial: true, savedRevision: e.savedRevision } : {} } } };
+  return { isError: true, content: [{ type: "text", text: e.message ?? "Code design operation failed." }], structuredContent: { error: { code: e.code ?? "CODE_DESIGN_ERROR", message: e.message ?? "Code design operation failed.", ...e.partial ? { partial: true, savedRevision: e.savedRevision, directory: e.directory, filesWritten: e.filesWritten ?? [], pendingFiles: e.pendingFiles ?? [], operationId: e.operationId } : {} } } };
 }
 function registerCodeTools(server, store, runtime) {
   function tool(name, description, shape, handler, writes = false, openWorld = false) {
@@ -64343,6 +64650,18 @@ function registerCodeTools(server, store, runtime) {
     return { project: await store.update(projectId, expectedRevision, { files: [...changes, ...stale], designSystem }), diagnostics: bundled.diagnostics, provenance, requiresIntegration: true, guide: "docs/design-system-guide.md" };
   }, true);
   tool("design_code_write_directory", "Export actual project source into an explicitly selected local directory using a synchronization manifest. Refuses to overwrite external edits or unrelated files.", { ...revisionInput, directory: external_exports.string().min(1).max(4096) }, async ({ projectId, expectedRevision, directory }) => store.exportDirectory(projectId, directory, { expectedRevision }), true);
+  tool("design_code_source_status", "Read the private source connection and any interrupted write journal. Local paths are not part of the exportable CodeProject.", projectInput, async ({ projectId }) => store.sourceStatus(projectId));
+  tool("design_code_connect_directory", "Explicitly connect an existing directory without writing it. Only matching existing files establish a common baseline; differing files remain conflicts.", { ...revisionInput, directory: external_exports.string().min(1).max(4096) }, async ({ projectId, expectedRevision, directory }) => store.connectSource(projectId, expectedRevision, directory), true);
+  tool("design_code_compare_source", "Read current project, baseline and connected directory hashes. Does not watch, write files, execute scripts or start inference.", projectInput, async ({ projectId }) => store.compareSource(projectId));
+  const sourceSelection = { ...revisionInput, paths: external_exports.array(external_exports.string().min(1).max(512)).min(1).max(500), expectedDirectoryHashes: external_exports.record(external_exports.string(), external_exports.string().regex(/^[a-f0-9]{64}$/).nullable()).refine((value) => Object.keys(value).length <= 500) };
+  tool("design_code_pull_source", "Pull explicitly selected directory-only changes into the same project using the inspected directory hashes. Conflicts are rejected; metadata references remain validated.", sourceSelection, async ({ projectId, expectedRevision, paths, expectedDirectoryHashes }) => ({ project: await store.pullSource(projectId, expectedRevision, paths, void 0, expectedDirectoryHashes) }), true);
+  tool("design_code_push_source", "Push explicitly selected project-only changes into the connected directory. Rechecks observed hashes and persists a recoverable per-file write journal. Never overwrites a two-sided change.", sourceSelection, async ({ projectId, expectedRevision, paths, expectedDirectoryHashes }) => store.pushSource(projectId, expectedRevision, paths, void 0, expectedDirectoryHashes), true);
+  tool("design_code_recheck_source", "Explicitly inspect an interrupted source write using actual disk hashes, reconcile completed steps and retain new conflicts. Does not retry writes.", projectInput, async ({ projectId }) => store.recheckSource(projectId), true);
+  tool("design_code_read_source_difference", "Read the actual project and connected-directory versions of one file for explicit conflict inspection. Binary files return hashes and metadata only.", { ...projectInput, file: external_exports.string().min(1).max(512) }, async ({ projectId, file: file2 }) => store.readSourceDifference(projectId, file2));
+  tool("design_code_resolve_source", "Explicitly choose an inspected side of a source conflict. Requires both exact hashes and the project revision; stale selections cannot overwrite later edits.", { ...revisionInput, file: external_exports.string().min(1).max(512), expectedProjectHash: external_exports.string().regex(/^[a-f0-9]{64}$/).nullable(), expectedDirectoryHash: external_exports.string().regex(/^[a-f0-9]{64}$/).nullable(), choice: external_exports.enum(["project", "directory"]) }, async ({ projectId, expectedRevision, file: file2, expectedProjectHash, expectedDirectoryHash, choice }) => {
+    const resolution = { path: file2, projectHash: expectedProjectHash, directoryHash: expectedDirectoryHash };
+    return choice === "directory" ? { project: await store.pullSource(projectId, expectedRevision, [file2], resolution) } : store.pushSource(projectId, expectedRevision, [file2], resolution);
+  }, true);
   tool("design_code_import_asset", "Import an explicitly selected local image/font as project asset bytes without copying binary content through the model context.", { ...revisionInput, file: external_exports.string().min(1).max(4096), targetPath: external_exports.string().min(1).max(512), expectedHash: external_exports.string().regex(/^[a-f0-9]{64}$/).nullable() }, async ({ projectId, expectedRevision, file: file2, targetPath, expectedHash }) => {
     if (!path3.isAbsolute(file2)) throw new Error("Choose an absolute local asset path.");
     const info = await lstat5(file2);
@@ -64439,7 +64758,7 @@ async function createDesignServer(options = {}) {
     }
   });
   N3(server, "Design studio", panelUri, { mimeType: p }, async () => ({ contents: [{ uri: panelUri, mimeType: p, text: panelHtml, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] } }, "openai/ui": { availableDisplayModes: ["inline", "fullscreen"] } } }] }));
-  tool("design_get_capabilities", "Read actual Design capabilities and model modes before use.", {}, async () => ({ version: VERSION, projectFormat: 2, editor: "source", modelModes: [{ id: "host", name: "\u5F53\u524D\u804A\u5929", default: true }, { id: "codex", name: "\u72EC\u7ACB\u672C\u5730 Codex", requires: "Installed Codex CLI and its existing ChatGPT login" }], formats: ["html", "zip", ...await browserExecutable() ? ["png", "pdf"] : []], templates: ["html", "react"], workflow: "Actual HTML/React/TSX/CSS source, source hashes, revision checks, source selection, sandbox interaction, real screenshots and browser diagnostics. Use design_code_* tools.", sourceSync: "Source import/export with per-file hash protection.", credentials: "Managed by Codex. No API key, token copying or separate OAuth.", unsupported: "No scene document or older project format migration. Unsupported files are reported and never silently rewritten or deleted." }));
+  tool("design_get_capabilities", "Read actual Design capabilities and model modes before use.", {}, async () => ({ version: VERSION, projectFormat: 2, editor: "source", modelModes: [{ id: "host", name: "\u5F53\u524D\u804A\u5929", default: true }, { id: "codex", name: "\u72EC\u7ACB\u672C\u5730 Codex", requires: "Installed Codex CLI and its existing ChatGPT login" }], formats: ["html", "zip", ...await browserExecutable() ? ["png", "pdf"] : []], templates: ["html", "react"], workflow: "Actual HTML/React/TSX/CSS source, source hashes, revision checks, source selection, sandbox interaction, real screenshots and browser diagnostics. Use design_code_* tools.", sourceSync: "Connected directories use explicit hash-checked comparison, pull/push, conflict selection and journal recheck. Other directory exports use manifest protection without journal recovery.", credentials: "Managed by Codex. No API key, token copying or separate OAuth.", unsupported: "No scene document or older project format migration. Unsupported files are reported and never silently rewritten or deleted." }));
   tool("design_get_guidance", "Read task-specific art direction before generating or refining a design. Existing brand and user intent take priority.", { directionId: external_exports.string().min(1).max(80).optional(), brief: external_exports.string().max(3e4).optional(), taskType: external_exports.enum(["landing", "workbench", "data", "editorial", "brand", "components", "prototype", "comparison", "diagram", "general"]).optional(), effort: external_exports.enum(["quick", "standard", "explore", "polish"]).optional(), scope: external_exports.enum(["new", "local", "system"]).optional(), preserveExisting: external_exports.boolean().optional(), existingSystem: external_exports.string().max(12e3).optional(), candidateCount: external_exports.union([external_exports.literal(2), external_exports.literal(3)]).optional() }, async (input2) => getDesignGuidance(input2));
   tool("design_list_models", "Read the actual model catalog from locally installed Codex using its existing login. A listed model is not proof of inference entitlement.", {}, async () => catalog.listModels(), true);
   registerCodeTools(server, codeStore, codeRuntime);
