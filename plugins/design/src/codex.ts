@@ -5,11 +5,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { DESIGN_LIMITS, validateDocument } from './model.ts';
+import { DESIGN_LIMITS, DesignError, validateDocument } from './model.ts';
 import type { DesignDocument } from './model.ts';
-import { applyPatches, patchSchema } from './operations.ts';
+import { applyPatches } from './operations.ts';
 import type { DesignPatch } from './operations.ts';
 import { buildArtDirectionPrompt } from './art-direction.ts';
+import { VERSION } from './version.ts';
 
 export interface GenerationJob {
   id: string; projectId: string; baseRevision: number;
@@ -24,8 +25,69 @@ const MAX_BYTES = 4 * 1024 * 1024;
 const disabledFeatures = ['apps', 'plugins', 'remote_plugin', 'browser_use', 'browser_use_external', 'computer_use', 'multi_agent', 'multi_agent_v2', 'hooks', 'skill_mcp_dependency_install', 'skill_search', 'memories', 'shell_tool', 'unified_exec', 'shell_snapshot', 'view_image', 'image_generation', 'code_mode', 'code_mode_host', 'sleep_tool', 'goals', 'in_app_browser', 'workspace_dependencies', 'recommended_plugins', 'tool_suggest'];
 const outputSchema = { type: 'object', additionalProperties: false, properties: { patches: { type: 'array', minItems: 1, maxItems: DESIGN_LIMITS.patches, items: { type: 'object', additionalProperties: false, properties: { op: { type: 'string', enum: ['add', 'replace', 'remove'] }, path: { type: 'string' }, valueJson: { type: 'string', description: 'JSON-serialized value; for remove use null serialized as "null".' } }, required: ['op', 'path', 'valueJson'] } } }, required: ['patches'] };
 const responseSchema = z.object({ patches: z.array(z.object({ op: z.enum(['add', 'replace', 'remove']), path: z.string().max(2048), valueJson: z.string().max(MAX_BYTES) }).strict()).min(1).max(DESIGN_LIMITS.patches) }).strict();
+const documentGuide = `Exact Design document constraints (all objects are strict: no extra CSS or framework fields):
+Patch envelope: {patches:[{op:"add"|"replace"|"remove",path:string,valueJson:string}]}; 1..500 patches. valueJson is serialized JSON, not a JS expression; remove uses "null". Paths use RFC6901 escaping, never patch id/schemaVersion/revision/createdAt/updatedAt or nested id fields. Add creates a property or inserts an array item; replace requires the target to exist. To introduce optional node fields that are currently absent use add. Root replacement is unsupported. Existing object IDs must survive replacement; new objects have new globally unique IDs. Replace collections explicitly to reorder items. All patches apply to the original base revision atomically, never to a previously rejected proposal.
+Shared primitives: id matches ^[A-Za-z][A-Za-z0-9_-]{0,79}$; name is trimmed nonempty string <=200 chars. Every coordinate x,y is finite [-100000,100000]; every width,height is finite >0 and <=20000. All numbers must be finite. Required fields must not be omitted; optional fields must be omitted rather than null. Document has schemaVersion:1,id,name,revision:positive safe integer,createdAt/updatedAt:ISO date-time,designSystem,artboards,assets,comments. Metadata is retained unchanged.
+Artboard requires {id,name,x,y,width,height,background,nodes}; artboards count 1..100. Node requires {id,name,type,x,y,width,height,style,children}; type is frame|text|rectangle|ellipse|image|button|input|component; children is always an array (empty for a leaf). Optional fields: text:string <=100000; assetId,componentId:valid IDs; visible,locked:boolean; layout; interaction. Total nodes <=10000, nesting <=32. A component node requires componentId; all asset/component IDs reference existing collections. Do not invent asset IDs.
+Style permits only fill,color,stroke:Color; strokeWidth:number[0,200]; radius:number[0,10000]; opacity:number[0,1]; fontFamily:CssText; fontSize:number[1,1000]; fontWeight:integer[100,1000]; lineHeight:number[0.5,4] AS A UNITLESS RATIO, e.g.1.5, NEVER pixel values like24; textAlign:left|center|right|justify; shadow:CssText. There are no fontStyle,letterSpacing,padding,margin,border,backgroundColor,display or CSS shorthand fields in style.
+Color is an existing $token.name reference, hex #RGB/#RGBA/#RRGGBB/#RRGGBBAA, numeric rgb/rgba/hsl/hsla(), or one of none,transparent,currentColor,black,white,red,green,blue,gray,grey,yellow,orange,purple,pink,navy,teal,lime,cyan,magenta,silver,maroon,olive,aqua,fuchsia. Other CSS named colors are unsupported. CssText is a nonempty string <=300, without semicolons,braces,angle brackets,backslashes,control characters,url(),expression(),@import,javascript: or data:. Layout requires {mode:absolute|row|column|grid,gap:number[0,10000],padding:number[0,10000]}; optional columns:integer[1,100],align:start|center|end|stretch,justify:start|center|end|space-between|space-around. No percentage/string dimensions. Positions of children are local to their parent.
+Interaction requires {action:navigate|url|toggle,target:nonempty string<=2048}; navigate references an artboard ID, toggle a node ID, url uses http/https/mailto. No missing interaction targets or complex event handlers. States requiring unsupported logic are separate explanatory artboards, not fabricated working behavior.
+DesignSystem requires {name,tokens,components}; tokens is a map <=500 entries, key matches ^[A-Za-z][A-Za-z0-9_.-]{0,99}$ and each value is CssText. All $token.name references must exist; token cycles are invalid. Components <=200, each {id,name,node:complete Node}; component cycles invalid. Assets <=200, each {id,name,mimeType:image/png|image/jpeg|image/webp,data:real matching canonical base64}, total decoded bytes<=20MiB. Existing asset bytes are omitted only from prompt context; preserve those actual assets and never write the omission marker. Do not create fictitious image bytes.
+Comments <=2000, each {id,artboardId,nodeId?:valid ID,text:nonempty string<=10000,status:open|resolved,createdAt:ISO date-time}; nodeId must belong to artboardId. IDs across document,boards,nodes,components,assets,comments are globally unique. Document<=32MiB. Reuse existing design-system tokens and unchanged nodes; new artboards/nodes are allowed. Return only the patch envelope, never an entire document or markdown.`;
 
-class Session {
+class ProposalValidationError extends Error {}
+const safeFields = new Set(['document','proposal','patches','op','path','valueJson','value','schemaVersion','id','name','revision','createdAt','updatedAt','designSystem','tokens','components','node','artboards','assets','comments','x','y','width','height','background','nodes','type','text','assetId','componentId','style','layout','children','interaction','visible','locked','fill','color','stroke','strokeWidth','radius','opacity','fontFamily','fontSize','fontWeight','lineHeight','textAlign','shadow','mode','gap','padding','columns','align','justify','action','target','mimeType','data','artboardId','nodeId','status']);
+function safeValidationPath(path: readonly PropertyKey[] | string): string {
+  const parts = typeof path === 'string' ? path.split(/[/.]/).filter(Boolean) : path;
+  return parts.slice(0, 40).map(part => typeof part === 'number' || /^\d{1,8}$/.test(String(part)) ? String(part) : safeFields.has(String(part)) ? String(part) : '[key]').join('.') || 'document';
+}
+function safeValidationMessage(message: string): string {
+  if (/^Too (?:big|small): expected (?:number|string|array) to (?:be |have )?[\w<>= ]*[\d.]+(?: (?:characters|items))?$/.test(message)) return message;
+  if (/^Invalid input: expected (?:string|number|int|boolean|array|object|undefined|never), received (?:string|number|int|boolean|array|object|undefined|null|NaN)$/.test(message)) return message;
+  if (message.startsWith('Unrecognized key')) return 'Unknown properties are not allowed.';
+  const messages: Array<[RegExp, string]> = [
+    [/^Duplicate ID:/, 'IDs must be globally unique.'], [/^Unknown design token:/, 'Unknown design token reference.'],
+    [/^Unknown asset:/, 'Unknown asset reference.'], [/^Unknown component:/, 'Unknown component reference.'],
+    [/^Unknown navigation artboard:/, 'Unknown navigation artboard reference.'], [/^Unknown toggle node:/, 'Unknown toggle node reference.'],
+    [/^Component instance .* requires componentId$/, 'Component nodes require componentId.'], [/^Comment node does not belong/, 'Comment node must belong to its artboard.'],
+    [/^Unknown comment artboard:/, 'Unknown comment artboard reference.'], [/^(?:Component reference|Design token) cycle:/, 'Reference cycles are not allowed.'],
+    [/^(?:Invalid base64 asset|Asset content does not match its media type):/, 'Asset bytes must match the declared media type.'],
+    [/^Patch (?:parent|target) does not exist:/, 'Patch parent or target does not exist. Use add for absent optional fields.'],
+  ];
+  for (const [pattern, safe] of messages) if (pattern.test(message)) return safe;
+  const allowed = ['Unsupported color value','Unsafe style value','Too many design tokens','Node count or nesting budget exceeded','Asset size budget exceeded','Interaction URL protocol is not allowed','Invalid interaction URL','Document nesting or entry budget exceeded','Document size budget exceeded','Numbers must be finite','Values must be JSON serializable','Circular or shared object references are not supported','Values must be plain JSON objects','Unsafe property name','Accessors and hidden properties are not supported','Patch paths must be valid RFC 6901 JSON pointers','Unsafe patch path','IDs and document metadata cannot be patched','Invalid array index','Array index is out of bounds','Replacing an identified object must preserve its ID','Root replacement is not supported','Patch parent must be an object or array'];
+  return allowed.includes(message) ? message : 'Value does not match the document schema.';
+}
+function localValidationError(error: DesignError | z.ZodError, context: string): ProposalValidationError {
+  const details = error instanceof z.ZodError
+    ? error.issues.slice(0, 8).map(issue => `${safeValidationPath(issue.path)}: ${safeValidationMessage(issue.message)}`)
+    : error.message.split('; ').slice(0, 8).map(issue => {
+      const match = /^([A-Za-z0-9_.]+): (.*)$/.exec(issue);
+      return match && (safeFields.has(match[1]!) || match[1]?.includes('.')) ? `${safeValidationPath(match[1]!)}: ${safeValidationMessage(match[2]!)}` : safeValidationMessage(issue);
+    });
+  return new ProposalValidationError(`Codex proposal validation failed (${context}): ${details.join('; ')}`);
+}
+function parseProposal(text: string, document: DesignDocument): DesignPatch[] {
+  let raw: unknown;
+  try { raw = JSON.parse(text); } catch { throw new ProposalValidationError('Codex proposal validation failed at proposal: Expected a JSON object.'); }
+  const result = responseSchema.safeParse(raw);
+  if (!result.success) throw localValidationError(result.error, 'proposal');
+  const patches = result.data.patches.map((patch, index): DesignPatch => {
+    if (patch.op === 'remove') return { op: patch.op, path: patch.path };
+    let value: unknown;
+    try { value = JSON.parse(patch.valueJson); } catch { throw new ProposalValidationError(`Codex proposal validation failed at patches.${index}.valueJson: Expected serialized JSON.`); }
+    return { op: patch.op, path: patch.path, value };
+  });
+  try { applyPatches(document, patches); }
+  catch (error) {
+    if (!(error instanceof DesignError) && !(error instanceof z.ZodError)) throw new Error('The generated proposal could not be validated.');
+    const context = patches.slice(0, 4).map((patch, index) => `patches.${index} -> ${safeValidationPath(patch.path)}`).join(', ');
+    throw localValidationError(error, context);
+  }
+  return patches;
+}
+
+export class Session {
   readonly child: ChildProcessWithoutNullStreams;
   readonly closed: Promise<void>;
   private stopped = false;
@@ -92,7 +154,7 @@ class Session {
     });
   }
   async initialize(): Promise<void> {
-    await this.request('initialize', { clientInfo: { name: 'codex_design', title: 'Design', version: '0.1.0' }, capabilities: { experimentalApi: true } });
+    await this.request('initialize', { clientInfo: { name: 'codex_design', title: 'Design', version: VERSION }, capabilities: { experimentalApi: true } });
     this.send({ method: 'initialized', params: {} });
   }
   close(): Promise<void> {
@@ -187,18 +249,25 @@ export class CodexDesignRuntime {
       cwd = await mkdtemp(join(tmpdir(), 'codex-design-worker-'));
       if (state.cancelRequested || this.disposed) return;
       const session = this.session(cwd); state.session = session;
-      let resolveTurn!: () => void; let rejectTurn!: (error: Error) => void;
-      const turnDone = new Promise<void>((resolve, reject) => { resolveTurn = resolve; rejectTurn = reject; });
-      // Observe rejection immediately; protocol startup may still be awaiting a response.
-      void turnDone.catch(() => {});
+      let resolveTurn!: () => void; let rejectTurn!: (error: Error) => void; let turnDone!: Promise<void>;
       let completedText = ''; let outputBytes = 0; const deltas = new Map<string, string>();
+      const completedTurnIds = new Set<string>();
+      const resetTurn = (): void => {
+        state.turnId = undefined; completedText = ''; outputBytes = 0; deltas.clear(); terminal.value = 'failed';
+        turnDone = new Promise<void>((resolve, reject) => { resolveTurn = resolve; rejectTurn = reject; });
+        // Observe rejection immediately while protocol startup may still await a response.
+        void turnDone.catch(() => {});
+      };
+      resetTurn();
       const stopTurn = (message: string): void => { rejectTurn(new Error(message)); void session.close(); };
       session.onfailure = error => rejectTurn(error);
       timer = setTimeout(() => { failure = 'Local Codex generation timed out.'; rejectTurn(new Error(failure)); void session.close(); }, this.timeoutMs);
       const startedAt = Date.now(); let stage = 'initializing the worker';
+      const deadline = startedAt + this.timeoutMs;
       progressTimer = setInterval(() => finishLog(`Local Codex is still running (${Math.floor((Date.now() - startedAt) / 1000)} seconds elapsed; ${stage}).`), 30_000);
       session.onnotification = (method, params) => {
         if (state.threadId && params.threadId && params.threadId !== state.threadId) return;
+        if (typeof params.turnId === 'string' && completedTurnIds.has(params.turnId)) return;
         if (state.turnId && params.turnId && params.turnId !== state.turnId) return;
         if (method === 'item/agentMessage/delta' && typeof params.delta === 'string') {
           outputBytes += Buffer.byteLength(params.delta);
@@ -214,6 +283,7 @@ export class CodexDesignRuntime {
           } else if (['commandExecution', 'fileChange', 'mcpToolCall', 'dynamicToolCall', 'webSearch', 'imageGeneration'].includes(item.type)) stopTurn('Codex attempted a tool in a generation that permits no tools.');
         } else if (method === 'turn/completed') {
           const turn = object(params.turn);
+          if (typeof turn.id === 'string' && completedTurnIds.has(turn.id)) return;
           if (state.turnId && turn.id && turn.id !== state.turnId) return;
           if (turn.status === 'completed') {
             const finalItem = Array.isArray(turn.items) ? turn.items.map(object).filter(item => item.type === 'agentMessage' && typeof item.text === 'string').at(-1) : undefined;
@@ -221,7 +291,8 @@ export class CodexDesignRuntime {
               if (Buffer.byteLength(finalItem.text) > MAX_BYTES) { stopTurn('Codex design output exceeded its size limit.'); return; }
               completedText = finalItem.text;
             }
-            terminal.value = 'completed'; if (!completedText) completedText = [...deltas.values()].at(-1) ?? ''; resolveTurn();
+            terminal.value = 'completed'; if (typeof turn.id === 'string') completedTurnIds.add(turn.id);
+            if (!completedText) completedText = [...deltas.values()].at(-1) ?? ''; resolveTurn();
           }
           else rejectTurn(new Error('The local Codex turn failed or was interrupted.'));
         } else if (method === 'error' && params.willRetry !== true) rejectTurn(new Error('The local Codex worker reported an inference error.'));
@@ -239,22 +310,35 @@ export class CodexDesignRuntime {
       state.threadId = thread.id; finishLog('Generating a structured proposal in a read-only ephemeral thread.');
       if (state.cancelRequested || this.disposed) return;
       const contextDocument = { ...document, assets: document.assets.map(({ data, ...metadata }) => ({ ...metadata, data: '[asset bytes omitted; preserve the existing asset and reference its ID]', byteLength: Buffer.byteLength(data, 'base64') })) };
-      const guide = 'You may create new artboards and nodes, not only edit existing templates. A new artboard requires id,name,x,y,width,height,background,nodes. A node requires id,name,type,x,y,width,height,style,children. Node types: frame,text,rectangle,ellipse,image,button,input,component. Optional fields: text,assetId,componentId,visible,locked; layout:{mode:absolute|row|column|grid,gap,padding,columns?,align:start|center|end|stretch,justify:start|center|end|space-between|space-around}; interaction:{action:navigate|url|toggle,target}. Style supports fill,color,stroke,strokeWidth,radius,opacity,fontFamily,fontSize,fontWeight,lineHeight,textAlign,shadow. Reuse designSystem tokens as $token.name. Use unique stable IDs for new objects. Existing asset bytes are omitted from this context and must not be replaced with the omission marker. Preserve assets when replacing a whole collection. Return minimal JSON patches rather than a complete document.';
       const artDirection = buildArtDirectionPrompt({ brief: prompt });
-      const turnResponse = object(await session.request('turn/start', { threadId: state.threadId, approvalPolicy: 'never', environments: [], input: [{ type: 'text', text: JSON.stringify({ task: prompt, guide, artDirection, document: contextDocument }), text_elements: [] }], outputSchema }));
-      const turn = object(turnResponse.turn);
-      if (typeof turn.id !== 'string') throw new Error('Codex did not return a valid generation turn ID.');
-      state.turnId = turn.id;
-      stage = 'waiting for the structured proposal';
-      await turnDone;
-      if (terminal.value !== 'completed' || state.cancelRequested) return;
-      let parsed: z.infer<typeof responseSchema>;
-      try { parsed = responseSchema.parse(JSON.parse(completedText)); } catch { throw new Error('Codex did not return a valid structured patch proposal.'); }
-      const patches = parsed.patches.map(patch => patch.op === 'remove' ? { op: patch.op, path: patch.path } : { op: patch.op, path: patch.path, value: JSON.parse(patch.valueJson) }) as DesignPatch[];
-      z.array(patchSchema).parse(patches);
-      // Validate the whole proposed document before exposing any completed proposal.
-      applyPatches(document, patches);
-      state.job.output = patches;
+      let repairError: ProposalValidationError | undefined;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (state.cancelRequested || this.disposed) return;
+        if (Date.now() >= deadline) throw new Error('Local Codex generation timed out.');
+        if (attempt > 0) resetTurn();
+        const input = repairError
+          ? { task: 'Repair the previous completed proposal once. Return a complete corrected patch list against the ORIGINAL document; rejected patches were never applied. Preserve the intended visual design. Only correct JSON/schema/reference errors; do not use tools or expand scope.', projectId: document.id, baseRevision: document.revision, validationError: repairError.message, guide: documentGuide }
+          : { task: prompt, guide: documentGuide, artDirection, document: contextDocument };
+        const turnResponse = object(await session.request('turn/start', { threadId: state.threadId, approvalPolicy: 'never', environments: [], input: [{ type: 'text', text: JSON.stringify(input), text_elements: [] }], outputSchema }));
+        const turn = object(turnResponse.turn);
+        if (typeof turn.id !== 'string') throw new Error('Codex did not return a valid generation turn ID.');
+        state.turnId = turn.id;
+        stage = attempt === 0 ? 'waiting for the structured proposal' : 'waiting for the single structural repair';
+        await turnDone;
+        if (terminal.value !== 'completed' || state.cancelRequested || this.disposed) return;
+        if (Date.now() >= deadline) throw new Error('Local Codex generation timed out.');
+        try {
+          // Both attempts validate against this exact original document and base revision.
+          state.job.output = parseProposal(completedText, document);
+          break;
+        } catch (error) {
+          if (!(error instanceof ProposalValidationError)) throw error;
+          if (attempt !== 0 || state.cancelRequested || this.disposed || Date.now() >= deadline) throw error;
+          repairError = error;
+          finishLog(error.message);
+          finishLog('The turn completed with an invalid proposal. Requesting one structural repair in the same read-only thread.');
+        }
+      }
     } catch (error) {
       terminal.value = 'failed'; failure ??= error instanceof Error ? error.message : 'Local Codex generation failed.';
       // Errors from local validators are safe; raw app-server diagnostics never reach here.

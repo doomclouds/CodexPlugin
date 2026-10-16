@@ -1,12 +1,23 @@
 import { build } from 'esbuild';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, cp } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Script } from 'node:vm';
+import { createRequire } from 'node:module';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 await mkdir(path.join(root,'runtime'),{recursive:true});
-const server=await build({absWorkingDir:root,entryPoints:['src/index.ts'],outfile:'runtime/index.js',bundle:true,platform:'node',format:'esm',target:'node22',metafile:true,banner:{js:'import { createRequire } from "node:module"; const require=createRequire(import.meta.url);'}});
+const resolve=createRequire(import.meta.url);
+const wasmRoot=path.dirname(resolve.resolve('esbuild-wasm/package.json'));
+await cp(wasmRoot,path.join(root,'runtime/vendor/esbuild-wasm'),{recursive:true});
+// The upstream Go launcher has an unreachable legacy package fallback on modern Node.
+// Keep every shipped reference resolvable even when the fallback is never taken.
+const wasmLauncher=path.join(root,'runtime/vendor/esbuild-wasm/wasm_exec_node.js');
+await writeFile(wasmLauncher,(await readFile(wasmLauncher,'utf8')).replace('require("performance")','require("node:perf_hooks").performance'));
+const goLicense=await readFile(path.join(root,'assets/go-LICENSE.txt'),'utf8');
+await writeFile(path.join(root,'runtime/vendor/esbuild-wasm/LICENSE'),goLicense);
+const react=await build({absWorkingDir:root,stdin:{contents:'import * as React from "react"; import * as Client from "react-dom/client"; import * as DOM from "react-dom"; import * as JSX from "react/jsx-runtime"; import * as JSXDev from "react/jsx-dev-runtime"; globalThis.__DesignReact=React; globalThis.__DesignReactDOMClient=Client; globalThis.__DesignReactDOM=DOM; globalThis.__DesignJSXRuntime=JSX; globalThis.__DesignJSXDevRuntime=JSXDev;',resolveDir:root},outfile:'runtime/react-vendor.js',bundle:true,platform:'browser',format:'iife',target:'es2022',define:{'process.env.NODE_ENV':'"production"'},minify:true,metafile:true});
+const server=await build({absWorkingDir:root,entryPoints:['src/index.ts'],outfile:'runtime/index.js',bundle:true,platform:'node',format:'esm',target:'node22',metafile:true,banner:{js:'import { createRequire as __designCreateRequire } from "node:module"; const require=__designCreateRequire(import.meta.url);'}});
 const ui=await build({absWorkingDir:root,entryPoints:['ui/app.ts'],bundle:true,platform:'browser',format:'iife',target:'es2022',minify:true,write:false,outfile:'app.js',metafile:true});
 const script=ui.outputFiles.find(file=>file.path.endsWith('.js'))?.text??'';
 const css=ui.outputFiles.find(file=>file.path.endsWith('.css'))?.text??'';
@@ -15,7 +26,8 @@ const panel=html.replace('{{SCRIPT}}',()=>script.replaceAll('</script','<\\/scri
 for(const match of panel.matchAll(/<script>([\s\S]*?)<\/script>/g))new Script(match[1],{filename:'design-panel.js'});
 await writeFile(path.join(root,'runtime/panel.html'),panel);
 const dirs=new Set();
-for(const input of [...Object.keys(server.metafile.inputs),...Object.keys(ui.metafile.inputs)]){
+dirs.add(wasmRoot);
+for(const input of [...Object.keys(server.metafile.inputs),...Object.keys(ui.metafile.inputs),...Object.keys(react.metafile.inputs)]){
  const normalized=input.replaceAll('\\','/'),index=normalized.lastIndexOf('node_modules/');if(index<0)continue;
  const prefix=normalized.slice(0,index+'node_modules/'.length),parts=normalized.slice(prefix.length).split('/');
  dirs.add(path.resolve(root,prefix,parts.slice(0,parts[0].startsWith('@')?2:1).join('/')));
@@ -27,5 +39,6 @@ for(const directory of [...dirs].sort()){
  for(const name of ['LICENSE','LICENSE.md','LICENSE.txt','license','license.md','LICENSE-MIT'])try{const license=await readFile(path.join(directory,name),'utf8');notices.push(`${pkg.name}@${pkg.version}\n${license.trim()}`);found=true;break;}catch(error){if(error.code!=='ENOENT')throw error;}
  if(!found)notices.push(`${pkg.name}@${pkg.version}\nLicense: ${pkg.license??'See upstream package metadata'}`);
 }
+notices.push(`Go WebAssembly runtime\n${goLicense.trim()}`);
 await writeFile(path.join(root,'runtime/third-party-licenses.txt'),notices.join('\n\n---\n\n')+'\n');
 console.log('Built Design runtime and self-contained editor.');

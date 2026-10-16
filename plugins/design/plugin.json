@@ -1,11 +1,23 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "design", "version": "0.1.0", "license": "MIT",
-  "description": "Local design canvas with reusable components, design tokens, prototypes, revision history and export, powered by Codex.",
-  "extensions": { "com.openai": { "interface": {
-    "displayName": "Design", "shortDescription": "用 Codex 设计、编辑与交付",
-    "longDescription": "当前聊天驱动的本地设计工作台，包含多画板、图层编辑、设计系统、原型预览、版本恢复和导出。可选独立 Codex 模式沿用本机登录。",
-    "category": "Productivity", "capabilities": ["Read", "Write", "Interactive"],
-    "defaultPrompt": "打开 Design，根据当前项目和设计系统创建可编辑方案，预览后交付源文件。"
-  } } }
+  "name": "design",
+  "version": "0.2.0",
+  "license": "MIT",
+  "description": "Local design studio with editable HTML/React prototypes, real component imports, visual review, artboards, revision history and export.",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Design",
+        "shortDescription": "用 Codex 设计、编辑与交付",
+        "longDescription": "当前聊天驱动的本地设计工作台，包含真实 HTML/React 源码、交互预览、组件设计系统、图层画板、版本恢复和导出。可选独立 Codex 模式沿用本机登录，生成提案经过编译与实际截图审阅后再应用。",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write",
+          "Interactive"
+        ],
+        "defaultPrompt": "打开 Design，根据当前项目和设计系统创建可编辑方案，预览后交付源文件。"
+      }
+    }
+  }
 }

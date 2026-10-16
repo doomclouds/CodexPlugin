@@ -73,6 +73,8 @@ export function mountEditor(root: HTMLElement, bridge: EditorBridge) {
   let clipboard: DesignNode[] = [];
   let pointerCleanup: (() => void) | undefined;
   const propertyTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const pendingProperties = new Map<string, { property: string; value: unknown; projectId: string; nodeId?: string; boardId: string }>();
+  let historyPending = false;
 
   function notify(message: string, error = false) {
     if (disposed) return;
@@ -261,7 +263,8 @@ export function mountEditor(root: HTMLElement, bridge: EditorBridge) {
   function render() {
     if (disposed) return;
     const active = window.document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
-    const draftKey = active && root.contains(active) ? active.dataset.draftKey : undefined;
+    const propertyDraftKey = active?.dataset.propertyKey;
+    const draftKey = active && root.contains(active) && (!active.dataset.prop || !historyPending && !!propertyDraftKey && pendingProperties.has(propertyDraftKey)) ? active.dataset.draftKey : undefined;
     const draft = draftKey ? { key: draftKey, value: active!.value, start: active!.selectionStart, end: active!.selectionEnd } : undefined;
     const leftScroll = root.querySelector(".de-sidebar .de-panel-content")?.scrollTop ?? 0;
     const rightScroll = root.querySelector(".de-inspector .de-panel-content")?.scrollTop ?? 0;
@@ -269,6 +272,15 @@ export function mountEditor(root: HTMLElement, bridge: EditorBridge) {
       <main class="de-body${leftOpen ? " show-left" : ""}${rightOpen ? " show-right" : ""}"><aside class="de-sidebar" aria-label="项目资源"><nav class="de-tabs">${[["layers", "图层"], ["assets", "素材"], ["comments", "评论"]].map(([key, label]) => `<button data-left-tab="${key}" class="${leftTab === key ? "active" : ""}">${label}${key === "comments" && document?.comments.filter(comment => comment.status === "open").length ? ` · ${document.comments.filter(comment => comment.status === "open").length}` : ""}</button>`).join("")}</nav><div class="de-panel-content${leftTab === "layers" ? " flush" : ""}">${leftTab === "layers" ? renderLayers() : leftTab === "assets" ? renderAssets() : renderComments()}</div>${leftTab === "comments" && document ? `<div class="de-comment-composer"><label class="de-field">评论定位：${e(currentNode()?.node.name ?? currentBoard()?.name ?? "画板")}<textarea data-setting="comment" data-draft-key="comment" placeholder="记录建议或待办…">${e(commentDraft)}</textarea></label><button data-action="add-comment">${icon("comment")}添加评论</button></div>` : ""}</aside>
       <section class="de-canvas-shell${tool === "hand" ? " tool-hand" : ""}" aria-label="设计画布" tabindex="0"><div class="de-canvas-viewport"><div class="de-world"></div></div>${document ? `<span class="de-canvas-label">${e(document.name)}${preview ? " · 交互预览" : ""}</span>${preview ? `<div class="de-preview-strip"><select data-setting="preview-board" aria-label="预览画板">${document.artboards.map(board => `<option value="${e(board.id)}"${board.id === artboardId ? " selected" : ""}>${e(board.name)}</option>`).join("")}</select><button class="icon quiet" data-action="fit" title="适合视图">${icon("fit")}</button></div>` : `<div class="de-toolbar" role="toolbar" aria-label="画布工具"><button class="${tool === "select" ? "active" : ""}" data-tool="select" title="选择 V">${icon("cursor")}</button><button class="${tool === "hand" ? "active" : ""}" data-tool="hand" title="平移 H">${icon("hand")}</button><div class="de-separator"></div><button data-add="frame" title="添加容器 F">${icon("frame")}</button><button data-add="text" title="添加文本 T">${icon("text")}</button><button data-add="rectangle" title="添加矩形 R">${icon("rectangle")}</button><button data-action="add-menu" class="${addMenu ? "active" : ""}" title="更多元素">${icon("plus")}</button><div class="de-separator"></div><button data-action="ai" title="AI 设计">${icon("spark")}</button></div>${addMenu ? `<div class="de-add-menu">${[["frame", "容器"], ["text", "文本"], ["rectangle", "矩形"], ["ellipse", "椭圆"], ["image", "图片"], ["button", "按钮"], ["input", "输入框"]].map(([type, name]) => `<button data-add="${type}">${icon(type!)}${name}</button>`).join("")}<button data-action="add-board">${icon("grid")}画板</button></div>` : ""}`}<div class="de-zoom"><button data-action="zoom-out" aria-label="缩小">${icon("minus")}</button><button class="value" data-action="fit" title="适合全部画板">${Math.round(scale * 100)}%</button><button data-action="zoom-in" aria-label="放大">${icon("plus")}</button></div>` : `<div class="de-welcome"><div class="de-welcome-art" aria-hidden="true"><span></span><span></span></div><h1>把想法放到画布上</h1><p>为你的下一个产品、品牌或灵感，创建一份可以持续编辑的设计。</p><button class="primary" data-action="new">${icon("plus")}创建第一个设计</button>${!connected ? '<p class="de-hint" style="margin-top:15px">请通过 MCP 宿主打开以读取和保存项目。</p>' : ""}</div>`}</section>
       <aside class="de-inspector" aria-label="元素属性"><nav class="de-tabs"><button data-right-tab="design" class="${rightTab === "design" ? "active" : ""}">设计</button><button data-right-tab="assistant" class="${rightTab === "assistant" ? "active" : ""}">${icon("spark")}AI 助手</button></nav><div class="de-panel-content">${rightTab === "assistant" ? renderAI() : renderInspector()}</div></aside>${renderModal()}</main><footer class="de-footer"><span data-connection></span><span class="keyboard-hint">V 选择 · H 平移 · ⌘D 复制 · Delete 删除</span><span class="right" data-revision></span></footer></div>`;
+    for (const control of Array.from(root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-prop]"))) {
+      const propertyKey = `${document?.id}:${selected[0] ?? artboardId}:${control.dataset.prop}`;
+      control.dataset.propertyKey = propertyKey;
+      control.dataset.projectId = document?.id ?? "";
+      control.dataset.targetNode = selected[0] ?? "";
+      control.dataset.targetBoard = artboardId;
+      control.dataset.initialValue = JSON.stringify(control instanceof HTMLInputElement && control.type === "checkbox" ? control.checked : control instanceof HTMLInputElement && control.type === "number" ? Number(control.value) : control.value);
+      if (control.dataset.draftKey) control.dataset.draftKey = propertyKey;
+    }
     root.querySelector('[data-action="preview"]')?.setAttribute("aria-label", preview ? "结束预览" : "预览");
     root.querySelector('[data-action="export"]')?.setAttribute("aria-label", "导出");
     root.querySelector('[data-prop="text"]')?.setAttribute("aria-label", "元素文案");
@@ -513,6 +525,15 @@ export function mountEditor(root: HTMLElement, bridge: EditorBridge) {
     });
   }
   async function historyStep(direction: "undo" | "redo") {
+    if (historyPending) return;
+    historyPending = true;
+    for (const [key, pending] of pendingProperties) {
+      clearTimeout(propertyTimers.get(key));
+      if (document?.id === pending.projectId) void setProperty(pending.property, pending.value, pending.nodeId, pending.boardId);
+    }
+    pendingProperties.clear(); propertyTimers.clear();
+    const focused = window.document.activeElement as HTMLElement | null;
+    if (focused && root.contains(focused) && focused.hasAttribute("data-prop")) focused.blur();
     queue = queue.then(async () => {
       if (!document) return;
       saving++; state = direction === "undo" ? "正在撤销…" : "正在重做…"; renderStatus();
@@ -520,7 +541,7 @@ export function mountEditor(root: HTMLElement, bridge: EditorBridge) {
       catch (error) { notify(errorMessage(error), true); }
       finally { saving--; renderStatus(); }
     });
-    await queue;
+    try { await queue; } finally { historyPending = false; }
   }
   async function group() {
     if (!document || selected.length < 1) return;
@@ -742,25 +763,29 @@ export function mountEditor(root: HTMLElement, bridge: EditorBridge) {
     if (input.dataset.setting === "rename-name") renameName = input.value;
     if (input.dataset.setting === "comment") commentDraft = input.value;
     if (input.dataset.setting === "system-content") systemDraft = input.value;
-    if (input.dataset.prop && document) {
+    if (input.dataset.prop && document && !historyPending && root.contains(input)) {
       const property = input.dataset.prop;
-      const nodeId = selected[0];
-      const boardId = artboardId;
-      const projectId = document.id;
-      const timerKey = `${projectId}:${nodeId ?? boardId}:${property}`;
+      const nodeId = input.dataset.targetNode || undefined;
+      const boardId = input.dataset.targetBoard ?? artboardId;
+      const projectId = input.dataset.projectId ?? document.id;
+      const timerKey = input.dataset.propertyKey ?? `${projectId}:${nodeId ?? boardId}:${property}`;
       clearTimeout(propertyTimers.get(timerKey));
       const value = input instanceof HTMLInputElement && input.type === "checkbox" ? input.checked : input instanceof HTMLInputElement && input.type === "number" ? input.value === "" ? undefined : Number(input.value) : input.value;
-      if (value === undefined || typeof value === "number" && !Number.isFinite(value)) return;
-      propertyTimers.set(timerKey, setTimeout(() => { propertyTimers.delete(timerKey); if (document?.id === projectId) void setProperty(property, value, nodeId, boardId); }, 450));
+      if (value === undefined || typeof value === "number" && !Number.isFinite(value) || JSON.stringify(value) === input.dataset.initialValue) { pendingProperties.delete(timerKey); propertyTimers.delete(timerKey); return; }
+      pendingProperties.set(timerKey, { property, value, projectId, nodeId, boardId });
+      propertyTimers.set(timerKey, setTimeout(() => { propertyTimers.delete(timerKey); const pending = pendingProperties.get(timerKey); pendingProperties.delete(timerKey); if (!historyPending && pending && document?.id === pending.projectId) void setProperty(pending.property, pending.value, pending.nodeId, pending.boardId); }, 450));
     }
   }
   function onChange(event: Event) {
     const input = event.target as HTMLInputElement | HTMLSelectElement;
     if (input.dataset.prop) {
-      if (document) { const timerKey = `${document.id}:${selected[0] ?? artboardId}:${input.dataset.prop}`; clearTimeout(propertyTimers.get(timerKey)); propertyTimers.delete(timerKey); }
+      if (!root.contains(input) || historyPending) return;
+      const timerKey = input.dataset.propertyKey;
+      if (timerKey) { clearTimeout(propertyTimers.get(timerKey)); propertyTimers.delete(timerKey); pendingProperties.delete(timerKey); }
       const value = input instanceof HTMLInputElement && input.type === "checkbox" ? input.checked : input instanceof HTMLInputElement && input.type === "number" ? Number(input.value) : input.value;
       if (typeof value === "number" && !Number.isFinite(value)) { notify("请输入有效数字。", true); return; }
-      void setProperty(input.dataset.prop, value); return;
+      if (JSON.stringify(value) === input.dataset.initialValue || input.dataset.projectId !== document?.id) return;
+      void setProperty(input.dataset.prop, value, input.dataset.targetNode || undefined, input.dataset.targetBoard ?? artboardId); return;
     }
     if (input.dataset.upload) { const file = (input as HTMLInputElement).files?.[0]; if (file) void upload(file, input.dataset.upload === "replace"); return; }
     switch (input.dataset.setting) {
@@ -966,7 +991,7 @@ export function mountEditor(root: HTMLElement, bridge: EditorBridge) {
     async teardown() {
       disposed = true;
       clearTimeout(toastTimer); clearTimeout(jobTimer); clearTimeout(refreshTimer); pointerCleanup?.(); resizeObserver.disconnect();
-      for (const timer of propertyTimers.values()) clearTimeout(timer); propertyTimers.clear();
+      for (const timer of propertyTimers.values()) clearTimeout(timer); propertyTimers.clear(); pendingProperties.clear();
       root.removeEventListener("click", onClick); root.removeEventListener("input", onInput); root.removeEventListener("change", onChange); root.removeEventListener("wheel", onWheel); root.removeEventListener("pointerdown", beginPointer); root.removeEventListener("dblclick", doubleClick); window.removeEventListener("keydown", onKeyDown); window.removeEventListener("keyup", onKeyUp);
       await queue;
     },

@@ -6,3 +6,37 @@
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;scroll-behavior:auto!important}}
 .de-board-content button[data-node-id]{padding:0;min-height:0;cursor:default}.de-preview-mode .de-board-content button[data-node-id]{cursor:pointer}
 .de-board-content [hidden]{display:none!important}
+
+/* Native option popups may ignore the surrounding dark control background. */
+.de-app select option,.de-app select optgroup{color:#202722;background-color:#ffffff}.de-app select option:disabled{color:#606960}.de-app select option:checked{color:#173e29;background-color:#e1ecdf}
+
+/* DESIGN_CONTROL_THEME_START: Paired UI states; prototype content is excluded. */
+:root{--de-muted:#5f6c62;--de-control-bg:#fff;--de-control-fg:#202c24;--de-control-border:#7c8c80;--de-control-hover:#e9f0e7;--de-control-active:#dbe7d8;--de-primary-bg:#365f45;--de-primary-fg:#fff;--de-primary-hover:#2c5139;--de-primary-active:#24452f;--de-selected-bg:#e0ecdf;--de-selected-fg:#234d34;--de-selected-border:#4f755b;--de-disabled-bg:#eef0eb;--de-disabled-fg:#657066;--de-disabled-border:#a6b2a6;--de-focus:#2b6a47;--de-placeholder:#657167;--de-toast-bg:#263d2e;--de-toast-fg:#fff}
+:root[data-host-theme=dark]{--de-muted:#b5c1b1;--de-control-bg:#263128;--de-control-fg:#edf3e9;--de-control-border:#819982;--de-control-hover:#344937;--de-control-active:#405d45;--de-primary-bg:#a2cfab;--de-primary-fg:#102318;--de-primary-hover:#b7dfbf;--de-primary-active:#8dbb97;--de-selected-bg:#34543c;--de-selected-fg:#d8f0d6;--de-selected-border:#92bc99;--de-disabled-bg:#27312a;--de-disabled-fg:#a3b09f;--de-disabled-border:#647b67;--de-focus:#b6e2bc;--de-placeholder:#b0beaa;--de-toast-bg:#e2eddd;--de-toast-fg:#14251a}
+@media(prefers-color-scheme:dark){:root:not([data-host-theme]){color-scheme:dark;--de-bg:#1b211d;--de-panel:#222a24;--de-ink:#e1e8df;--de-muted:#b5c1b1;--de-border:#3a453c;--de-accent:#719a7a;--de-accent-soft:#334a38;--de-danger:#e8a398;--de-control-bg:#263128;--de-control-fg:#edf3e9;--de-control-border:#819982;--de-control-hover:#344937;--de-control-active:#405d45;--de-primary-bg:#a2cfab;--de-primary-fg:#102318;--de-primary-hover:#b7dfbf;--de-primary-active:#8dbb97;--de-selected-bg:#34543c;--de-selected-fg:#d8f0d6;--de-selected-border:#92bc99;--de-disabled-bg:#27312a;--de-disabled-fg:#a3b09f;--de-disabled-border:#647b67;--de-focus:#b6e2bc;--de-placeholder:#b0beaa;--de-toast-bg:#e2eddd;--de-toast-fg:#14251a}:root:not([data-host-theme]) .de-canvas-shell{background-color:#171d18;background-image:radial-gradient(#39483b .8px,transparent .8px)}}
+.de-app :is(button,input,select,textarea):not(.de-board-content *){color:var(--de-control-fg);background-color:var(--de-control-bg);border-color:var(--de-control-border);color-scheme:inherit}
+.de-app :is(input,textarea):not(.de-board-content *)::placeholder{color:var(--de-placeholder);opacity:1}
+.de-app button.quiet:not(.de-board-content *){background-color:transparent;border-color:transparent;color:var(--de-control-fg)}
+.de-app :is(button,input,select,textarea):not(.de-board-content *):hover:not(:disabled){background-color:var(--de-control-hover);color:var(--de-control-fg);border-color:var(--de-control-border)}
+.de-app button:not(.de-board-content *):active:not(:disabled){background-color:var(--de-control-active);color:var(--de-control-fg)}
+.de-app button:is(.active,[aria-pressed=true],[aria-selected=true]):not(.de-board-content *){background-color:var(--de-selected-bg);color:var(--de-selected-fg);border-color:var(--de-selected-border)}
+.de-app button:is(.active,[aria-pressed=true],[aria-selected=true]):not(.de-board-content *):is(:hover,:focus,:active):not(:disabled){background-color:var(--de-selected-bg);color:var(--de-selected-fg);border-color:var(--de-selected-border)}
+.de-app button.primary:not(.de-board-content *),.de-app button.primary:not(.de-board-content *):is(:focus,:focus-visible){background:var(--de-primary-bg);color:var(--de-primary-fg);border-color:var(--de-primary-bg);filter:none}
+.de-app button.primary:not(.de-board-content *):hover:not(:disabled){background:var(--de-primary-hover);color:var(--de-primary-fg);border-color:var(--de-primary-hover);filter:none}
+.de-app button.primary:not(.de-board-content *):active:not(:disabled){background:var(--de-primary-active);color:var(--de-primary-fg);border-color:var(--de-primary-active);filter:none}
+.de-app :is(button,input,select,textarea):not(.de-board-content *):focus-visible{outline:3px solid var(--de-focus);outline-offset:2px;box-shadow:0 0 0 2px var(--de-panel)}
+.de-app textarea:not(.de-board-content *):focus-visible{outline-offset:-3px;box-shadow:none}
+.de-app :is(button,input,select,textarea):not(.de-board-content *):disabled,.de-app button.primary:not(.de-board-content *):disabled{background-color:var(--de-disabled-bg);color:var(--de-disabled-fg);border-color:var(--de-disabled-border);opacity:1;filter:none;cursor:not-allowed}
+/* Native popups may ignore dark option backgrounds. Keep the popup light,
+   while the closed control uses the active theme and its own visible arrow. */
+.de-app select:not(.de-board-content *){appearance:none;color-scheme:light;padding-right:29px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23202c24' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;background-size:12px}
+:root[data-host-theme=dark] .de-app select:not(.de-board-content *){background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23edf3e9' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
+@media(prefers-color-scheme:dark){:root:not([data-host-theme]) .de-app select:not(.de-board-content *){background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23edf3e9' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}}
+.de-app select :is(option,optgroup){background:#fff;color:#202722;color-scheme:light}
+.de-app select option:checked{background:#e1ecdf;color:#173e29}
+.de-app select option:disabled{background:#f0f2ed;color:#606960}
+.de-brand-mark,.de-selection-label,.de-comment-pin{background:var(--de-primary-bg);color:var(--de-primary-fg)}
+.de-layer.selected{color:var(--de-selected-fg);background:var(--de-selected-bg)}.de-layer.selected .icon{color:currentColor}
+.de-layer:focus-visible,.de-add-asset:focus-within{outline:3px solid var(--de-focus);outline-offset:-3px}
+.de-toast{background:var(--de-toast-bg);color:var(--de-toast-fg)}.de-toast.error{background:#843f36;color:#fff}
+/* DESIGN_CONTROL_THEME_END */

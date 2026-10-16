@@ -14,7 +14,8 @@ let origin='';
 const server=createServer(async(req,res)=>{
  try{
   res.setHeader('cache-control','no-store');
-  if(req.method==='GET'&&req.url==='/'){res.setHeader('content-type','text/html;charset=utf-8');res.end(html);return;}
+  const requestUrl=new URL(req.url,origin||'http://localhost');
+  if(req.method==='GET'&&requestUrl.pathname==='/'){const theme=requestUrl.searchParams.get('theme');res.setHeader('content-type','text/html;charset=utf-8');res.end(['light','dark'].includes(theme)?html.replace(/<html\b/,'<html data-host-theme=\"'+theme+'\"'):html);return;}
   const header=String(req.headers['x-design-preview']??'');
   if(req.method!=='POST'||req.url!=='/tool'||header.length!==token.length||!timingSafeEqual(Buffer.from(header),Buffer.from(token))||(req.headers.origin&&req.headers.origin!==origin)){res.writeHead(403);res.end('Forbidden');return;}
   let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>32*1024*1024)throw new Error('Request too large');}
