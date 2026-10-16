@@ -34,3 +34,11 @@
 ## Motion研究顺序
 
 用户已明确优先Claude Motion的REA。已追踪类型路由、实例SKILL载入、本地通用截图回看及相邻解说视频模板的独立注册归属；公开motion-render提供导出数据/播放器调用线索，但不是官方规范、没有真实player fixture，本轮不执行或复制无许可证运行时。OpenDesign Motion作为后续补充。研究不等于Motion已实现。
+
+## GitHub与安装核对
+
+功能提交9310b202f661655be4980f912268825a062e2624已推送main，远端读回一致。GitHub市场upgrade与add返回安装0.3.0。
+
+从安装缓存启动全新真实stdio服务，返回version0.3.0、33工具、editor=source、projectFormat=2；没有旧图层工具或model.ts/codex.ts/editor.ts/editor.css/document.md旧文件。清单、runtime、panel、React vendor、WASM逐字节匹配已验证包，未调用模型推理。runtime SHA256为02242ccf55e4a495fe851bb733cfd074d6d71c3a9ef04aefafbf2de72b772a74，panel为f0611373ad2afd6b2b1354b30c314632e1d25ce52707d57f347c34a9b7b540d1。
+
+当前聊天旧MCP进程、安装缓存和原生面板加载分别确认，不能用缓存验证冒充原生已切换。目标状态工具当前返回paused，未标记complete；用户最新已要求继续Motion研究，当前按该消息推进研究，但目标自动循环需由应用控制恢复。
