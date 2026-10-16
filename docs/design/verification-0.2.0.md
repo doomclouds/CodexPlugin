@@ -20,4 +20,14 @@
 - 同样 brief 的 Claude/Open Design/Huashu 多次作品与连续改稿比较尚未完成，当前不能声称已对等或超越。
 - 复杂组件的打包通过不表示自动接入完整页面。后端服务、在线多人协作、独立 Motion 时间线及 MP4 渲染尚未实现。
 
-整仓检查与 GitHub 同步/安装结果在发布完成后另补实际记录。
+## 发布与安装实录
+
+- `npm run check` 全仓退出码 0：可移植性测试 20/20，Design 92/92，Workflows 466 项中 463 通过、3 项按原条件跳过；两个插件隔离运行包检查通过。
+- 功能提交 `b6301bb`；将已发布的 0.1.1 可读性修复历史合并为 `bb22d331ede080a295903867092550be004bf3d8`。合并后的插件树与已验证版本完全一致。
+- 已推送 GitHub `main`；远端读回该提交一致。
+- `codex plugin marketplace upgrade codex-plugin-workspace --json` 成功，随后 `codex plugin add design@codex-plugin-workspace --json` 返回安装版本 `0.2.0`。
+- 从安装缓存启动全新真实 stdio 服务，返回 design 0.2.0、51 工具、默认 code、20 方向；本次核对未启动模型推理。清单、runtime、panel、React vendor 与 WASM 均逐字节匹配已验证源码包。
+- 安装后的 runtime SHA256：`a6c30c5e366a87f1e8a9fa6da65de783fd5aef2fbaa560067c6c7aa3ddf2e2f9`；panel：`1a21ad76e9753ca878beb040601d24816852fbe5bb77ce93bacfbec9216282b6`。
+- 安装更新不代表当前聊天旧 MCP 进程已切换。用户重启 Codex 后，仍需在实际原生面板核对新版本、焦点状态与关键工作流。
+
+原目标保持 active。第二轮可试用发布不等于静态对标通过，也不等于 Motion 准入条件已满足。
