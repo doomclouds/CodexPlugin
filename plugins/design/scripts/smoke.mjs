@@ -17,7 +17,7 @@ async function connect(){
 async function call(name,args={}){const r=await client.callTool({name,arguments:args});assert.notEqual(r.isError,true,JSON.stringify(r.content));return r.structuredContent;}
 try{
  for(const file of ['runtime','skills','plugin.json','mcp.json','package.json','README.md'])await cp(path.join(root,file),path.join(isolated,file),{recursive:true});
- await connect();assert.equal(client.getServerVersion().version,'0.1.0');
+ await connect();assert.equal(client.getServerVersion().version,'0.1.1');
  const names=(await client.listTools()).tools.map(t=>t.name);assert.ok(names.includes('design_apply_changes'));assert.ok(names.includes('design_request_generation'));
  const panel=(await client.readResource({uri:'ui://design/studio.html'})).contents[0];assert.match(panel.text,/design-editor/);assert.ok(!panel.text.includes('{{SCRIPT}}'));
  assert.equal((await call('design_get_capabilities')).modelModes[0].id,'host');

@@ -6,3 +6,6 @@
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;scroll-behavior:auto!important}}
 .de-board-content button[data-node-id]{padding:0;min-height:0;cursor:default}.de-preview-mode .de-board-content button[data-node-id]{cursor:pointer}
 .de-board-content [hidden]{display:none!important}
+
+/* Native option popups may ignore the surrounding dark control background. */
+.de-app select option,.de-app select optgroup{color:#202722;background-color:#ffffff}.de-app select option:disabled{color:#606960}.de-app select option:checked{color:#173e29;background-color:#e1ecdf}

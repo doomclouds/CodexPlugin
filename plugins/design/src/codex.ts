@@ -92,7 +92,7 @@ class Session {
     });
   }
   async initialize(): Promise<void> {
-    await this.request('initialize', { clientInfo: { name: 'codex_design', title: 'Design', version: '0.1.0' }, capabilities: { experimentalApi: true } });
+    await this.request('initialize', { clientInfo: { name: 'codex_design', title: 'Design', version: '0.1.1' }, capabilities: { experimentalApi: true } });
     this.send({ method: 'initialized', params: {} });
   }
   close(): Promise<void> {

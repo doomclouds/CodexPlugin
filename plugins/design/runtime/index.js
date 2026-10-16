@@ -39754,7 +39754,7 @@ var Session = class {
     });
   }
   async initialize() {
-    await this.request("initialize", { clientInfo: { name: "codex_design", title: "Design", version: "0.1.0" }, capabilities: { experimentalApi: true } });
+    await this.request("initialize", { clientInfo: { name: "codex_design", title: "Design", version: "0.1.1" }, capabilities: { experimentalApi: true } });
     this.send({ method: "initialized", params: {} });
   }
   close() {
@@ -48617,7 +48617,7 @@ async function writeProjectLocked(document2, directory) {
 }
 
 // src/server.ts
-var VERSION = "0.1.0";
+var VERSION = "0.1.1";
 var panelUri = "ui://design/studio.html";
 var readonly2 = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
 var mutating = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };

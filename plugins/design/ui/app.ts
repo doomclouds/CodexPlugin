@@ -39,7 +39,7 @@ if (window.parent === window && previewToken) {
   void editor.connected();
   window.addEventListener("pagehide", () => { void editor.teardown(); });
 } else {
-  const app = new App({ name: "Design", version: "0.1.0" }, { availableDisplayModes: ["fullscreen"] }, { autoResize: true });
+  const app = new App({ name: "Design", version: "0.1.1" }, { availableDisplayModes: ["fullscreen"] }, { autoResize: true });
   const editor = mountEditor(root, {
     async callTool(name, args) { return unpack(await app.callServerTool({ name, arguments: args }, { timeout: name === "design_list_models" ? 30000 : 120000 })); },
     async prompt(text, context) {

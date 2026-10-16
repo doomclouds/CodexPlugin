@@ -1,6 +1,6 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "design", "version": "0.1.0", "license": "MIT",
+  "name": "design", "version": "0.1.1", "license": "MIT",
   "description": "Local design canvas with reusable components, design tokens, prototypes, revision history and export, powered by Codex.",
   "extensions": { "com.openai": { "interface": {
     "displayName": "Design", "shortDescription": "用 Codex 设计、编辑与交付",

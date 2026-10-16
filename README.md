@@ -65,7 +65,7 @@ codex plugin add workflows@codex-plugin-workspace
 
 ## Design
 
-`design 0.1.0` 是用于实际试用的本地设计插件：多画板、图层属性、组件、设计令牌、原型交互、评论、撤销重做、历史恢复及 HTML/JSON/SVG/ZIP 导出；本机有 Chromium 时可导出 PNG/PDF。默认由当前聊天使用设计工具；独立模式通过本机 Codex app-server 沿用 ChatGPT 登录，不需要 API Key。
+`design 0.1.1` 是用于实际试用的本地设计插件：多画板、图层属性、组件、设计令牌、原型交互、评论、撤销重做、历史恢复及 HTML/JSON/SVG/ZIP 导出；本机有 Chromium 时可导出 PNG/PDF。默认由当前聊天使用设计工具；独立模式通过本机 Codex app-server 沿用 ChatGPT 登录，不需要 API Key。
 
 当前版本以结构化设计文档为源，不是任意前端代码的无损编辑器。对标 Claude Design 的真实组件代码工作流仍在研究与迭代，安装此版本不代表已经达到完整体验对等。
 

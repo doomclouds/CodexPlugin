@@ -13,7 +13,7 @@ import { browserExecutable, exportDesign, importHtml } from './export.ts';
 import { importProject, readProject, writeProjectLocked } from './sync.ts';
 import { getDesignGuidance } from './art-direction.ts';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.1.1';
 const panelUri = 'ui://design/studio.html';
 const readonly = {readOnlyHint:true,destructiveHint:false,openWorldHint:false};
 const mutating = {readOnlyHint:false,destructiveHint:false,openWorldHint:false};
