@@ -1,10 +1,11 @@
 import type { CodePage, CodeProject, CodeViewport } from './code-project.ts';
+import { CODE_PROJECT_FORMAT } from './code-project-format.ts';
 
 export const CODE_PAGE_LIMIT = 32;
 export class UnsupportedCodeProjectFormatError extends Error {
   readonly code = 'UNSUPPORTED_FORMAT';
   readonly format?:number|string;
-  constructor(format?:number|string) { super('This code project uses an unsupported format. Code projects now require schemaVersion 2 with real pages and a defaultPageId. The original file was not modified or deleted.'); this.name = 'UnsupportedCodeProjectFormatError';this.format=format; }
+  constructor(format?:number|string) { super(`This code project uses an unsupported format. Code projects require schemaVersion ${CODE_PROJECT_FORMAT} with real pages, a defaultPageId and CSS-source tokens. The original file was not modified or deleted.`); this.name = 'UnsupportedCodeProjectFormatError';this.format=format; }
 }
 
 export function canonicalCodeRoute(route: string): string {
@@ -16,7 +17,7 @@ export function canonicalCodeRoute(route: string): string {
 }
 
 export function getCodePages(project: CodeProject): CodePage[] {
-  if (project.schemaVersion !== 2 || !Array.isArray(project.pages) || !project.pages.length) throw new UnsupportedCodeProjectFormatError();
+  if (project.schemaVersion !== CODE_PROJECT_FORMAT || !Array.isArray(project.pages) || !project.pages.length) throw new UnsupportedCodeProjectFormatError();
   return project.pages.map((page)=>({...page}));
 }
 export function resolveCodePage(project: CodeProject, pageId?: string): CodePage {
@@ -75,6 +76,6 @@ export function createCodePageRouter(project:CodeProject,pages:CompiledCodePage[
   const payload={projectId:project.id,revision:project.revision,initialPageId:initial.id,pages:pages.map((item)=>({id:item.page.id,name:item.page.name,html:item.html}))};
   const injectSource=injectCodePageRuntimeLocation.toString().replace(/<\/script/gi,'<\\/script');
   const script=`(()=>{const data=${inlineJson(payload)},frame=document.getElementById('design-page'),index=new Map(data.pages.map(p=>[p.id,p])),inject=${injectSource};let current='',navigation;const open=(id,detail)=>{const page=index.get(id);if(!page)throw Error('Unknown prototype page');const html=inject(page.html,{projectId:data.projectId,revision:data.revision,pageId:id,search:detail?.search||'',hash:detail?.hash||''});current=id;navigation=detail;frame.dataset.pageId=id;frame.title=page.name;frame.srcdoc=html;};frame.addEventListener('load',()=>{frame.contentWindow.postMessage({type:'design:mode',projectId:data.projectId,revision:data.revision,mode:'preview'},'*');if(navigation)frame.contentWindow.postMessage({type:'design:location',projectId:data.projectId,revision:data.revision,pageId:current,href:navigation.href,hash:navigation.hash,search:navigation.search},'*');});addEventListener('message',event=>{const message=event.data;if(event.source!==frame.contentWindow||!message||message.projectId!==data.projectId||message.revision!==data.revision||message.pageId!==current)return;if(message.type==='design:navigate'&&index.has(message.targetPageId)){open(message.targetPageId,message);return;}if(message.type==='design:runtime-error'){const error=document.createElement('p');error.setAttribute('role','alert');error.textContent=String(message.message).slice(0,1000);document.getElementById('design-errors').append(error);} });open(data.initialPageId);})();`;
-  const csp="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: 'self'; connect-src 'none'; img-src data:; object-src 'none'; base-uri 'none'; form-action 'none'";
+  const csp="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: 'self'; connect-src 'none'; img-src data:; font-src data:; object-src 'none'; base-uri 'none'; form-action 'none'";
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${csp}"><title>${htmlEscape(project.name)}</title><style>html,body{height:100%;margin:0}#design-page{display:block;border:0;width:100%;height:100%}#design-errors{position:fixed;inset:auto 0 0;background:#fff0ed;color:#742c22;font:12px system-ui}#design-errors:empty{display:none}</style></head><body><iframe id="design-page" title="${htmlEscape(initial.name)}" sandbox="allow-scripts allow-forms" referrerpolicy="no-referrer"></iframe><aside id="design-errors" aria-live="polite"></aside><script>${script}</script></body></html>`;
 }

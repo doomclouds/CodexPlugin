@@ -7,18 +7,52 @@ import { parse as parseHtml } from 'parse5';
 import { parse as parseJavaScript } from '@babel/parser';
 import type * as ESBuild from 'esbuild-wasm';
 import type { CodeProject, CodeFile, CodePage } from './code-project.ts';
+import { codeFileHash } from './code-project.ts';
+import { codeRenderInputs } from './code-render-inputs.ts';
 import { codePageRuntimeContext, getCodePages, resolveCodePage, resolveCodePageViewport } from './code-pages.ts';
 
 export interface SourceElement { id: string; file: string; start: number; end: number; tag: string; editableText: boolean; fileHash?: string; identity?: 'stable' | 'ephemeral' }
 export interface PreviewDiagnostic { level: 'error' | 'warning'; message: string; file?: string; line?: number }
-export interface CodePreview { projectId: string; revision: number; pageId:string;pages:CodePage[];html: string; diagnostics: PreviewDiagnostic[]; sources: SourceElement[] }
+export interface CodePreview { projectId: string; revision: number; pageId:string;pages:CodePage[];renderIdentity:string;fileHashes:Record<string,string>;html: string; diagnostics: PreviewDiagnostic[]; sources: SourceElement[] }
 type AnyNode = Record<string, any>;
 type Edit = { start: number; end: number; text: string };
 type ElementRecord = { source: SourceElement; node: AnyNode; language: 'html' | 'jsx' };
 const require = createRequire(import.meta.url);
 const hash = (text: string): string => createHash('sha256').update(text).digest('hex');
 const htmlEscape = (text: string): string => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-const scriptSafe = (text: string): string => text.replace(/<\/script/gi, '<\\/script');
+// A trailing line comment returns both legacy HTML escaped states to script data.
+// Escaping only closing tags leaves "<!--<script>" able to consume the real end tag.
+const scriptSafe = (text: string): string => text.replace(/<\/script/gi, '<\\/script') + '\n// -->\n';
+function componentNotices(project: CodeProject): string {
+  const manifests = project.files.filter(file => {
+    if (file.path === 'docs/design-system-provenance.json') return true;
+    const name = /^docs\/([a-z][a-z0-9]*(?:-[a-z0-9]+)*)-provenance\.json$/.exec(file.path)?.[1];
+    return name !== undefined && name.length <= 48 && project.files.some(source => source.path.startsWith(`components/${name}/`));
+  });
+  const notices: Array<{ sourcePath: string; path: string; sha256: string; text: string }> = [];
+  const seen = new Map<string, string>();
+  for (const manifest of manifests) {
+    if (manifest.encoding !== 'utf8') throw new Error('Component provenance must be a UTF-8 JSON file.');
+    const value: unknown = JSON.parse(manifest.content);
+    if (!value || typeof value !== 'object' || !('licenses' in value)) continue;
+    if ('libraryName' in value && value.libraryName !== manifest.path.slice(5,-16)) throw new Error('Component provenance does not match its library namespace.');
+    const licenses = value.licenses;
+    if (!Array.isArray(licenses) || licenses.length > 128) throw new Error('Component license declarations must be a bounded array.');
+    for (const item of licenses) {
+    if (!item || typeof item !== 'object' || typeof item.path !== 'string' || typeof item.sourcePath !== 'string' || typeof item.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.sha256)) throw new Error('A component license declaration is invalid.');
+    if (!item.sourcePath || item.sourcePath.length > 512 || /^(?:[A-Za-z]:|[\\/~])/.test(item.sourcePath) || item.sourcePath.split('/').some((part: string) => !part || part === '.' || part === '..')) throw new Error('Component license source identities must be portable.');
+    const file = project.files.find(file => file.path === item.path);
+    if (!file || file.encoding !== 'utf8') throw new Error(`The declared component license is missing or is not UTF-8: ${item.path}`);
+    const digest = hash(file.content);
+    if (digest !== item.sha256) throw new Error(`The component license changed. Reconcile its provenance before export: ${item.path}`);
+    if (seen.has(item.path)) { if (seen.get(item.path) !== digest) throw new Error('Component license declarations disagree.'); continue; }
+    seen.set(item.path, digest); notices.push({ sourcePath: item.sourcePath, path: item.path, sha256: digest, text: file.content });
+    }
+  }
+  if (!notices.length) return '';
+  // Inert JSON retains the exact license text without turning source text into executable markup.
+  return '<script type="application/json" id="design-component-notices">' + JSON.stringify(notices).replaceAll('<', '\\u003c') + '</script>';
+}
 const mimeTypes: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml', '.avif': 'image/avif', '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf', '.mp3': 'audio/mpeg', '.mp4': 'video/mp4' };
 const sourceTagsExcluded = new Set(['html', 'head', 'meta', 'link', 'base', 'script', 'style', 'title']);
 const styleProperties = new Set(['color','background','backgroundColor','fontFamily','fontSize','fontWeight','fontStyle','lineHeight','letterSpacing','textAlign','textDecoration','opacity','border','borderColor','borderWidth','borderStyle','borderRadius','boxShadow','width','height','minWidth','maxWidth','minHeight','maxHeight','padding','paddingTop','paddingRight','paddingBottom','paddingLeft','margin','marginTop','marginRight','marginBottom','marginLeft','gap','rowGap','columnGap','display','flexDirection','alignItems','justifyContent']);
@@ -159,19 +193,23 @@ const reactShims: Record<string,string> = {
   'react/jsx-runtime': `const r=globalThis.__DesignJSXRuntime;export const {Fragment,jsx,jsxs}=r;`,
   'react/jsx-dev-runtime': `const r=globalThis.__DesignJSXDevRuntime;export const {Fragment,jsxDEV}=r;`,
 };
-function bridge(project: CodeProject, page:CodePage, select: boolean, sources: SourceElement[], literalTexts:Record<string,string>): string {
+function bridge(project: CodeProject, page:CodePage, select: boolean, sources: SourceElement[], literalTexts:Record<string,string>, renderIdentity:string, fileHashes:Record<string,string>): string {
   const sourceFiles = Object.fromEntries(sources.map(source=>[source.id,source.file]));
   const literalSources = Object.fromEntries(sources.map(source=>[source.id,source.editableText]));
   return String.raw`(function(){
-const projectId=${JSON.stringify(project.id)},revision=${JSON.stringify(project.revision)},page=${JSON.stringify(page)},pages=${JSON.stringify(getCodePages(project))},sourceFiles=${JSON.stringify(sourceFiles)},literalSources=${JSON.stringify(literalSources)},literalTexts=${JSON.stringify(literalTexts)};
+const projectId=${JSON.stringify(project.id)},page=${JSON.stringify(page)},pages=${JSON.stringify(getCodePages(project))},sourceFiles=${JSON.stringify(sourceFiles)},literalSources=${JSON.stringify(literalSources)},literalTexts=${JSON.stringify(literalTexts)},renderIdentity=${JSON.stringify(renderIdentity)},fileHashes=${JSON.stringify(fileHashes)};
+let revision=${JSON.stringify(project.revision)};
 const pageId=page.id;let mode=${JSON.stringify(select?'select':'preview')};
 const post=x=>parent.postMessage(Object.assign({projectId,revision,pageId},x),'*');
+const activate=()=>post({type:'design:activate',renderIdentity,fileHashes});
+addEventListener('pointerdown',activate,true);
+addEventListener('focusin',activate,true);
 const selectElement=(el,target=el)=>{
   const sourceId=el.getAttribute('data-design-source');if(!sourceFiles[sourceId])return;
   const s=getComputedStyle(el),computedStyles={};for(const k of ['color','backgroundColor','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','padding','borderRadius','width','height'])computedStyles[k]=s[k];
   const normalize=text=>text.replace(/\r\n?/g,'\n');
   const runtimeLiteralText=literalSources[sourceId]===true&&typeof literalTexts[sourceId]==='string'&&[...el.childNodes].every(n=>n.nodeType===3||n.nodeType===8)&&normalize(el.textContent||'')===normalize(literalTexts[sourceId]);
-  post({type:'design:selection',sourceId,file:sourceFiles[sourceId],text:el.textContent,computedStyles,runtimeLiteralText,ancestorMapped:el!==target});
+  post({type:'design:selection',sourceId,file:sourceFiles[sourceId],fileHash:fileHashes[sourceFiles[sourceId]],text:el.textContent,computedStyles,runtimeLiteralText,ancestorMapped:el!==target});
 };
 const scroll=hash=>{if(hash){try{document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({block:'start'});}catch{}}};
 let initialLocation;try{initialLocation=JSON.parse(document.getElementById('design-page-context')?.textContent||'null')}catch{}
@@ -190,6 +228,11 @@ const linkTarget=href=>{
 };
 addEventListener('message',e=>{
   if(e.source!==parent||!e.data||e.data.projectId!==undefined&&e.data.projectId!==projectId||e.data.revision!==undefined&&e.data.revision!==revision||e.data.pageId!==undefined&&e.data.pageId!==pageId)return;
+  if(e.data.type==='design:sync-revision'){
+    const next=e.data.nextRevision,hashes=e.data.fileHashes;
+    if(e.data.projectId!==projectId||e.data.pageId!==pageId||e.data.revision!==revision||e.data.renderIdentity!==renderIdentity||!Number.isSafeInteger(next)||next<=revision||typeof e.data.nonce!=='string'||e.data.nonce.length>100||!hashes||typeof hashes!=='object'||Object.keys(hashes).length!==Object.keys(fileHashes).length||Object.keys(fileHashes).some(file=>hashes[file]!==fileHashes[file]))return;
+    const previousRevision=revision;revision=next;post({type:'design:revision-synced',previousRevision,renderIdentity,fileHashes,nonce:e.data.nonce});return;
+  }
   if(e.data.type==='design:mode'&&['select','preview'].includes(e.data.mode))mode=e.data.mode;
   if(e.data.type==='design:location'){globalThis.designLocation={pageId,pathname:page.route,search:e.data.search||'',hash:e.data.hash||''};scroll(e.data.hash);dispatchEvent(new CustomEvent('design:location',{detail:globalThis.designLocation}));}
   if(e.data.type==='design:focus'&&sourceFiles[e.data.sourceId]){const el=[...document.querySelectorAll('[data-design-source]')].find(x=>x.getAttribute('data-design-source')===e.data.sourceId);if(el){el.scrollIntoView({block:'center',inline:'nearest'});el.animate&&el.animate([{outline:'3px solid #ea6644',outlineOffset:'3px'},{outline:'3px solid transparent',outlineOffset:'8px'}],{duration:1300});selectElement(el);}}
@@ -209,8 +252,9 @@ addEventListener('unhandledrejection',e=>post({type:'design:runtime-error',messa
 export async function compileCodeProject(project: CodeProject, options: { instrument?: boolean;pageId?:string;viewportId?:string } = {}): Promise<CodePreview> {
   const diagnostics: PreviewDiagnostic[] = []; const sources: SourceElement[] = []; const instrument = options.instrument !== false;
   const literalTexts:Record<string,string>={};const collect=(records:ElementRecord[]):void=>{for(const record of records){sources.push(record.source);const text=confirmedLiteralText(record);if(text!==undefined)literalTexts[record.source.id]=text;}};
-  const result: CodePreview = {projectId:project.id,revision:project.revision,pageId:options.pageId??project.defaultPageId,pages:[],html:'',diagnostics,sources};
+  const result: CodePreview = {projectId:project.id,revision:project.revision,pageId:options.pageId??project.defaultPageId,pages:[],renderIdentity:'',fileHashes:{},html:'',diagnostics,sources};
   try {
+    result.fileHashes=Object.fromEntries(project.files.map(file=>[file.path,codeFileHash(file)]));result.renderIdentity=hash(JSON.stringify(codeRenderInputs(project)));
     const page=options.viewportId?resolveCodePageViewport(project,options).page:resolveCodePage(project,options.pageId);result.pageId=page.id;result.pages=getCodePages(project);
     const files = vfsFiles(project); const entry = files.get(page.entry);if(!entry)throw new Error('The selected page entry file does not exist.');
     const virtual = new Map(files); let needReact = false;
@@ -249,6 +293,7 @@ export async function compileCodeProject(project: CodeProject, options: { instru
     if(/\.html?$/i.test(entry.path)){
       if(entry.encoding!=='utf8')throw new Error('HTML entry must use UTF-8 encoding.');
       const collected=htmlRecords(entry);collect(collected.records);const edits:Edit[]=[];let index=0;
+      const classicScripts:Array<{code:string;sourcefile:string;start:number;end:number;defer:boolean}>=[];
       visit(collected.tree,node=>{
         const location=node.sourceCodeLocation;if(!node.tagName||!location?.startTag)return;
         const attrs=new Map<string,string>((node.attrs??[]).map((attr:AnyNode)=>[attr.name,attr.value]));
@@ -260,9 +305,7 @@ export async function compileCodeProject(project: CodeProject, options: { instru
             let code=(node.childNodes??[]).map((child:AnyNode)=>child.value??'').join('');
             if(src){if(/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(src)){warn('External script was blocked.');code='';}else{const file=files.get(resolveFile(files,entry.path,src))!;if(file.encoding!=='utf8')throw new Error('Classic scripts must use UTF-8 source.');code=file.content;}}
             if(code)try{parseJavaScript(code,{sourceType:'script'});}catch(error){throw new Error(`Classic script syntax error in ${src??entry.path}: ${error instanceof Error?error.message:'invalid JavaScript'}`);}
-            const rendered=code?`<script>${scriptSafe(code)}</script>`:'';
-            if(src&&attrs.has('defer')){deferredClassic.push(rendered);edits.push({start:location.startOffset,end:location.endOffset,text:''});}
-            else edits.push({start:location.startOffset,end:location.endOffset,text:rendered});
+            classicScripts.push({code,sourcefile:src??entry.path,start:location.startOffset,end:location.endOffset,defer:!!src&&attrs.has('defer')});
             return;
           }
           if(src){if(/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(src))warn('External script was blocked.');else script=resolveFile(files,entry.path,src);}
@@ -287,6 +330,15 @@ export async function compileCodeProject(project: CodeProject, options: { instru
           else if(name==='style'&&/url\(/i.test(value))edits.push({start:attrLocation.startOffset,end:attrLocation.endOffset,text:`style="${htmlEscape(rewriteCssUrls(value,entry.path))}"`});
         }
       });
+      for(const classic of classicScripts){
+        // Transform instead of string-replacing raw source: regex and tagged-template
+        // values containing a closing script tag must retain their JavaScript meaning.
+        const transformed=classic.code?await esbuild().transform(classic.code,{loader:'js',sourcefile:classic.sourcefile,platform:'browser',target:'es2022',supported:{'inline-script':true},legalComments:'inline',logLevel:'silent'}):undefined;
+        for(const warning of transformed?.warnings??[])diagnostics.push({level:'warning',message:warning.text,file:classic.sourcefile,...(warning.location?{line:warning.location.line}:{})});
+        const rendered=transformed?`<script>${scriptSafe(transformed.code)}</script>`:'';
+        if(classic.defer)deferredClassic.push(rendered);
+        edits.push({start:classic.start,end:classic.end,text:classic.defer?'':rendered});
+      }
       if(instrument)for(const record of collected.records){if(edits.some(edit=>edit.text===''&&edit.start<=record.source.start&&edit.end>=record.source.end))continue;const location=record.node.sourceCodeLocation;const attr=location.attrs?.['data-design-source'];if(attr)edits.push({start:attr.startOffset,end:attr.endOffset,text:''});const at=insertionPoint(entry.content,location.startTag.endOffset);edits.push({start:at,end:at,text:` data-design-source="${record.source.id}"`});}
       html=editsApplied(entry.content,edits);
     }else{
@@ -306,7 +358,7 @@ export async function compileCodeProject(project: CodeProject, options: { instru
     }
     const vendor=needReact?await readFile(fileURLToPath(new URL('../runtime/react-vendor.js',import.meta.url)),'utf8'):'';
     const csp="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
-    const head=`<meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer">${codePageRuntimeContext(project,page)}<script>${scriptSafe(bridge(project,page,instrument,sources,literalTexts))}</script><style>${styles.join('\n').replace(/<\/style/gi,'<\\/style')}</style>`;
+    const head=`<meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer">${codePageRuntimeContext(project,page)}${componentNotices(project)}<script>${scriptSafe(bridge(project,page,instrument,sources,literalTexts,result.renderIdentity,result.fileHashes))}</script><style>${styles.join('\n').replace(/<\/style/gi,'<\\/style')}</style>`;
     const runtime=`${vendor?`<script>${scriptSafe(vendor)}</script>`:''}${deferredClassic.join('')}${scripts.map(script=>`<script>${scriptSafe(script)}</script>`).join('')}`;
     // Content is executed only by the caller's sandbox iframe. The backend only parses and compiles it.
     html=/<head(?:\s[^>]*)?>/i.test(html)?html.replace(/<head(?:\s[^>]*)?>/i,match=>match+head):head+html;

@@ -27,18 +27,31 @@ for(const match of panel.matchAll(/<script>([\s\S]*?)<\/script>/g))new Script(ma
 await writeFile(path.join(root,'runtime/panel.html'),panel);
 const dirs=new Set();
 dirs.add(wasmRoot);
+const browserDirs=new Set();
+for(const input of Object.keys(react.metafile.inputs)){
+ const normalized=input.replaceAll('\\','/'),index=normalized.lastIndexOf('node_modules/');if(index<0)continue;
+ const prefix=normalized.slice(0,index+'node_modules/'.length),parts=normalized.slice(prefix.length).split('/');
+ browserDirs.add(path.resolve(root,prefix,parts.slice(0,parts[0].startsWith('@')?2:1).join('/')));
+}
 for(const input of [...Object.keys(server.metafile.inputs),...Object.keys(ui.metafile.inputs),...Object.keys(react.metafile.inputs)]){
  const normalized=input.replaceAll('\\','/'),index=normalized.lastIndexOf('node_modules/');if(index<0)continue;
  const prefix=normalized.slice(0,index+'node_modules/'.length),parts=normalized.slice(prefix.length).split('/');
  dirs.add(path.resolve(root,prefix,parts.slice(0,parts[0].startsWith('@')?2:1).join('/')));
 }
 const notices=[];
+const browserNotices=[];
 for(const directory of [...dirs].sort()){
  const pkg=JSON.parse(await readFile(path.join(directory,'package.json'),'utf8'));
  let found=false;
- for(const name of ['LICENSE','LICENSE.md','LICENSE.txt','license','license.md','LICENSE-MIT'])try{const license=await readFile(path.join(directory,name),'utf8');notices.push(`${pkg.name}@${pkg.version}\n${license.trim()}`);found=true;break;}catch(error){if(error.code!=='ENOENT')throw error;}
+ for(const name of ['LICENSE','LICENSE.md','LICENSE.txt','license','license.md','LICENSE-MIT'])try{const license=await readFile(path.join(directory,name),'utf8');const notice=`${pkg.name}@${pkg.version}\n${license.trim()}`;notices.push(notice);if(browserDirs.has(directory))browserNotices.push(notice);found=true;break;}catch(error){if(error.code!=='ENOENT')throw error;}
+ if(!found&&browserDirs.has(directory))throw new Error(`The browser runtime dependency ${pkg.name} has no bundled license text.`);
  if(!found)notices.push(`${pkg.name}@${pkg.version}\nLicense: ${pkg.license??'See upstream package metadata'}`);
 }
 notices.push(`Go WebAssembly runtime\n${goLicense.trim()}`);
 await writeFile(path.join(root,'runtime/third-party-licenses.txt'),notices.join('\n\n---\n\n')+'\n');
+// Standalone React prototypes embed this runtime, so its complete notices travel with the JavaScript.
+const browserLicense=browserNotices.join('\n\n---\n\n');
+if(!browserLicense||browserLicense.includes('*/'))throw new Error('The browser runtime license cannot be represented as a complete JavaScript notice.');
+const vendor=path.join(root,'runtime/react-vendor.js');
+await writeFile(vendor,(await readFile(vendor,'utf8'))+'\n/*!\n'+browserLicense+'\n*/\n');
 console.log('Built Design runtime and self-contained editor.');

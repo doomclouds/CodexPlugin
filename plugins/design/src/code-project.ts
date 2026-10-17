@@ -7,15 +7,16 @@ import lockfile from "proper-lockfile";
 import { z } from "zod";
 import { assertSafeJson, DesignError, idSchema } from "./validation.ts";
 import { canonicalCodeRoute, CODE_PAGE_LIMIT, UnsupportedCodeProjectFormatError } from "./code-pages.ts";
+import { CODE_PROJECT_FORMAT } from "./code-project-format.ts";
 
 export interface CodeFile { path: string; content: string; encoding: "utf8" | "base64" }
 export interface CodeFileSummary { path: string; encoding: CodeFile["encoding"]; sha256: string; bytes: number }
 export interface CodePage { id:string;name:string;entry:string;route:string }
 export interface CodeViewport { id:string;name:string;width:number;height:number;pageId?:string | undefined }
 export interface CodeProject {
-  schemaVersion: 2; id: string; name: string; revision: number; createdAt: string; updatedAt: string;
+  schemaVersion: typeof CODE_PROJECT_FORMAT; id: string; name: string; revision: number; createdAt: string; updatedAt: string;
   defaultPageId: string; pages: CodePage[]; files: CodeFile[];
-  designSystem: { tokens: Record<string, string>; components: Array<{ name: string; path: string; exportName?: string | undefined; usage?: string | undefined }>; notes: string };
+  designSystem: { components: Array<{ name: string; path: string; exportName?: string | undefined; usage?: string | undefined }>; notes: string };
   comments: Array<{ id: string; file: string; sourceId?: string | undefined; text: string; status: "open" | "resolved"; createdAt: string }>;
   viewports: CodeViewport[];
 }
@@ -27,6 +28,7 @@ export interface CodeProjectUpdate {
 export interface CodeProjectSummary { id: string; name: string; revision: number; updatedAt: string; defaultPageId: string; pageCount:number; fileCount: number }
 export interface CodeProjectListing { projects:CodeProjectSummary[];unsupported:Array<{id:string;format?:number|string;reason:string}> }
 export interface CodeProjectRevision { revision: number; createdAt: string; operation: "create" | "import" | "update" | "undo" | "redo" | "restore"; restoredFrom?: number | undefined }
+export interface CodeProjectHistory { revision: number; versions: CodeProjectRevision[]; canUndo: boolean; canRedo: boolean }
 
 export const CODE_PROJECT_LIMITS = { files: 500, textBytes: 1024 * 1024, assetBytes: 8 * 1024 * 1024, projectBytes: 32 * 1024 * 1024, history: 50, storeBytes: 96 * 1024 * 1024 } as const;
 const textExtensions = new Set([".html", ".htm", ".css", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".json", ".md", ".txt", ".svg"]);
@@ -45,10 +47,10 @@ const routeSchema=z.string().superRefine((value,context)=>{try{canonicalCodeRout
 export const codePageSchema: z.ZodType<CodePage> = z.object({id:idSchema,name:nameSchema,entry:pathSchema,route:routeSchema}).strict();
 export const codeFileSchema: z.ZodType<CodeFile> = z.object({ path: pathSchema, content: z.string().max(12 * 1024 * 1024), encoding: z.enum(["utf8", "base64"]) }).strict();
 const rawProjectSchema: z.ZodType<CodeProject> = z.object({
-  schemaVersion: z.literal(2), id: idSchema, name: nameSchema, revision: z.number().int().positive().safe(), createdAt: z.string().datetime({ offset: true }), updatedAt: z.string().datetime({ offset: true }),
+  schemaVersion: z.literal(CODE_PROJECT_FORMAT), id: idSchema, name: nameSchema, revision: z.number().int().positive().safe(), createdAt: z.string().datetime({ offset: true }).max(64), updatedAt: z.string().datetime({ offset: true }).max(64),
   defaultPageId:idSchema,pages:z.array(codePageSchema).min(1).max(CODE_PAGE_LIMIT), files: z.array(codeFileSchema).min(1).max(CODE_PROJECT_LIMITS.files),
-  designSystem: z.object({ tokens: z.record(z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,99}$/), z.string().max(1000)).refine((tokens) => Object.keys(tokens).length <= 500), components: z.array(z.object({ name: nameSchema, path: pathSchema, exportName: z.string().min(1).max(200).optional(), usage: z.string().max(10_000).optional() }).strict()).max(500), notes: z.string().max(100_000) }).strict(),
-  comments: z.array(z.object({ id: idSchema, file: pathSchema, sourceId: z.string().min(1).max(500).optional(), text: z.string().min(1).max(10_000), status: z.enum(["open", "resolved"]), createdAt: z.string().datetime({ offset: true }) }).strict()).max(2000),
+  designSystem: z.object({ components: z.array(z.object({ name: nameSchema, path: pathSchema, exportName: z.string().min(1).max(200).optional(), usage: z.string().max(10_000).optional() }).strict()).max(500), notes: z.string().max(100_000) }).strict(),
+  comments: z.array(z.object({ id: idSchema, file: pathSchema, sourceId: z.string().min(1).max(500).optional(), text: z.string().min(1).max(10_000), status: z.enum(["open", "resolved"]), createdAt: z.string().datetime({ offset: true }).max(64) }).strict()).max(2000),
   viewports: z.array(z.object({ id: idSchema, name: nameSchema, width: z.number().int().min(240).max(8192), height: z.number().int().min(240).max(8192),pageId:idSchema.optional() }).strict()).min(1).max(12),
 }).strict();
 
@@ -87,7 +89,7 @@ export const codeProjectSchema: z.ZodType<CodeProject> = z.any().superRefine((va
   for (const comment of project.comments) if (!files.has(comment.file)) fail(`Comment source file is missing: ${comment.file}`);
 });
 export function validateCodeProject(value: unknown): CodeProject {
-  assertSafeJson(value);if(value&&typeof value==='object'&&'schemaVersion'in value&&value.schemaVersion!==2)throw new UnsupportedCodeProjectFormatError(typeof value.schemaVersion==='number'||typeof value.schemaVersion==='string'?value.schemaVersion:undefined);
+  assertSafeJson(value);if(value&&typeof value==='object'&&'schemaVersion'in value&&value.schemaVersion!==CODE_PROJECT_FORMAT)throw new UnsupportedCodeProjectFormatError(typeof value.schemaVersion==='number'||typeof value.schemaVersion==='string'?value.schemaVersion:undefined);
   const result = codeProjectSchema.safeParse(value);
   if (!result.success) throw new DesignError("VALIDATION", result.error.issues.slice(0, 10).map((issue) => `${issue.path.join(".") || "project"}: ${issue.message}`).join("; "));
   return result.data;
@@ -97,7 +99,7 @@ export function summarizeCodeFiles(project: CodeProject): CodeFileSummary[] { re
 
 function baseProject(name: string, files: CodeFile[], entry = "index.html"): CodeProject {
   const now = new Date().toISOString();
-  return { schemaVersion: 2, id: `code_${randomUUID().replaceAll("-", "")}`, name, revision: 1, createdAt: now, updatedAt: now, defaultPageId:'page_main',pages:[{id:'page_main',name:'主页面',entry,route:'/'}], files, designSystem: { tokens: { "color.paper": "#f5f1e8", "color.ink": "#242724", "color.accent": "#ea6644", "font.body": "Arial, sans-serif" }, components: [], notes: "模板示例；源码是真实设计源，可替换组件、行为和样式。" }, comments: [], viewports: [{ id: "viewport_desktop", name: "桌面", width: 1440, height: 1000 }, { id: "viewport_mobile", name: "手机", width: 390, height: 844 }] };
+  return { schemaVersion: CODE_PROJECT_FORMAT, id: `code_${randomUUID().replaceAll("-", "")}`, name, revision: 1, createdAt: now, updatedAt: now, defaultPageId:'page_main',pages:[{id:'page_main',name:'主页面',entry,route:'/'}], files, designSystem: { components: [], notes: "模板示例；源码是真实设计源，可替换组件、行为和样式。" }, comments: [], viewports: [{ id: "viewport_desktop", name: "桌面", width: 1440, height: 1000 }, { id: "viewport_mobile", name: "手机", width: 390, height: 844 }] };
 }
 const templateCss = `:root{--paper:#f5f1e8;--ink:#242724;--accent:#ea6644;font-family:Arial,sans-serif;color:var(--ink);background:var(--paper)}*{box-sizing:border-box}body{margin:0}button,input{font:inherit}button{cursor:pointer}header{display:flex;justify-content:space-between;align-items:center;padding:26px 6vw;border-bottom:1px solid #24272430}.brand{font-weight:900;letter-spacing:-2px;font-size:25px}.edition{font-size:11px;letter-spacing:2px;text-transform:uppercase}main{padding:65px 6vw;max-width:1600px;margin:auto}.eyebrow{font-size:12px;letter-spacing:3px;text-transform:uppercase}h1{font-family:Georgia,serif;font-size:clamp(52px,8vw,116px);font-weight:400;letter-spacing:-5px;line-height:.97;max-width:970px;margin:28px 0}h1 em{color:var(--accent)}.intro{max-width:530px;line-height:1.75;color:#62655e}.actions{display:flex;gap:12px;margin:30px 0 60px}button{border:1px solid var(--ink);padding:13px 21px;border-radius:30px;background:transparent;color:inherit}.primary{background:var(--ink);color:var(--paper)}.grid{display:grid;grid-template-columns:1.3fr 1fr;gap:24px}.card{background:#e8e5da;border-radius:4px;padding:34px;min-height:245px;border-top:2px solid var(--ink)}.card.coral{background:var(--accent)}.card h2{font:400 34px Georgia,serif;letter-spacing:-1px;margin:15px 0}.card small{letter-spacing:2px}.row{display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid #24272425}.row input{accent-color:var(--ink)}.complete{text-decoration:line-through;opacity:.5}.add{display:flex;gap:8px;margin-top:20px}.add input{background:#fff8;border:0;padding:12px;min-width:0;flex:1}.add button{padding:10px 16px}.count{font:72px Georgia,serif;line-height:1;margin:24px 0}dialog{border:0;max-width:460px;padding:35px;background:var(--paper);box-shadow:0 30px 100px #0004}dialog::backdrop{background:#161b1670}footer{padding:24px 6vw;border-top:1px solid #24272430;font-size:12px;display:flex;justify-content:space-between}@media(max-width:650px){header{padding:20px}.edition{display:none}main{padding:42px 20px}h1{letter-spacing:-3px}.grid{grid-template-columns:1fr}.actions{margin-bottom:35px}footer{padding:20px}}`;
 export function createCodeTemplate(name: string, template: "html" | "react"): CodeProject {
@@ -143,6 +145,13 @@ export class CodeProjectStore {
     return{projects,unsupported:unsupported.sort((a,b)=>a.id.localeCompare(b.id))};
   }
   async create(input: { name: string; template: "html" | "react" }): Promise<CodeProject> { return this.insert(createCodeTemplate(input.name, input.template), "create"); }
+  async importProject(value: unknown, name?: string): Promise<CodeProject> {
+    const source = validateCodeProject(value), now = new Date().toISOString();
+    const project = validateCodeProject({ ...source, id: `code_${randomUUID().replaceAll("-", "")}`, name: name ?? source.name, revision: 1, createdAt: now, updatedAt: now });
+    // Imported source is a new independent project. Private directory bindings
+    // and historical records are neither accepted as input nor reconstructed.
+    return this.insert(project, "import");
+  }
   async get(id: string): Promise<CodeProject> { return structuredClone((await this.read(id)).current); }
   async update(id: string, expectedRevision: number, input: CodeProjectUpdate): Promise<CodeProject> {
     assertSafeJson(input); const result = updateSchema.safeParse(input);
@@ -165,7 +174,10 @@ export class CodeProjectStore {
   }
   async undo(id: string, expectedRevision: number): Promise<CodeProject> { return this.change(id, expectedRevision, "undo", (record) => { const revision = record.undo.pop(); if (revision === undefined) throw new DesignError("VALIDATION", "No source change is available to undo"); record.redo.push(record.current.revision); return this.snapshot(record, revision); }, false); }
   async redo(id: string, expectedRevision: number): Promise<CodeProject> { return this.change(id, expectedRevision, "redo", (record) => { const revision = record.redo.pop(); if (revision === undefined) throw new DesignError("VALIDATION", "No source change is available to redo"); record.undo.push(record.current.revision); return this.snapshot(record, revision); }, false); }
-  async history(id: string): Promise<CodeProjectRevision[]> { return structuredClone((await this.read(id)).history); }
+  async history(id: string): Promise<CodeProjectHistory> {
+    const record = await this.read(id);
+    return { revision: record.current.revision, versions: structuredClone(record.history), canUndo: record.undo.length > 0, canRedo: record.redo.length > 0 };
+  }
   async restore(id: string, expectedRevision: number, revision: number): Promise<CodeProject> { return this.change(id, expectedRevision, "restore", (record) => this.snapshot(record, revision), true, revision); }
 
   async importDirectory(input: { name: string; directory: string; entry?: string }): Promise<CodeProject> {
@@ -347,7 +359,7 @@ export class CodeProjectStore {
     const filename = this.filename(id);
     try {
       const info = await lstat(filename); if (!info.isFile() || info.isSymbolicLink() || info.size > CODE_PROJECT_LIMITS.storeBytes) throw new DesignError("VALIDATION", "Stored code project must be a bounded regular file");
-      const raw:unknown=JSON.parse(await readFile(filename,'utf8'));if(raw&&typeof raw==='object'&&'current'in raw&&raw.current&&typeof raw.current==='object'&&'schemaVersion'in raw.current&&raw.current.schemaVersion!==2){const format=raw.current.schemaVersion;throw new UnsupportedCodeProjectFormatError(typeof format==='number'||typeof format==='string'?format:undefined);}
+      const raw:unknown=JSON.parse(await readFile(filename,'utf8'));if(raw&&typeof raw==='object'&&'current'in raw&&raw.current&&typeof raw.current==='object'&&'schemaVersion'in raw.current&&raw.current.schemaVersion!==CODE_PROJECT_FORMAT){const format=raw.current.schemaVersion;throw new UnsupportedCodeProjectFormatError(typeof format==='number'||typeof format==='string'?format:undefined);}
       const result = recordSchema.safeParse(raw); if (!result.success) throw new DesignError("VALIDATION", "Stored code project is invalid");
       const record = result.data; const revisions = new Set(record.snapshots.map((item) => item.revision));
       if (record.current.id !== id || record.snapshots.some((item) => item.id !== id || item.createdAt !== record.current.createdAt) || revisions.size !== record.snapshots.length || !revisions.has(record.current.revision) || [...record.undo, ...record.redo, ...record.history.map((item) => item.revision)].some((revision) => !revisions.has(revision))) throw new DesignError("VALIDATION", "Stored code history is inconsistent");

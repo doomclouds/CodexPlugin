@@ -65,16 +65,16 @@ codex plugin add workflows@codex-plugin-workspace
 
 ## Design
 
-`design 0.4.0` 开发版提供真实 HTML/React/TSX/CSS 设计项目：可运行交互预览、源码定位和窄范围属性修改、真实组件导入、设计系统、评论、历史恢复及自包含 HTML/源代码 ZIP 导出；本机有 Chromium 时可渲染 PNG/PDF。源码目录可显式连接、比较、拉取与回写，冲突按两端内容确认，中断写入先重查现场。设计只以真实源码为源，已移除旧图层文档和格式兼容分支。默认由当前聊天调用工具；可选独立模式通过本机 Codex app-server 沿用 ChatGPT 登录，不需要 API Key。
+`design 0.5.0` 开发预览版提供真实 HTML/React/TSX/CSS 设计项目：可运行交互预览、最多 4 板的真实页面总览、源码定位和窄范围属性修改、可编辑组件导入、设计系统、评论、历史恢复、自包含 HTML/源代码 ZIP 导出及完整工程 ZIP 回读；本机有 Chromium 时可渲染 PNG/PDF。设计系统直接读取、修改真实 CSS 变量；组件库可按独立名称追加，已有命名空间整批拒绝，保留手工修改。当前项目格式为 3，删除脱离 CSS 的令牌元数据；旧格式明确诊断并保留原文件。源码目录可显式连接、比较、拉取与回写，冲突按两端内容确认，中断写入先重查现场。设计只以真实源码为源，已移除旧图层文档和格式兼容分支。默认由当前聊天调用工具；可选独立模式通过本机 Codex app-server 沿用 ChatGPT 登录，不需要 API Key。
 
-源码更新同时校验修订与文件哈希。组件静态打包、页面接入、编译、实际截图和交互验收分别验证；不把模板或通过结构检查当作设计完成。对标 Claude Design、Open Design 与 Huashu Design 的实际作品和完整工作流仍在迭代，当前未宣称体验对等或超越；Motion 的独立时间线与视频交付尚未实现。
+源码更新同时校验修订与文件哈希。组件源码导入、页面接入、编译、实际截图和交互验收分别验证；不把模板或通过结构检查当作设计完成。对标 Claude Design、Open Design 与 Huashu Design 的实际作品和完整工作流仍在迭代，当前未宣称体验对等或超越；Motion 的独立时间线与视频交付尚未实现。
 
 ```shell
 codex plugin marketplace upgrade codex-plugin-workspace
 codex plugin add design@codex-plugin-workspace
 ```
 
-使用见 [Design 说明](plugins/design/README.md)。安装后需核对新聊天是否实际加载 `design_open_editor` 等工具。
+使用见 [Design 说明](plugins/design/README.md)，本版变化见 [0.5.0 发布说明](docs/design/release-0.5.0.md)。安装后需核对新聊天是否实际加载 `design_open_editor` 等工具。
 
 ## Workflows
 

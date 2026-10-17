@@ -1,4 +1,5 @@
-function crc32(data: Buffer): number { let crc=0xffffffff; for(const byte of data) { crc^=byte; for(let i=0;i<8;i++) crc=(crc>>>1)^((crc&1)?0xedb88320:0); } return (crc^0xffffffff)>>>0; }
+const crcTable = Uint32Array.from({ length: 256 }, (_, value) => { let crc = value; for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0); return crc >>> 0; });
+export function crc32(data: Uint8Array): number { let crc = 0xffffffff; for (const byte of data) crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 0xff]!; return (crc ^ 0xffffffff) >>> 0; }
 export function zipFiles(files: Array<{name:string;data:Buffer}>): Buffer {
   const local: Buffer[] = [], central: Buffer[] = []; let offset=0;
   for(const file of files) {

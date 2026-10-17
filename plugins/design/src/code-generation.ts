@@ -12,34 +12,43 @@ import type { CodeProject, CodeProjectUpdate } from './code-project.ts';
 import { compileCodeProject } from './code-preview.ts';
 import { inspectCodeHtml } from './code-browser.ts';
 import { browserExecutable } from './browser.ts';
+import { DESIGN_REFERENCE_VERSION, loadDesignReference, validateDesignReferenceSnapshot } from './design-references.ts';
+import type { DesignReferenceChoice, DesignReferenceMetadata, DesignReferencePayload, DesignReferenceView } from './design-references.ts';
 
 export interface CodeGenerationJob {
   id:string;projectId:string;baseRevision:number;status:'running'|'completed'|'failed'|'cancelled';model?:string;
   changes?:CodeProjectUpdate;log:string[];error?:string;createdAt:string;updatedAt:string;
   verification:{compiled:boolean;rendered:boolean;modelReviewed:boolean;viewports:number;pages:string[]};
   budgetMs:number;reviewPageIds:string[];resumedFrom?:string;draft?:CodeDraftSummary;
+  reference:DesignReferenceMetadata;referenceTurns:CodeReferenceTurn[];
 }
+export interface CodeReferenceTurn { turn:number;turnId:string|null;phase:'initial'|'correction'|'review'|'resume-review';status:'prepared'|'dispatched'|'completed';referenceDigest:string;referenceId:DesignReferenceMetadata['selectedId'];budget:DesignReferenceMetadata['budget'];imageHashes:string[];workSourceDigest:string|null;workImageHashes:string[] }
 export interface CodeDraftSummary {
   id:string;projectId:string;baseRevision:number;originJobId:string;
   status:'unverified';requiresReview:true;stage:'compiled'|'rendering'|'rendered'|'reviewing';
   verification:CodeGenerationJob['verification'];createdAt:string;updatedAt:string;expiresAt:string;expired:boolean;
   originStatus:CodeGenerationJob['status']|'not-attached';originBudgetMs:number;lastError?:string;resumable:boolean;captureCount:number;reviewPageIds:string[];
   sourceDigest:string;reviewedSourceDigest:string|null;
+  reference:DesignReferenceMetadata;referenceTurns:CodeReferenceTurn[];resumedFrom:string|null;
 }
+export interface CodeDraftList {drafts:CodeDraftSummary[];unsupported:Array<{id:string;format:number|string;reason:string}>}
 export interface CodeDraftCapture {pageId:string;viewportId:string;width:number;height:number;sourceDigest:string;pngBase64:string;sha256:string;observations:unknown}
 export interface CodeDraft {draft:CodeDraftSummary;project:CodeProject;baseFileHashes:Record<string,string>;captures:Array<Omit<CodeDraftCapture,'pngBase64'> & {pngBase64?:string}>}
 export interface CodeGenerationOptions {
   command?:string;timeoutMs?:number;inspect?:typeof inspectCodeHtml;checkpointDir?:string;
   checkpointTtlMs?:number;maxCheckpoints?:number;maxCheckpointBytes?:number;
+  referencePackageRoot?:string|URL;
 }
 interface CheckpointRecord {
-  version:1;id:string;originJobId:string;originStatus:CodeGenerationJob['status'];originBudgetMs:number;lastError?:string;
+  version:2;id:string;originJobId:string;originStatus:CodeGenerationJob['status'];originBudgetMs:number;lastError?:string;
   original:CodeProject;working:CodeProject;baseFileHashes:Record<string,string>;baseDigest:string;sourceDigest:string;reviewedSourceDigest:string|null;
   accountFingerprint:string|null;model:string;prompt:string;stage:CodeDraftSummary['stage'];
   verification:CodeGenerationJob['verification'];captures:CodeDraftCapture[];
   createdAt:string;updatedAt:string;expiresAt:string;reviewPageIds:string[];integrity:string;
+  reference:DesignReferencePayload;referenceTurns:CodeReferenceTurn[];resumedFrom:string|null;
 }
 export const CODE_CHECKPOINT_LIMITS={ttlMs:24*60*60*1000,records:8,totalBytes:128*1024*1024,recordBytes:96*1024*1024,captures:8,reviewPages:4} as const;
+export const CODE_GENERATION_INPUT_LIMITS={textBytes:Math.floor(2.5*1024*1024),imageBytes:64*1024*1024,wireBytes:90*1024*1024} as const;
 type ObjectValue=Record<string,any>;
 const object=(value:unknown):ObjectValue=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as ObjectValue:{};
 const maxOutput=4*1024*1024;
@@ -83,22 +92,23 @@ function changesFrom(original:CodeProject,candidate:CodeProject):CodeProjectUpda
   const previous=new Map(original.files.map(file=>[file.path,file]));
   return{files:candidate.files.filter(file=>!previous.has(file.path)||codeFileHash(previous.get(file.path)!)!==codeFileHash(file)).map(file=>({path:file.path,content:file.content,encoding:file.encoding,expectedHash:previous.has(file.path)?codeFileHash(previous.get(file.path)!):null}))};
 }
-interface Running {job:CodeGenerationJob;done:Promise<void>;session?:Session;threadId?:string;turnId?:string;cancelled:boolean;checkpoint?:CheckpointRecord}
+class UnsupportedCheckpointFormatError extends Error {readonly code='DESIGN_DRAFT_FORMAT';readonly id:string;readonly format:number|string;constructor(id:string,format:number|string){super(`Private draft ${id} uses unsupported checkpoint format ${String(format)}. Current format is 2 with design-reference material format ${DESIGN_REFERENCE_VERSION}; the original file was not migrated or deleted.`);this.id=id;this.format=format;}}
+interface Running {job:CodeGenerationJob;reference:DesignReferencePayload;done:Promise<void>;session?:Session;threadId?:string;turnId?:string;cancelled:boolean;checkpoint?:CheckpointRecord}
 export class CodeGenerationRuntime {
-  private readonly options:Required<Pick<CodeGenerationOptions,'command'|'timeoutMs'|'checkpointTtlMs'|'maxCheckpoints'|'maxCheckpointBytes'>>&Pick<CodeGenerationOptions,'inspect'>;
+  private readonly options:Required<Pick<CodeGenerationOptions,'command'|'timeoutMs'|'checkpointTtlMs'|'maxCheckpoints'|'maxCheckpointBytes'>>&Pick<CodeGenerationOptions,'inspect'|'referencePackageRoot'>;
   readonly checkpointDir:string;
   private readonly jobs=new Map<string,Running>();private disposed=false;
   constructor(options:CodeGenerationOptions={}){
-    this.options={command:options.command??'codex',timeoutMs:budget(options.timeoutMs??600000),checkpointTtlMs:options.checkpointTtlMs??CODE_CHECKPOINT_LIMITS.ttlMs,maxCheckpoints:options.maxCheckpoints??CODE_CHECKPOINT_LIMITS.records,maxCheckpointBytes:options.maxCheckpointBytes??CODE_CHECKPOINT_LIMITS.totalBytes,...(options.inspect?{inspect:options.inspect}:{})};
+    this.options={command:options.command??'codex',timeoutMs:budget(options.timeoutMs??600000),checkpointTtlMs:options.checkpointTtlMs??CODE_CHECKPOINT_LIMITS.ttlMs,maxCheckpoints:options.maxCheckpoints??CODE_CHECKPOINT_LIMITS.records,maxCheckpointBytes:options.maxCheckpointBytes??CODE_CHECKPOINT_LIMITS.totalBytes,...(options.inspect?{inspect:options.inspect}:{}),...(options.referencePackageRoot?{referencePackageRoot:options.referencePackageRoot}:{})};
     const directory=options.checkpointDir??join(process.env.DESIGN_DATA_DIR||join(homedir(),'.codex-design','projects'),'private-generation');
     if(!isAbsolute(directory))throw new Error('The private checkpoint directory must be absolute.');this.checkpointDir=resolve(directory);
     if(!Number.isInteger(this.options.checkpointTtlMs)||this.options.checkpointTtlMs<10||this.options.checkpointTtlMs>7*CODE_CHECKPOINT_LIMITS.ttlMs)throw new Error('Checkpoint retention must be between 10 milliseconds and 7 days.');
     if(!Number.isInteger(this.options.maxCheckpoints)||this.options.maxCheckpoints<1||this.options.maxCheckpoints>50||!Number.isSafeInteger(this.options.maxCheckpointBytes)||this.options.maxCheckpointBytes<1024||this.options.maxCheckpointBytes>512*1024*1024)throw new Error('Private checkpoint limits must allow 1–50 records and 1 KiB–512 MiB total storage.');
   }
-  async start(input:{project:CodeProject;prompt:string;model?:string;timeoutMs?:number;pageIds?:string[]}):Promise<CodeGenerationJob>{
+  async start(input:{project:CodeProject;prompt:string;model?:string;timeoutMs?:number;pageIds?:string[];referenceId?:DesignReferenceChoice}):Promise<CodeGenerationJob>{
     return this.begin(input);
   }
-  private async begin(input:{project:CodeProject;prompt:string;model?:string;timeoutMs?:number;pageIds?:string[]},checkpoint?:CheckpointRecord):Promise<CodeGenerationJob>{
+  private async begin(input:{project:CodeProject;prompt:string;model?:string;timeoutMs?:number;pageIds?:string[];referenceId?:DesignReferenceChoice},checkpoint?:CheckpointRecord):Promise<CodeGenerationJob>{
     if(this.disposed)throw new Error('Code generation runtime is disposed.');
     if([...this.jobs.values()].some(state=>state.job.status==='running'))throw new Error('An independent code generation is already running.');
     if(!input.prompt.trim()||input.prompt.length>30000)throw new Error('Code generation prompt must contain 1 to 30000 characters.');
@@ -106,7 +116,10 @@ export class CodeGenerationRuntime {
     const project=validateCodeProject(structuredClone(input.project));buildCodeGenerationContext(project);
     const reviewPageIds=input.pageIds??project.pages.map(page=>page.id);
     if(!reviewPageIds.length||reviewPageIds.length>CODE_CHECKPOINT_LIMITS.reviewPages||new Set(reviewPageIds).size!==reviewPageIds.length||reviewPageIds.some(id=>!project.pages.some(page=>page.id===id)))throw new Error('Explicitly select 1 to 4 existing pages for independent visual review; no page is silently skipped.');
-    const now=new Date().toISOString();const state:Running={job:{id:'codejob_'+randomUUID(),projectId:project.id,baseRevision:project.revision,status:'running',budgetMs:budget(input.timeoutMs??this.options.timeoutMs),reviewPageIds:[...reviewPageIds],...(checkpoint?{resumedFrom:checkpoint.id}:{}),...(input.model?{model:input.model}:{}),log:[checkpoint?'Explicitly starting a new local review of a saved unverified private draft; the previous worker is not resumed.':'Preparing the local ChatGPT-signed-in Codex code worker.'],createdAt:now,updatedAt:now,verification:{compiled:false,rendered:false,modelReviewed:false,viewports:0,pages:[]}},done:Promise.resolve(),cancelled:false};
+    const views=[...new Set(reviewPageIds.flatMap(pageId=>project.viewports.filter(viewport=>!viewport.pageId||viewport.pageId===pageId).slice(0,2)).map(viewport=>viewport.width<=600?'mobile':'desktop'))] as DesignReferenceView[];
+    const reference=checkpoint?validateDesignReferenceSnapshot(checkpoint.reference):await loadDesignReference({referenceId:input.referenceId,brief:input.prompt,views},{packageRoot:this.options.referencePackageRoot});
+    if(this.disposed)throw new Error('Code generation runtime is disposed.');if([...this.jobs.values()].some(state=>state.job.status==='running'))throw new Error('An independent code generation is already running.');
+    const now=new Date().toISOString();const state:Running={job:{id:'codejob_'+randomUUID(),projectId:project.id,baseRevision:project.revision,status:'running',budgetMs:budget(input.timeoutMs??this.options.timeoutMs),reviewPageIds:[...reviewPageIds],reference:structuredClone(reference.metadata),referenceTurns:[],...(checkpoint?{resumedFrom:checkpoint.id}:{}),...(input.model?{model:input.model}:{}),log:[checkpoint?'Explicitly starting a new local review of a saved unverified private draft; the previous worker is not resumed.':'Preparing the local ChatGPT-signed-in Codex code worker.'],createdAt:now,updatedAt:now,verification:{compiled:false,rendered:false,modelReviewed:false,viewports:0,pages:[]}},reference,done:Promise.resolve(),cancelled:false};
     this.jobs.set(state.job.id,state);state.done=this.generate(state,project,input.prompt,checkpoint);
     while(this.jobs.size>100){const oldest=[...this.jobs].find(([,value])=>value.job.status!=='running');if(!oldest)break;this.jobs.delete(oldest[0]);}
     return this.get(state.job.id);
@@ -117,11 +130,12 @@ export class CodeGenerationRuntime {
     if(!checkpoint.accountFingerprint)throw new Error('This draft has no stable identity exposed by account/read; account continuity cannot be verified. Read it without resuming or use the current conversation.');
     return this.begin({project:input.project,prompt:input.prompt??checkpoint.prompt,model:input.model??checkpoint.model,pageIds:input.pageIds??checkpoint.reviewPageIds,timeoutMs:input.timeoutMs??600000},checkpoint);
   }
-  async listDrafts(options:{includeExpired?:boolean}={}):Promise<CodeDraftSummary[]>{
+  async listDrafts(options:{includeExpired?:boolean}={}):Promise<CodeDraftList>{
+    const unsupported:CodeDraftList['unsupported']=[];
     const entries=await this.checkpointEntries();const records=await Promise.all(entries.map(async entry=>{
-      try{return await this.readCheckpoint(entry.id);}catch(error){if((error as NodeJS.ErrnoException).code==='DESIGN_DRAFT_NOT_FOUND')return undefined;throw error;}
+      try{return await this.readCheckpoint(entry.id);}catch(error){if(error instanceof UnsupportedCheckpointFormatError){unsupported.push({id:error.id,format:error.format,reason:error.message});return undefined;}if((error as NodeJS.ErrnoException).code==='DESIGN_DRAFT_NOT_FOUND')return undefined;throw error;}
     }));
-    return records.filter((record):record is CheckpointRecord=>record!==undefined).map(record=>this.draftSummary(record)).filter(record=>options.includeExpired||!record.expired).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
+    return{drafts:records.filter((record):record is CheckpointRecord=>record!==undefined).map(record=>this.draftSummary(record)).filter(record=>options.includeExpired||!record.expired).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)),unsupported:unsupported.sort((a,b)=>a.id.localeCompare(b.id))};
   }
   async getDraft(id:string,options:{includeScreenshots?:boolean}={}):Promise<CodeDraft>{
     const record=await this.readCheckpoint(id);
@@ -134,7 +148,7 @@ export class CodeGenerationRuntime {
   private draftSummary(record:CheckpointRecord):CodeDraftSummary{
     const status=this.jobs.get(record.originJobId)?.job.status??(record.originStatus==='running'?'not-attached':record.originStatus);
     const expired=Date.now()>=Date.parse(record.expiresAt);
-    return{id:record.id,projectId:record.original.id,baseRevision:record.original.revision,originJobId:record.originJobId,status:'unverified',requiresReview:true,stage:record.stage,verification:structuredClone(record.verification),createdAt:record.createdAt,updatedAt:record.updatedAt,expiresAt:record.expiresAt,expired,originStatus:status,originBudgetMs:record.originBudgetMs,...(record.lastError?{lastError:record.lastError}:{}),resumable:!expired&&Boolean(record.accountFingerprint),captureCount:record.captures.length,reviewPageIds:[...record.reviewPageIds],sourceDigest:record.sourceDigest,reviewedSourceDigest:record.reviewedSourceDigest};
+    return{id:record.id,projectId:record.original.id,baseRevision:record.original.revision,originJobId:record.originJobId,status:'unverified',requiresReview:true,stage:record.stage,verification:structuredClone(record.verification),createdAt:record.createdAt,updatedAt:record.updatedAt,expiresAt:record.expiresAt,expired,originStatus:status,originBudgetMs:record.originBudgetMs,...(record.lastError?{lastError:record.lastError}:{}),resumable:!expired&&Boolean(record.accountFingerprint),captureCount:record.captures.length,reviewPageIds:[...record.reviewPageIds],sourceDigest:record.sourceDigest,reviewedSourceDigest:record.reviewedSourceDigest,reference:structuredClone(record.reference.metadata),referenceTurns:structuredClone(record.referenceTurns),resumedFrom:record.resumedFrom};
   }
   private async prepareCheckpoints():Promise<void>{
     await mkdir(this.checkpointDir,{recursive:true,mode:0o700});const info=await lstat(this.checkpointDir);
@@ -161,8 +175,18 @@ export class CodeGenerationRuntime {
       // Validate the opened descriptor so readers observe either complete version.
       if(!actual.isFile()||actual.size>CODE_CHECKPOINT_LIMITS.recordBytes||process.platform!=='win32'&&(actual.mode&0o077)!==0)throw new Error('Unsafe checkpoint');
       const raw:unknown=JSON.parse(await file.readFile('utf8'));const record=object(raw) as CheckpointRecord;
-      if(record.version!==1||record.id!==id||!Number.isInteger(record.originBudgetMs)||record.originBudgetMs<10||record.originBudgetMs>900000||!Array.isArray(record.captures)||record.captures.length>CODE_CHECKPOINT_LIMITS.captures||!Array.isArray(record.reviewPageIds)||record.reviewPageIds.length<1||record.reviewPageIds.length>CODE_CHECKPOINT_LIMITS.reviewPages||typeof record.prompt!=='string'||record.prompt.length>30000||typeof record.model!=='string'||!['compiled','rendering','rendered','reviewing'].includes(record.stage)||!Number.isFinite(Date.parse(record.createdAt))||!Number.isFinite(Date.parse(record.updatedAt))||!Number.isFinite(Date.parse(record.expiresAt)))throw new Error('Invalid checkpoint');
+      if(record.version!==2)throw new UnsupportedCheckpointFormatError(id,typeof record.version==='number'||typeof record.version==='string'?record.version:'unknown');
+      if(record.id!==id||!Number.isInteger(record.originBudgetMs)||record.originBudgetMs<10||record.originBudgetMs>900000||!Array.isArray(record.captures)||record.captures.length>CODE_CHECKPOINT_LIMITS.captures||!Array.isArray(record.reviewPageIds)||record.reviewPageIds.length<1||record.reviewPageIds.length>CODE_CHECKPOINT_LIMITS.reviewPages||typeof record.prompt!=='string'||record.prompt.length>30000||typeof record.model!=='string'||!['compiled','rendering','rendered','reviewing'].includes(record.stage)||!Number.isFinite(Date.parse(record.createdAt))||!Number.isFinite(Date.parse(record.updatedAt))||!Number.isFinite(Date.parse(record.expiresAt)))throw new Error('Invalid checkpoint');
       const{integrity,...payload}=record;if(typeof integrity!=='string'||recordIntegrity(payload)!==integrity)throw new Error('Checkpoint integrity mismatch');
+      try{record.reference=validateDesignReferenceSnapshot(record.reference);}catch(error){
+        if(error instanceof Error&&'code'in error&&error.code==='DESIGN_REFERENCE_FORMAT'){
+          const value='format'in error?error.format:object(object(record.reference).metadata).version;
+          const format=typeof value==='number'&&Number.isFinite(value)?String(value):typeof value==='string'&&/^[A-Za-z0-9_.-]{1,32}$/.test(value)?value:'unknown';
+          throw new UnsupportedCheckpointFormatError(id,`checkpoint-2/reference-${format}`);
+        }
+        throw error;
+      }
+      if(!Array.isArray(record.referenceTurns)||record.referenceTurns.length>3||record.resumedFrom!==null&&!draftIdPattern.test(record.resumedFrom)||record.referenceTurns.some((turn,index)=>turn.turn!==index+1||!['initial','correction','review','resume-review'].includes(turn.phase)||!['prepared','dispatched','completed'].includes(turn.status)||turn.turnId!==null&&(typeof turn.turnId!=='string'||!turn.turnId.length||turn.turnId.length>256)||turn.status!=='prepared'&&turn.turnId===null||turn.referenceDigest!==record.reference.metadata.digest||turn.referenceId!==record.reference.metadata.selectedId||canonical(turn.budget)!==canonical(record.reference.metadata.budget)||canonical(turn.imageHashes)!==canonical(record.reference.images.map(image=>image.sha256))||turn.workSourceDigest!==null&&!/^[a-f0-9]{64}$/.test(turn.workSourceDigest)||!Array.isArray(turn.workImageHashes)||turn.workImageHashes.length>CODE_CHECKPOINT_LIMITS.captures||turn.workImageHashes.some(hash=>!/^[a-f0-9]{64}$/.test(hash))))throw new Error('Checkpoint reference receipt mismatch');
       record.original=validateCodeProject(record.original);record.working=validateCodeProject(record.working);
       if(projectDigest(record.original)!==record.baseDigest||projectDigest(record.working)!==record.sourceDigest||record.original.id!==record.working.id||record.original.revision!==record.working.revision)throw new Error('Checkpoint source identity mismatch');
       if(canonical(record.baseFileHashes)!==canonical(Object.fromEntries(record.original.files.map(item=>[item.path,codeFileHash(item)]))))throw new Error('Checkpoint base hashes mismatch');
@@ -170,7 +194,7 @@ export class CodeGenerationRuntime {
       if(record.reviewedSourceDigest!==null&&!/^[a-f0-9]{64}$/.test(record.reviewedSourceDigest))throw new Error('Invalid reviewed source identity');
       for(const capture of record.captures){if(typeof capture.pngBase64!=='string'||capture.pngBase64.length>12*1024*1024||sha(Buffer.from(capture.pngBase64,'base64'))!==capture.sha256||capture.sourceDigest!==record.sourceDigest)throw new Error('Checkpoint screenshot integrity mismatch');}
       return record;
-    }catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')throw Object.assign(new Error('Private draft was not found; it may have expired or been evicted by the storage limit.'),{code:'DESIGN_DRAFT_NOT_FOUND'});throw new Error('Private draft is corrupt, incompatible or changed. It cannot be resumed.');}
+    }catch(error){if(error instanceof UnsupportedCheckpointFormatError)throw error;if((error as NodeJS.ErrnoException).code==='ENOENT')throw Object.assign(new Error('Private draft was not found; it may have expired or been evicted by the storage limit.'),{code:'DESIGN_DRAFT_NOT_FOUND'});throw new Error('Private draft is corrupt, incompatible or changed. It cannot be resumed.');}
     finally{await file?.close();}
   }
   private async persistCheckpoint(record:CheckpointRecord):Promise<void>{
@@ -179,7 +203,7 @@ export class CodeGenerationRuntime {
     const release=await lockfile.lock(this.checkpointDir,{realpath:false,stale:30000,update:10000,retries:{retries:10,minTimeout:15,maxTimeout:100}});
     const temporary=join(this.checkpointDir,'.checkpoint-'+randomUUID()+'.tmp');let file:Awaited<ReturnType<typeof open>>|undefined;
     try{
-      const entries=await this.checkpointEntries();let total=entries.reduce((sum,item)=>sum+item.bytes,0),count=entries.length;
+      const entries=[];for(const entry of await this.checkpointEntries()){try{await this.readCheckpoint(entry.id);entries.push(entry);}catch(error){if(error instanceof UnsupportedCheckpointFormatError)continue;throw error;}}let total=entries.reduce((sum,item)=>sum+item.bytes,0),count=entries.length;
       const current=entries.find(item=>item.id===record.id);if(current){total-=current.bytes;count--;}
       for(const entry of entries.filter(item=>item.id!==record.id).sort((a,b)=>a.modified-b.modified)){
         let expired=false;try{expired=Date.now()>=Date.parse((await this.readCheckpoint(entry.id)).expiresAt);}catch{}
@@ -234,7 +258,7 @@ export class CodeGenerationRuntime {
       let working=structuredClone(resumed?.working??original);let feedback:unknown;let screenshots:string[]=[];let captures:CodeDraftCapture[]=[];let receivedVisualFeedback=false,reviewedSourceDigest:string|null=null;const completedTurns=new Set<string>();
       const saveDraft=async(checkpointStage:CodeDraftSummary['stage']):Promise<void>=>{
         const now=new Date().toISOString(),previous=state.checkpoint;
-        const payload:Omit<CheckpointRecord,'integrity'>={version:1,id:previous?.id??'draft_'+randomUUID(),originJobId:state.job.id,originStatus:state.job.status,originBudgetMs:state.job.budgetMs,original:structuredClone(original),working:structuredClone(working),baseFileHashes:Object.fromEntries(original.files.map(file=>[file.path,codeFileHash(file)])),baseDigest:projectDigest(original),sourceDigest:projectDigest(working),reviewedSourceDigest,accountFingerprint:identity,model:state.job.model!,prompt,stage:checkpointStage,verification:structuredClone(state.job.verification),captures:structuredClone(captures),createdAt:previous?.createdAt??now,updatedAt:now,expiresAt:previous?.expiresAt??new Date(Date.now()+this.options.checkpointTtlMs).toISOString(),reviewPageIds:[...state.job.reviewPageIds]};
+        const payload:Omit<CheckpointRecord,'integrity'>={version:2,id:previous?.id??'draft_'+randomUUID(),originJobId:state.job.id,originStatus:state.job.status,originBudgetMs:state.job.budgetMs,original:structuredClone(original),working:structuredClone(working),baseFileHashes:Object.fromEntries(original.files.map(file=>[file.path,codeFileHash(file)])),baseDigest:projectDigest(original),sourceDigest:projectDigest(working),reviewedSourceDigest,accountFingerprint:identity,model:state.job.model!,prompt,stage:checkpointStage,verification:structuredClone(state.job.verification),captures:structuredClone(captures),createdAt:previous?.createdAt??now,updatedAt:now,expiresAt:previous?.expiresAt??new Date(Date.now()+this.options.checkpointTtlMs).toISOString(),reviewPageIds:[...state.job.reviewPageIds],reference:structuredClone(state.reference),referenceTurns:structuredClone(state.job.referenceTurns),resumedFrom:state.job.resumedFrom??null};
         const record:CheckpointRecord={...payload,integrity:recordIntegrity(payload)};
         try{await this.persistCheckpoint(record);}catch{throw new Error('Could not durably save the private draft within its storage limits. Any earlier saved checkpoint remains unverified; no draft was applied.');}
         state.checkpoint=record;state.job.draft=this.draftSummary(record);
@@ -287,13 +311,20 @@ export class CodeGenerationRuntime {
             if(Buffer.byteLength(text)>maxOutput)fail('Codex source proposal exceeds the output budget.');else resolveTurn();
           }else if(method==='error'&&params.willRetry!==true){const error=object(params.error);rejectTurn(new Error(`Codex inference error (${safe(typeof error.codexErrorInfo==='string'?error.codexErrorInfo:'unknown')}). No automatic model retry is performed.`));}
         };
+        const receipt:CodeReferenceTurn={turn:attempt+1,turnId:null,phase:attempt===0&&!resumed?'initial':screenshots.length?resumed&&attempt===0?'resume-review':'review':'correction',status:'prepared',referenceDigest:state.reference.metadata.digest,referenceId:state.reference.metadata.selectedId,budget:structuredClone(state.reference.metadata.budget),imageHashes:state.reference.images.map(image=>image.sha256),workSourceDigest:screenshots.length?captures[0]?.sourceDigest??null:null,workImageHashes:screenshots.length?captures.map(capture=>capture.sha256):[]};state.job.referenceTurns.push(receipt);
         if(screenshots.length)await saveDraft('reviewing');check();
-        const payload=attempt===0&&!resumed?{task:prompt,guide:sourceGuide,artDirection:artistic,reviewPageIds:state.job.reviewPageIds,project:buildCodeGenerationContext(working)}:{task:'Review the provided compilation/render diagnostics and actual screenshot(s). Improve or fix the current private proposal, preserving the user brief and intended direction. Return complete content only for files that need changing; return files:[] when the displayed result already meets the brief. This is an unverified private draft, never an already-applied user project. The full original project and page structure must be preserved.',correction:attempt,maximumCorrections:2,originalBaseRevision:original.revision,reviewPageIds:state.job.reviewPageIds,feedback,project:buildCodeGenerationContext(working)};
-        const input:unknown[]=[{type:'text',text:JSON.stringify(payload),text_elements:[]}];for(const url of screenshots)input.push({type:'image',url,detail:'original'});
+        const referenceImageInputs=state.reference.images.map((image,index)=>({inputIndex:index+1,role:'design-reference',path:image.path,view:image.view,sha256:image.sha256,width:image.width,height:image.height}));
+        const workImageInputs=captures.slice(0,screenshots.length).map((capture,index)=>({inputIndex:index+1+state.reference.images.length,role:'current-work',pageId:capture.pageId,viewportId:capture.viewportId,sourceDigest:capture.sourceDigest,sha256:capture.sha256}));
+        const referenceContext={metadata:state.reference.metadata,content:state.reference.content};
+        const payload=attempt===0&&!resumed?{task:prompt,guide:sourceGuide,artDirection:artistic,reviewPageIds:state.job.reviewPageIds,designReference:referenceContext,referenceImageInputs,workImageInputs,project:buildCodeGenerationContext(working)}:{task:'Review only the separately labelled current-work screenshots for acceptance; packaged design-reference images are inspiration, never proof that this project has rendered. Improve or fix the current private proposal, preserving the complete user brief, existing brand and intended direction. Return complete content only for changed files; return files:[] when the displayed result already meets the brief. The private draft is not applied to the original project.',userBrief:prompt,correction:attempt,maximumCorrections:2,originalBaseRevision:original.revision,reviewPageIds:state.job.reviewPageIds,designReference:referenceContext,referenceImageInputs,workImageInputs,feedback,project:buildCodeGenerationContext(working)};
+        const textInput=JSON.stringify(payload);if(Buffer.byteLength(textInput)>CODE_GENERATION_INPUT_LIMITS.textBytes)throw new Error('Generation turn text exceeds the total source, brief and reference input budget.');
+        const input:unknown[]=[{type:'text',text:textInput,text_elements:[]}];for(const image of state.reference.images)input.push({type:'image',url:'data:image/png;base64,'+image.dataBase64,detail:'original'});for(const url of screenshots)input.push({type:'image',url,detail:'original'});
+        if(state.reference.metadata.budget.imageBytes+captures.slice(0,screenshots.length).reduce((sum,capture)=>sum+Buffer.byteLength(capture.pngBase64,'base64'),0)>CODE_GENERATION_INPUT_LIMITS.imageBytes||Buffer.byteLength(JSON.stringify(input))>CODE_GENERATION_INPUT_LIMITS.wireBytes)throw new Error('Generation turn images and reference exceed the total input budget.');
         stage=screenshots.length?'reviewing actual rendered screenshots':attempt?'correcting source diagnostics':'generating real frontend source';log(`Starting ${attempt===0&&!resumed?'initial source proposal':screenshots.length?'screenshot review':'source correction'} (turn ${attempt+1}/3).`);
-        const response=object(await session.request('turn/start',{threadId:state.threadId,approvalPolicy:'never',environments:[],input,outputSchema}));const turn=object(response.turn);if(typeof turn.id!=='string')throw new Error('Codex did not return a generation turn ID.');state.turnId=turn.id;
-        await turnDone;check();if(screenshots.length){receivedVisualFeedback=true;reviewedSourceDigest=captures[0]?.sourceDigest??null;}
+        const response=object(await session.request('turn/start',{threadId:state.threadId,approvalPolicy:'never',environments:[],input,outputSchema}));const turn=object(response.turn);if(typeof turn.id!=='string'||!turn.id.length||turn.id.length>256)throw new Error('Codex did not return a valid generation turn ID.');state.turnId=turn.id;receipt.turnId=turn.id;receipt.status='dispatched';
+        await turnDone;receipt.status='completed';check();if(screenshots.length){receivedVisualFeedback=true;reviewedSourceDigest=captures[0]?.sourceDigest??null;}
         try{working=proposal(text,working);}catch(error){feedback={schemaError:safe(error instanceof Error?error.message:'Invalid source proposal.')};screenshots=[];log(`Structured source validation failed; ${attempt<2?'sending one correction':'correction budget exhausted'}.`);if(attempt===2)throw new Error(`Source proposal validation failed: ${object(feedback).schemaError}`);continue;}
+        receivedVisualFeedback=receivedVisualFeedback&&reviewedSourceDigest===projectDigest(working);
         const verified=await verifyWorking();feedback=verified.feedback;screenshots=verified.screenshots;
         if(!verified.compiled){log(`Compilation failed; ${attempt<2?'requesting a bounded source correction':'correction budget exhausted'}.`);if(attempt===2)throw new Error(`Source compilation failed: ${JSON.stringify(object(feedback).compileDiagnostics)}`);continue;}
         if(receivedVisualFeedback&&verified.clean){const changes=changesFrom(original,working);if(!changes.files?.length)throw new Error('The model produced no source changes to apply.');state.job.changes=changes;complete=true;log('Screenshot feedback was reviewed and the final proposal compiled and rendered again. Original project files remain unchanged.');break;}
@@ -307,7 +338,7 @@ export class CodeGenerationRuntime {
       else if(finalStatus==='completed')log('Validated code changes are ready for revision/hash-checked application.');
       else{delete state.job.changes;state.job.error??='Code generation did not complete source and visual verification.';log('Independent code generation exited without an applicable completed proposal.');}
       if(state.checkpoint){
-        const{integrity,...previous}=state.checkpoint;const payload={...previous,originStatus:finalStatus,...(state.job.error?{lastError:state.job.error}:{}),updatedAt:new Date().toISOString()};const record={...payload,integrity:recordIntegrity(payload)};
+        const{integrity,...previous}=state.checkpoint;const payload={...previous,originStatus:finalStatus,referenceTurns:structuredClone(state.job.referenceTurns),...(state.job.error?{lastError:state.job.error}:{}),updatedAt:new Date().toISOString()};const record={...payload,integrity:recordIntegrity(payload)};
         try{await this.persistCheckpoint(record);state.checkpoint=record;log('A private checkpoint remains available for reading or an explicit new review. It cannot be applied as an unverified draft.');}
         catch{log('Final checkpoint status could not be updated; its earlier durable snapshot remains unverified. After restart, its old running status is reported as not-attached, not as a resumed worker.');}
       }

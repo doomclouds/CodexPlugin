@@ -34,6 +34,23 @@ test("HTML and React templates contain real source, state handlers, components a
   });
 });
 
+test("metadata timestamps have a bounded representation and invalid user records remain untouched", async () => {
+  await workspace(async (store) => {
+    const original = await store.create({ name: "Bounded metadata", template: "html" });
+    const prefix = "2026-10-17T00:00:00.", boundary = prefix + "1".repeat(64 - prefix.length - 1) + "Z";
+    const comment = { id: "comment_timestamp", file: original.files[0]!.path, text: "Actual note", status: "open" as const, createdAt: boundary };
+    assert.equal(boundary.length, 64);
+    assert.equal(validateCodeProject({ ...original, createdAt: boundary, updatedAt: boundary, comments: [comment] }).comments[0]!.createdAt, boundary);
+    const oversized = boundary.slice(0, -1) + "1Z";
+    for (const changes of [{ createdAt: oversized }, { updatedAt: oversized }, { comments: [{ ...comment, createdAt: oversized }] }]) assert.throws(() => validateCodeProject({ ...original, ...changes }), /64/);
+    const filename = join(store.dataDir, original.id + ".json"), raw = JSON.parse(await readFile(filename, "utf8"));
+    raw.current.comments = [{ ...comment, createdAt: oversized }];
+    const invalid = JSON.stringify(raw); await writeFile(filename, invalid);
+    await assert.rejects(store.get(original.id), hasCode("VALIDATION"));
+    assert.equal(await readFile(filename, "utf8"), invalid, "Validation must never rewrite or delete the user's invalid record.");
+  });
+});
+
 test("file hash and project revision checks make an entire source update atomic", async () => {
   await workspace(async (store) => {
     const first = await store.create({ name: "CAS", template: "html" });
@@ -61,7 +78,7 @@ test("source history survives reopening and restores exact authored files with m
     assert.deepEqual((await reopened.redo(first.id, 3)).files, second.files);
     const restored = await reopened.restore(first.id, 4, 1);
     assert.equal(restored.revision, 5); assert.deepEqual(restored.files, first.files);
-    assert.equal((await reopened.history(first.id)).at(-1)?.restoredFrom, 1);
+    assert.equal((await reopened.history(first.id)).versions.at(-1)?.restoredFrom, 1);
   });
 });
 
@@ -87,7 +104,7 @@ test("read-only directory import ignores reserved trees and symlinks without exe
     assert.deepEqual(project.files.map((file) => file.path), ["index.html", "src/never.js"]);
     assert.equal(project.revision, 1); assert.equal(project.pages[0]!.entry, "index.html");
     assert.equal(await readFile(join(source, "src", "never.js"), "utf8"), project.files[1]!.content);
-    assert.equal((await store.history(project.id))[0]!.operation, "import");
+    assert.equal((await store.history(project.id)).versions[0]!.operation, "import");
     await symlink(source, join(directory, "linked-root"), "dir");
     await assert.rejects(store.importDirectory({ name: "No links", directory: join(directory, "linked-root") }), hasCode("VALIDATION"));
   });

@@ -32,9 +32,36 @@ test('local edits retain the existing brand and unrelated regions even when a di
  const local=getDesignGuidance({brief:'只改当前工作台的按钮文案，保留品牌和其他布局',directionId:'expressive',existingSystem:'Brand uses cobalt actions and an existing Button component.'});
  assert.equal(local.scope,'local');assert.equal(local.preserveExisting,true);assert.equal(local.effort,'quick');assert.deepEqual(local.reviewBudget,{rounds:1,focus:'affected-region'});
  assert.match(local.guidance,/不授权换皮或重排全页/);assert.ok(local.guidance.includes('Brand uses cobalt actions'));assert.deepEqual(local.candidates,[]);
- const newPage=getDesignGuidance({brief:'创建一个全新页面，保留品牌和组件设计系统'});assert.equal(newPage.scope,'new');assert.equal(newPage.preserveExisting,false);assert.match(newPage.guidance,/用户明确要求与参考优先/);
+ const newPage=getDesignGuidance({brief:'创建一个全新页面，保留品牌和组件设计系统'});assert.equal(newPage.scope,'new');assert.equal(newPage.preserveExisting,true);assert.equal(newPage.effort,'standard');assert.equal(newPage.reviewBudget.focus,'primary-path');assert.match(newPage.guidance,/用户明确要求优先/);
  const system=getDesignGuidance({brief:'只改按钮',scope:'system',effort:'standard'});assert.equal(system.scope,'system');assert.equal(system.effort,'standard');
  const inferredSystem=getDesignGuidance({brief:'跨页面更新设计系统的语义token'});assert.equal(inferredSystem.scope,'system');assert.equal(inferredSystem.taskType,'components');assert.equal(inferredSystem.effort,'standard');
+});
+
+test('one primary direction governs the response and incompatible cards expose only a local summary',()=>{
+ const tools=getDesignGuidance({brief:'做一个中文运维后台，二十列表格、失败与恢复优先，标题可借活动海报力度。',taskType:'workbench',directionId:'typographic-poster'});
+ assert.equal(tools.taskType,'workbench');assert.equal(tools.directionResolution.primary,'task-led');assert.equal(tools.directionResolution.requestedRole,'local-reference');assert.equal(tools.directionResolution.localBorrowLimit,1);assert.equal(tools.selectedDirection,undefined);assert.equal(tools.selectedDirectionSummary!.id,'typographic-poster');assert.ok(!('composition' in tools.selectedDirectionSummary!));assert.ok(!tools.references.some(reference=>reference.includes('direction-cards.md')));assert.match(tools.guidance,/不适配本次产品工作台/);assert.ok(!tools.guidance.includes(getDesignGuidance({directionId:'typographic-poster'}).selectedDirection!.composition));
+ const local=getDesignGuidance({brief:'只改标题，保留品牌',directionId:'expressive',existingSystem:'Existing Button / blue brand'});assert.equal(local.directionResolution.primary,'existing-system');assert.equal(local.directionResolution.requestedRole,'local-reference');assert.equal(local.selectedDirection,undefined);assert.equal(local.selectedDirectionSummary!.id,'expressive');
+ const compatible=getDesignGuidance({taskType:'brand',directionId:'expressive'});assert.equal(compatible.directionResolution.primary,'explicit-direction');assert.equal(compatible.directionResolution.requestedRole,'primary');assert.equal(compatible.selectedDirection!.id,'expressive');
+});
+
+test('repair, new-page brand inheritance and English console routing stay consistent with real task scope',()=>{
+ const repair=getDesignGuidance({brief:'修复酒店预订表单的日期校验 Bug，其他内容与组件都不动。有人建议更华丽，但先把错误恢复做好。',taskType:'workbench'});assert.equal(repair.scope,'local');assert.equal(repair.preserveExisting,true);assert.equal(repair.reviewBudget.focus,'affected-region');
+ const consolePage=getDesignGuidance({brief:'创建一个新的 operations console，借活动页时间分组，品牌与控件另定。',directionId:'precision'});assert.equal(consolePage.taskType,'workbench');assert.equal(consolePage.directionResolution.primary,'explicit-direction');
+ const newPage=getDesignGuidance({brief:'创建酒店全新预约页面，但保留现有品牌与组件设计系统；只借空间关系。',taskType:'prototype',directionId:'quiet-monochrome',existingSystem:'Existing red brand / SerifHeading / AccessibleButton'});assert.equal(newPage.scope,'new');assert.equal(newPage.preserveExisting,true);assert.equal(newPage.effort,'standard');assert.equal(newPage.reviewBudget.focus,'primary-path');assert.equal(newPage.directionResolution.primary,'existing-system');assert.match(newPage.guidance,/新建页面可重排其内容/);assert.doesNotMatch(newPage.guidance,/不授权换皮或重排全页/);
+ assert.deepEqual(getDesignGuidance({taskType:'workbench',directionId:'typographic-poster'}),getDesignGuidance({taskType:'workbench',directionId:'typographic-poster'}));
+});
+
+test('directly prohibited redesign phrases cannot override an authorized local repair',()=>{
+ for(const brief of [
+  '只修复酒店预订表单日期校验 Bug，不要整体重做，也不要换品牌或其他组件。',
+  '只修当前表单的错误，不做整体改版，保留现有品牌和布局。',
+  '局部修正日期错误，不需要整体重做，沿用原有组件。',
+  '只改按钮文案，不要做整体改版，不重排其他内容。',
+  '只修复现有文化档案的标签筛选Bug，保留品牌与其他组件，不要整体重做，也不要新建页面。',
+  'Fix only the existing filter bug; do not create a new page; keep the current brand.',
+  'Fix the current form bug; do not redesign the whole page; keep the existing brand.'
+ ]){const value=getDesignGuidance({brief,taskType:'workbench',directionId:'expressive'});assert.equal(value.scope,'local',brief);assert.equal(value.preserveExisting,true,brief);assert.equal(value.directionResolution.primary,'existing-system',brief);assert.equal(value.directionResolution.requestedRole,'local-reference',brief);assert.equal(value.reviewBudget.focus,'affected-region',brief);assert.equal(value.selectedDirection,undefined);assert.ok(value.guidance.includes(brief),'The complete user brief must remain unchanged');}
+ const allowed=getDesignGuidance({brief:'整体重做官网并使用全新视觉，旧品牌可以替换。',taskType:'brand',directionId:'expressive'});assert.equal(allowed.scope,'new');assert.equal(allowed.preserveExisting,false);assert.equal(allowed.directionResolution.primary,'explicit-direction');
 });
 
 test('effort changes the authorized work and evidence scope rather than forcing more options or unrestricted checking',()=>{
@@ -56,7 +83,8 @@ test('guidance uses real code, states and responsive behavior with honest verifi
 
 test('all returned references and direction anchors are contained in the published skill and carry original, self-contained rules',async()=>{
  const main=await readFile(new URL('../skills/design/references/art-direction.md',import.meta.url),'utf8');const cards=await readFile(new URL('../skills/design/references/direction-cards.md',import.meta.url),'utf8');
- assert.match(main,/这些外部链接不是运行前置资料/);assert.match(main,/未随本技能复制其完整正文/);
+ assert.doesNotMatch(main+cards,/\]\(https?:\/\//,'Published design guidance must resolve to the local skill instead of sending the agent to external knowledge links.');
+ assert.match(main,/案例|examples\.md/);
  for(const item of getDesignGuidance().directions){const value=getDesignGuidance({directionId:item.id});for(const reference of value.references){assert.ok(reference.startsWith('references/'));assert.ok(!reference.includes('..'));const[file,anchor]=reference.split('#');const content=await readFile(new URL('../skills/design/'+file,import.meta.url),'utf8');if(anchor)assert.ok(content.includes(`id="${anchor}"`));}assert.ok(cards.includes(value.selectedDirection!.composition));}
  assert.doesNotMatch(main+cards,/\/Users\/|\/tmp\/|\.\.\/\.\.\/|docs\/design\//);
 });

@@ -12,11 +12,11 @@ import { exportCodeProject } from '../src/code-export.ts';
 
 function project():CodeProject {
   const base=createCodeTemplate('Real pages','html');
-  return validateCodeProject({...base,files:[{path:'index.html',encoding:'utf8',content:'<h1 data-design-id="home-title">Home source</h1><a href="./settings.html">Settings</a>'},{path:'settings.html',encoding:'utf8',content:'<h1 data-design-id="settings-title">Settings source</h1>'},{path:'src/Details.tsx',encoding:'utf8',content:'export default function Details(){return <h1 data-design-id="details-title">React details source</h1>}'}],pages:[{id:'page_home',name:'Home',entry:'index.html',route:'/'},{id:'page_settings',name:'Settings',entry:'settings.html',route:'/settings'},{id:'page_details',name:'Details',entry:'src/Details.tsx',route:'/details'}],defaultPageId:'page_home',designSystem:{tokens:{accent:'#e65e38'},components:[],notes:'Actual sources'},viewports:[{id:'shared_desktop',name:'Desktop',width:1280,height:900},{id:'details_phone',name:'Details phone',width:390,height:844,pageId:'page_details'}]});
+  return validateCodeProject({...base,files:[{path:'index.html',encoding:'utf8',content:'<h1 data-design-id="home-title">Home source</h1><a href="./settings.html">Settings</a>'},{path:'settings.html',encoding:'utf8',content:'<h1 data-design-id="settings-title">Settings source</h1>'},{path:'src/Details.tsx',encoding:'utf8',content:'export default function Details(){return <h1 data-design-id="details-title">React details source</h1>}'}],pages:[{id:'page_home',name:'Home',entry:'index.html',route:'/'},{id:'page_settings',name:'Settings',entry:'settings.html',route:'/settings'},{id:'page_details',name:'Details',entry:'src/Details.tsx',route:'/details'}],defaultPageId:'page_home',designSystem:{components:[],notes:'Actual sources'},viewports:[{id:'shared_desktop',name:'Desktop',width:1280,height:900},{id:'details_phone',name:'Details phone',width:390,height:844,pageId:'page_details'}]});
 }
 
-test('v2 pages select real HTML or React sources with shared and page-specific viewports',async()=>{
-  const original=project();assert.equal(original.schemaVersion,2);assert.ok(!Object.hasOwn(original,'entry'));
+test('current pages select real HTML or React sources with shared and page-specific viewports',async()=>{
+  const original=project();assert.equal(original.schemaVersion,3);assert.ok(!Object.hasOwn(original,'entry'));
   assert.equal(resolveCodePage(original).id,'page_home');
   assert.equal(resolveCodePageViewport(original,{viewportId:'details_phone'}).page.id,'page_details');
   assert.equal(resolveCodePageViewport(original,{pageId:'page_settings'}).viewport.id,'shared_desktop');
@@ -39,6 +39,7 @@ test('canonical project routes, actual entries and metadata references reject am
   assert.equal(canonicalCodeRoute('/caf%C3%A9'),'/caf%C3%A9');
   for(const route of ['https://outside.invalid','//outside.invalid','relative','/../secret','/%2e%2e/secret','/a//b','/a\\b','/%2fsecret','/%255csecret','/a?x=1','/a#section','/a b'])assert.throws(()=>canonicalCodeRoute(route));
   const original=project();
+  assert.throws(()=>validateCodeProject({...original,designSystem:{...original.designSystem,tokens:{ink:'#18231d'}}}),/tokens|Unrecognized key/,'Removed metadata tokens must not enter the current project format.');
   for(const update of [
     {pages:[...original.pages,{id:'page_duplicate',name:'Duplicate',entry:'settings.html',route:'/different'}]},
     {pages:original.pages.map(page=>({...page,route:'/same'}))},
@@ -82,9 +83,13 @@ test('page, viewport and file changes persist atomically with history; unsupport
     const third=await store.undo(first.id,2);assert.deepEqual(third.pages,first.pages);assert.equal(third.defaultPageId,first.defaultPageId);
     const fourth=await new CodeProjectStore({dataDir:store.dataDir}).redo(first.id,3);assert.deepEqual(fourth.pages,second.pages);assert.equal(codeFileHash(fourth.files.at(-1)!),codeFileHash(second.files.at(-1)!));
     const restored=await store.restore(first.id,4,1);assert.deepEqual(restored.pages,first.pages);assert.equal(restored.revision,5);
-    const legacyId='code_unsupported_fixture';const legacy=JSON.stringify({version:1,current:{schemaVersion:1,id:legacyId,entry:'legacy.html',privateSource:'never return this source'}});const filename=join(store.dataDir,legacyId+'.json');await writeFile(filename,legacy);
-    await assert.rejects(store.get(legacyId),(error:unknown)=>error instanceof Error&&'code'in error&&error.code==='UNSUPPORTED_FORMAT');
-    const listing=await store.list();assert.equal(listing.projects.length,1);assert.equal(listing.unsupported.length,1);assert.equal(listing.unsupported[0]!.id,legacyId);assert.equal(listing.unsupported[0]!.format,1);assert.doesNotMatch(JSON.stringify(listing),/privateSource|never return|legacy\.html/);assert.equal(await readFile(filename,'utf8'),legacy);
+    const unsupportedFiles=[];
+    for(const format of [1,2]){
+      const legacyId=`code_unsupported_fixture_${format}`,legacy=JSON.stringify({version:1,current:{...first,schemaVersion:format,id:legacyId,designSystem:{tokens:{ink:'#18231d'},components:[],notes:'never return this source'}}});const filename=join(store.dataDir,legacyId+'.json');await writeFile(filename,legacy);unsupportedFiles.push({id:legacyId,format,filename,legacy});
+      await assert.rejects(store.get(legacyId),(error:unknown)=>error instanceof Error&&'code'in error&&error.code==='UNSUPPORTED_FORMAT');
+    }
+    const listing=await store.list();assert.equal(listing.projects.length,1);assert.equal(listing.unsupported.length,2);assert.doesNotMatch(JSON.stringify(listing),/never return this source|#18231d/);
+    for(const item of unsupportedFiles){assert.equal(listing.unsupported.find(entry=>entry.id===item.id)!.format,item.format);assert.equal(await readFile(item.filename,'utf8'),item.legacy);}
   }finally{await rm(directory,{recursive:true,force:true});}
 });
 
@@ -93,6 +98,6 @@ test('read-only HTML directory import registers separate source pages and keeps 
   try{
     const source=join(directory,'source');await mkdir(join(source,'account'),{recursive:true});await writeFile(join(source,'index.html'),'<h1>Home</h1>');await writeFile(join(source,'account','settings.html'),'<h1>Settings</h1>');
     const store=new CodeProjectStore({dataDir:join(directory,'data')});const imported=await store.importDirectory({name:'Imported pages',directory:source,entry:'account/settings.html'});
-    assert.equal(imported.pages.length,2);assert.equal(resolveCodePage(imported).entry,'account/settings.html');assert.equal(imported.pages.find(page=>page.entry==='index.html')!.route,'/index.html');assert.equal((await store.history(imported.id))[0]!.operation,'import');
+    assert.equal(imported.pages.length,2);assert.equal(resolveCodePage(imported).entry,'account/settings.html');assert.equal(imported.pages.find(page=>page.entry==='index.html')!.route,'/index.html');assert.equal((await store.history(imported.id)).versions[0]!.operation,'import');
   }finally{await rm(directory,{recursive:true,force:true});}
 });

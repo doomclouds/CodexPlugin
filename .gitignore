@@ -8,3 +8,9 @@ coverage/
 *.log
 .workflow-data/
 artifacts/
+.DS_Store
+
+# Local Design briefs, verification runs, exports and temporary project data.
+# Shipped references under plugins/design/skills/design/assets remain versioned.
+/docs/design/briefs/
+/docs/design/verification/

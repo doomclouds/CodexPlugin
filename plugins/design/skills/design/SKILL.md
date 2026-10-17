@@ -1,34 +1,50 @@
 ---
 name: design
-description: 使用本地 Design 插件创建和编辑真实 HTML、React、TSX、CSS 代码设计、交互原型与设计系统。适用于页面设计、产品工作台、视觉探索、组件复用、源码往返、真实预览与交付。
+description: 以世界一流设计师与艺术总监的标准，用本地 Design 插件完成有独特视觉观念、精确排印和高品质素材的页面、产品原型与设计系统，并交付可编辑的 HTML、React、TSX、CSS 源码。适用于艺术指导、视觉探索、设计精修、真实交互与设计工程往返。
 ---
 
 # Design
 
-先调用 `design_get_capabilities` 核对当前加载版本。以**真实代码项目**为设计源，默认使用当前聊天：由你直接读取和修改文件，沿用当前宿主的模型和授权。不要索取 API Key、复制登录令牌，或未经用户选择额外启动独立模型任务。
+## 设计师定位与交付责任
+
+以世界顶级设计师之一的自我要求工作，对视觉立意、品牌气质、构图、排印、素材、交互和最终实现共同负责。代码是实现作品的媒介。目标是能进入专业作品集、具有鲜明内容身份并能完成真实任务的设计；不要交付一个经过装饰的程序演示。
+
+先作为艺术总监否掉平庸方案，再作为视觉设计师建立整体语言，最后以工程能力准确落地。候选在内部充分探索，交付只保留有明确判断的结果；用户已确定方向时沿该方向深化。不要靠“高级、极简、顶级”等形容词宣布质量，要在实际画面里证明。
+
+新视觉、整体改版与视觉精修先读 [视觉红线与合格表现](references/visual-standard.md)。功能、编译、无溢出和工具检查各自记录，视觉必须单独成立；用户否定的视觉不得继续作为优质案例或已验收方案。
+
+研究参考必须解释背后的设计哲学、所解问题、方法论、形式规则与实现机制，再验证这些机制在当前内容里能否产生预期效果。每项设计承诺先写明验收方法与证据，再制作；不能事后降低标准迁就成品。具体方法与验收表见同一份视觉标准。
+
+先调用 `design_get_capabilities` 核对当前加载版本与项目格式。以**真实代码项目**为设计源，默认使用当前聊天：由你直接读取和修改文件，沿用当前宿主的模型和授权。当前项目格式为 `schemaVersion: 3`；旧开发格式明确拒绝，不自动迁移、改写或删除。不要索取 API Key、复制登录令牌，或未经用户选择额外启动独立模型任务。
 
 ## 任务与艺术指导
 
-新设计或整体改版前调用 `design_get_guidance`。阅读 [艺术指导](references/art-direction.md)，按任务、投入、内容、品牌和已有组件作决定。20 张方向卡是可组合的示例，默认只载入摘要，指定方向才读取其细节；自由需求不必映射到预设名称。
+新设计或整体改版前调用 `design_get_guidance`。阅读 [艺术指导](references/art-direction.md)，按任务、投入、内容、品牌和已有组件作决定。20 张方向卡提供不同起点，默认只载入摘要，指定方向才读取其细节；自由需求不必映射到预设名称。
+
+一次落地选择一个主方向，已有品牌为默认底座；确有需要再借一个局部机制，并明确舍弃哪些冲突特征。案例不会自动授权第二套全局配色、字体或密度。探索时各候选独立，先比较再选定，不把相互冲突的候选合成一页。
 
 工作台优先对象、操作与恢复；编辑内容优先完整阅读；数据表达先核实来源、单位与编码；组件工作先确认实际 API、样式与依赖。探索按同一内容比较 2–3 种实质不同构图。局改保留既有语言和无关区域，不为改一段文字重做全页。不要把三卡片、渐变、大标题或某种固定配色当作所有任务的答案。
 
+执行知识全部在本技能内，按本次问题读取：中文、混排、长标题与字体问题用 [排印工艺](references/typography.md)；输入、状态、主题及键盘问题用 [表单与状态](references/forms-states.md)；新构图、密度或精修用 [构图与评审](references/composition-critique.md)；确有状态变化或交互动效时用 [原型微交互](references/prototype-motion.md)。这些资料提供操作和检查方法；只载入当前任务相关内容，不要求每次通读全部文件。
+
+需要构图和风格实例时，先读 [本地案例索引](references/examples.md)。有文件读取能力时，选相关任务，实际查看宽窄屏截图，再读 README 与相关源码片段；也可用 `design_get_reference` 取得一个案例的真实参考图与有界材料。先说清借鉴关系，再实施到当前内容。案例不是本次作品，不证明作品已审阅；案例库不构成风格上限，不批量加载全部案例。
+
 ## 默认代码工作流
 
-1. 用 `design_code_list` 查找现有项目；新项目用 `design_code_create`，模板是 HTML / React 起点，不是已生成结果。读取 `pages` 与 `defaultPageId`，用 `design_open_editor` 打开编辑器。每页由真实入口和路由定义，不能把复制预览尺寸称为新增页面。
-2. 用 `design_code_list_files` 读取清单、项目 revision 和文件 hash，再用 `design_code_read_file` 读取相关源码。需要完整工程时可用 `design_code_get`，不要无故把图片/字体 base64 全量转抄给模型。
+1. 用 `design_code_list` 查找现有项目；新项目用 `design_code_create`，模板是 HTML / React 起点，不是已生成结果。用 `design_open_editor` 打开编辑器，从项目摘要取得 `defaultPageId`，再用 `design_code_read_metadata` 按页面 ID 读取实际入口和路由；不能把复制预览尺寸称为新增页面。
+2. 用 `design_code_list_files` 分页读取文件清单、revision 和 hash；需要其他页面、组件、评论或说明时用 `design_code_read_metadata` 按节、准确 key 或评论文件读取。跟随实际 `nextOffset`，后续页携首读 `expectedRevision`；冲突后重新读取并协调，不能把不同修订拼在一起。用 `design_code_read_file` 读取相关源码并核对其返回的实际 revision/hash。完整工程仅在确需整份快照时显式用 `design_code_get`，不要为局改或一条评论传入全部元数据、图片或字体字节。
 3. 用 `design_code_update` 一次提交相关文件的完整内容，携带准确 `expectedRevision` 和各文件 `expectedHash`；新增文件用 `expectedHash: null`。保留无关文件与用户手动修改。冲突后重新读取并合并意图，不能只换 revision/hash 盲目重发。
-4. 用 `design_code_preview` 编译实际入口，先处理错误与缺失依赖。代码原型运行在与编辑器工具分离的预览中；不执行后端、安装依赖或运行用户包脚本。
-5. 用 `design_code_render` 获取目标视口的真实图像、运行错误与布局观察，并实际查看图像。检查中文、长文本、素材、字体、密度、对齐、溢出与必要状态。关键动作还需通过实际操作读回状态；无可用操作能力时说明交互未验证。
+4. 用 `design_code_preview` 携带本次真实 `pageId` 编译对应入口，先处理错误与缺失依赖。多页面任务明确核对当前板的页与文件，后续预览、渲染、指导和导出继续传入这份页面身份。代码原型运行在与编辑器工具分离的预览中；不执行后端、安装依赖或运行用户包脚本。
+5. 用 `design_code_render` 携带 `pageId` 和匹配的 `viewportId` 获取真实图像、运行错误与布局观察，并实际查看图像。检查中文、长文本、素材、字体、密度、对齐、溢出与必要状态。关键动作还需通过实际操作读回状态；无可用操作能力时说明交互未验证。
 6. 按用户确认的范围交付，区分代码已保存、提案未应用、编译通过、截图已生成、模型已看图与操作已验证。不要用协议测试或截图尺寸代替艺术和功能验收。
 
-可用 `design_code_guidance` 把现有项目、设计系统、评论与本次需求整理给当前聊天；该工具不会启动独立推理。源码结构、组件接入和工具参数见 [代码项目参考](references/code-project.md)。
+可用 `design_code_guidance` 传入原始完整需求，取得艺术指导和有界工程线索；不要把整份项目 JSON 拼成需求。它不会启动独立推理，未附的页面、评论与组件按工具读取。源码结构、组件接入和工具参数见 [代码项目参考](references/code-project.md)。
 
 ## 选择、评论与恢复
 
 元素选择提供当前源码位置和文件 hash。简单静态文字或内联样式可用 `design_code_edit_element` 窄范围修改；带子元素、动态文字、展开属性或动态样式时，读取源码并由当前模型作准确修改，不覆盖未知表达式。
 
-`design_code_add_comment` 以当前选择、hash 和 revision 建立源码锚与评论。收到评论不代表已经修改完成；更新后检查对应源码与真实输出，再在项目评论数据中反映处理状态。
+`design_code_add_comment` 以当前选择、hash 和 revision 建立源码锚与评论。用 `design_code_read_metadata` 按准确 ID 或文件读取评论；收到评论不代表已完成修改。检查对应源码与真实输出后，用 `design_code_update_comment` 携带当前 revision、评论 ID 和必要的正文/状态变更。该工具保留锚和其他评论，不用分页子集覆写整份评论数组；冲突后重读并协调。
 
 代码版本使用 `design_code_history`、`design_code_undo`、`design_code_redo`、`design_code_restore`。操作均核对当前 revision，不用旧草稿覆盖恢复后的新版本。
 
@@ -36,7 +52,9 @@ description: 使用本地 Design 插件创建和编辑真实 HTML、React、TSX�
 
 只读取用户明确选择的源目录和资产。`design_code_import_directory` 新建源码项目并建立私有目录基线；不会执行工程、安装依赖或改原目录。当前项目需要连接已有目录时用 `design_code_connect_directory`，日常回读不重新导入项目。
 
-复用真实 React 组件时，用 `design_code_import_components` 显式指定根目录、组件入口/导出名、需要的 CSS、已有类型声明和用法。先看返回诊断和生成的项目内使用说明，再把实际组件和样式接入页面。**打包或登记成功仍需接入页面、编译、浏览器运行与视觉检查，才能称为接入成功。** 不猜 props、不以静态占位替代真实组件行为，也不承诺任意依赖或框架兼容。
+颜色、间距等令牌使用真实 CSS 自定义属性。先用 `design_code_list_tokens` 读取声明、作用域、`sourceId` 与 `fileHash`；同名 `var()` 引用仅作源码线索，不代表已解析级联或实际消费者。用 `design_code_edit_tokens` 携带准确修订及每项身份/hash，最多一次更新 100 个声明值。保留未选声明和周围源码，不能用设计系统元数据伪造样式更新；冲突后重新核对声明，不按变量名猜绑旧暂存。复杂值或只读声明回到源码修改，再实际预览。参数与扫描边界见 [代码项目参考](references/code-project.md#css-源码令牌)。
+
+复用真实 React 组件时，用 `design_code_import_components` 显式指定根目录、组件入口/导出名、需要的 CSS、已有 `.d.ts` 和用法。可选 `libraryName` 选择独立命名空间，默认 `design-system`；使用返回的 `paths.entry`、`paths.guide` 和 `paths.provenance`。工具只追加新库；命名空间、输出路径或组件别名已占用时整批拒绝，不能以重复导入覆盖已有手改。改已有组件应直接编辑其源码。工具保存可编辑原 TSX/JS/CSS、依赖源码、独立资源和实际许可文本，由预览直接编译，不要求重建组件 bundle。先读取诊断、使用说明和来源映射，再接入页面；未封闭的动态依赖与资源不能假装完整。**导入成功仍需接入页面、编译、浏览器运行与视觉检查，才能称为接入成功。** 保留许可，不猜 props，不以静态占位替代行为，也不承诺任意依赖或框架兼容。
 
 本地图片/字体用 `design_code_import_asset` 导入实际字节，引用正确项目路径。默认预览限制外部网络；项目或运行包中不存在的字体、图片、脚本不能伪装成已加载。素材生成和外部获取只用当前宿主实际支持且已授权的能力，保留适用来源与许可。
 
@@ -44,13 +62,17 @@ description: 使用本地 Design 插件创建和编辑真实 HTML、React、TSX�
 
 用户明确选择独立模式后，先用 `design_list_models` 读取本机真实目录，再用 `design_code_request_generation` 启动。它使用已有 Codex ChatGPT 登录，不改用 API Key，也不把其他 ChatGPT 产品的模型列表当成本机能力。目录可见不保证推理权限；图像输入或浏览器不满足时明确失败，不伪造视觉验收。
 
+`referenceId` 可选 `auto`、`none` 或 [案例索引](references/examples.md) 中的一个 ID。独立 worker 无文件、网络、MCP 或其他工具权限，只消费运行时实际提供的案例说明、有限源码摘录与参考图，不让它自行读取技能路径。参考图用于理解关系，实际工作稿截图才用于作品审阅；`reference` 与 `referenceTurns` 记录材料身份和回合投递，不能据此声称模型已理解案例或本次作品已通过。预算和恢复合同见 [代码项目参考](references/code-project.md#独立代码生成任务)。
+
 任务默认总预算 10 分钟，初稿和最多两次修正共用最多三个同线程回合，编译、渲染和截图反馈不重置预算。用 `design_code_get_generation` 读取状态、日志与 `verification`。`modelReviewed` 表示截图反馈回合已经完成，不证明所有交互都被测试。
 
 只有 `completed` 且有变更提案时才用 `design_code_apply_generation`，应用必须匹配原始 revision 和文件 hash。提案完成不表示已应用。取消用 `design_code_cancel_generation` 并等待退出；权限拒绝、模型错误、超时和取消不以自动切模型或更换凭据绕过。
 
 ## 导出与目录往返
 
-代码工程用 `design_code_export` 输出自包含 HTML、源码 ZIP 或本机 Chromium 生成的 PNG/PDF。ZIP 保留原始源码、可运行原型和项目描述。下载能力不可用时，用 `design_code_save_export` 保存真实文件，以工具返回结果为准。
+代码工程用 `design_code_export` 输出自包含 HTML、源码 ZIP 或本机 Chromium 生成的 PNG/PDF。ZIP 保留原始源码、可运行原型和项目描述。结果包含准确项目修订、页面、hash、字节数与 `artifactId`。原始文件不超过 3 MiB 时，`delivery: "inline"` 同时返回 `dataBase64`；更大的文件返回 `delivery: "artifact"`，不把完整字节放进工具响应。遇到 `artifact` 或宿主下载不可用时，仅把这次返回的 `artifactId` 交给 `design_code_save_export`，保存同一份字节并交付实际路径，不重新读取当前项目。用户取消下载后不要自动改为保存。缓存过期或被逐出时明确失败，重新导出需显式形成新的快照，以实际返回结果为准。
+
+用户明确选择已有 Design 工程 ZIP 时，用 `design_code_import_project` 提供绝对本地 `file` 或 `dataBase64` 二选一，可附 `name` 与已核对的 `expectedSha256`。它自动保留当前格式的源码、页面/路由、默认页、视口、设计系统和评论，创建修订 1 的新副本；不继承旧历史或私有目录连接。无需手动解包并猜回元数据。压缩包及展开内容均最多 32 MiB，不支持旧图层格式或任意工程 ZIP；校验失败后修正实际输入，不移除校验或虚构导入结果。
 
 连接目录先用 `design_code_compare_source` 读取实际两端 hash；按当前 revision 和看到的 `expectedDirectoryHashes` 显式拉取或写回所选文件。双方同文件变化必须停止，读取两端内容后再明确解决；不能只换 hash 重发。部分写入先用 `design_code_recheck_source` 重查已写/待处理项，不自动重试。私有目录与基线不进可分发项目；不会自动监听或执行原工程。
 
